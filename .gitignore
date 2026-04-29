@@ -18,8 +18,7 @@ node_modules/
 npm-debug.log*
 
 # Frontend build output (regenerated each release)
-custom_components/homelable/frontend/*.js
-custom_components/homelable/frontend/*.js.map
+custom_components/homelable/frontend/homelable-panel-*
 !custom_components/homelable/frontend/.gitkeep
 
 # IDE
@@ -37,5 +36,6 @@ CLAUDE.md
 
 _project_specs/
 
-# Local HA test instance
+# Local HA dev instance (docker-compose.dev.yml mount)
+dev-config/
 config/

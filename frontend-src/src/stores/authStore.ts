@@ -1,5 +1,9 @@
+/**
+ * HA build: HA owns auth. Panel inherits the user's HA session via the `hass`
+ * property. This stub preserves the original API surface so unmodified call
+ * sites keep working — `isAuthenticated` is always true.
+ */
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 
 interface AuthState {
   token: string | null
@@ -8,19 +12,9 @@ interface AuthState {
   logout: () => void
 }
 
-export const useAuthStore = create<AuthState>()(
-  persist(
-    (set) => ({
-      token: null,
-      isAuthenticated: false,
-      login: (token) => set({ token, isAuthenticated: true }),
-      logout: () => set({ token: null, isAuthenticated: false }),
-    }),
-    {
-      name: 'homelable-auth',
-      // sessionStorage: scoped to the tab, cleared on browser close.
-      // Prevents XSS from other tabs stealing the token via localStorage.
-      storage: createJSONStorage(() => sessionStorage),
-    }
-  )
-)
+export const useAuthStore = create<AuthState>(() => ({
+  token: null,
+  isAuthenticated: true,
+  login: () => {},
+  logout: () => {},
+}))

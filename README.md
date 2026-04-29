@@ -58,6 +58,32 @@ Some scan features (ARP discovery, OS detection, SYN scans) require raw network 
 
 ---
 
+## Development
+
+See [CLAUDE.md](./CLAUDE.md) for dev environment setup, testing, and conventions.
+
+### Local HA in Docker
+
+```bash
+./scripts/dev-ha.sh           # build frontend + start HA on :8123 + tail logs
+./scripts/dev-ha.sh restart   # rebuild frontend + restart container
+./scripts/dev-ha.sh stop      # stop the container
+./scripts/dev-ha.sh logs      # tail logs
+./scripts/dev-ha.sh shell     # bash inside the container
+```
+
+First-run flow: open <http://localhost:8123> → complete HA onboarding → Settings → Devices & Services → **Add Integration** → search "Homelable".
+
+Bind mounts:
+- `./custom_components/homelable` → `/config/custom_components/homelable` (live source)
+- `./dev-config/` → `/config` (HA database, registry, secrets — gitignored, persisted between runs)
+
+Iteration:
+- **Python changes** → `./scripts/dev-ha.sh restart` (HA reloads).
+- **Frontend changes** → same — restart triggers `build:ha` which writes the bundle into the mounted integration dir.
+
+---
+
 ## License
 
 MIT © Remy Jardinet

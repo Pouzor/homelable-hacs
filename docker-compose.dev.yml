@@ -1,0 +1,15 @@
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homelable-ha-dev
+    restart: unless-stopped
+    privileged: true
+    network_mode: host
+    environment:
+      TZ: Europe/Paris
+    volumes:
+      # HA persists its database, secrets and registry under .storage/ here.
+      # Survives container restarts so config flow setup is not lost.
+      - ./dev-config:/config
+      # Live-mount the integration source. Edit Python → restart container to reload.
+      - ./custom_components/homelable:/config/custom_components/homelable

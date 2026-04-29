@@ -14,7 +14,7 @@ def _load() -> list[dict[str, Any]]:
     if _SIGNATURES is None:
         with _LOCK:
             if _SIGNATURES is None:
-                path = Path(__file__).parent.parent / "data" / "service_signatures.json"
+                path = Path(__file__).parent / "service_signatures.json"
                 try:
                     with open(path) as f:
                         _SIGNATURES = json.load(f)

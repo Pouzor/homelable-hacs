@@ -1,4 +1,6 @@
 """Per-node status checks: ping, http, https, tcp, ssh, prometheus, health, none."""
+from __future__ import annotations
+
 import asyncio
 import logging
 import socket
@@ -8,18 +10,19 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(__name__)
 
 
-async def check_node(check_method: str, target: str | None, ip: str | None) -> dict[str, Any]:
-    """
-    Run the appropriate check and return {status, response_time_ms}.
+async def check_node(
+    check_method: str, target: str | None, ip: str | None
+) -> dict[str, Any]:
+    """Run the appropriate check and return {status, response_time_ms}.
+
     status is one of: online, offline, unknown.
     """
     if check_method == "none":
         return {"status": "online", "response_time_ms": None}
 
-    # Use only the first IP when the field contains comma-separated addresses
     raw_ip = ip.split(",")[0].strip() if ip else None
     host = target or raw_ip
     if not host:
@@ -52,10 +55,13 @@ async def check_node(check_method: str, target: str | None, ip: str | None) -> d
                 ok = await _ping(host)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        return {"status": "online" if ok else "offline", "response_time_ms": elapsed_ms}
+        return {
+            "status": "online" if ok else "offline",
+            "response_time_ms": elapsed_ms,
+        }
 
     except Exception as exc:
-        logger.debug("Check failed for %s (%s): %s", host, check_method, exc)
+        _LOGGER.debug("Check failed for %s (%s): %s", host, check_method, exc)
         return {"status": "offline", "response_time_ms": None}
 
 

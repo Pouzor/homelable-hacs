@@ -16,6 +16,11 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_canvas)
     websocket_api.async_register_command(hass, ws_save_canvas)
     websocket_api.async_register_command(hass, ws_scan_start)
+    websocket_api.async_register_command(hass, ws_scan_cancel)
+    websocket_api.async_register_command(hass, ws_scan_pending)
+    websocket_api.async_register_command(hass, ws_scan_approve)
+    websocket_api.async_register_command(hass, ws_scan_hide)
+    websocket_api.async_register_command(hass, ws_status_get)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -26,15 +31,20 @@ def _coordinator(hass: HomeAssistant):
     return next(iter(entries.values()))
 
 
+def _send_not_setup(connection, msg_id: int) -> None:
+    connection.send_error(msg_id, "not_setup", "Homelable not configured")
+
+
+# ─── Canvas ──────────────────────────────────────────────────────────────────
+
 @websocket_api.websocket_command({vol.Required("type"): "homelable/get_canvas"})
 @websocket_api.async_response
 async def ws_get_canvas(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Return the persisted canvas."""
     coord = _coordinator(hass)
     if coord is None:
-        connection.send_error(msg["id"], "not_setup", "Homelable not configured")
+        _send_not_setup(connection, msg["id"])
         return
     canvas = await coord.get_canvas()
     connection.send_result(msg["id"], canvas)
@@ -50,24 +60,113 @@ async def ws_get_canvas(
 async def ws_save_canvas(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Persist the canvas."""
     coord = _coordinator(hass)
     if coord is None:
-        connection.send_error(msg["id"], "not_setup", "Homelable not configured")
+        _send_not_setup(connection, msg["id"])
         return
     await coord.save_canvas(msg["canvas"])
     connection.send_result(msg["id"], {"ok": True})
 
+
+# ─── Scan ────────────────────────────────────────────────────────────────────
 
 @websocket_api.websocket_command({vol.Required("type"): "homelable/scan/start"})
 @websocket_api.async_response
 async def ws_scan_start(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Trigger a scan."""
     coord = _coordinator(hass)
     if coord is None:
-        connection.send_error(msg["id"], "not_setup", "Homelable not configured")
+        _send_not_setup(connection, msg["id"])
         return
-    await coord.trigger_scan()
+    result = await coord.trigger_scan()
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/scan/cancel"})
+@websocket_api.async_response
+async def ws_scan_cancel(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    cancelled = coord.cancel_scan()
+    connection.send_result(msg["id"], {"cancelled": cancelled})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/pending",
+        vol.Optional("status", default="pending"): vol.In(["pending", "hidden"]),
+    }
+)
+@websocket_api.async_response
+async def ws_scan_pending(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    devices = await coord.list_pending(status=msg["status"])
+    connection.send_result(msg["id"], {"devices": devices})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/approve",
+        vol.Required("device_id"): str,
+        vol.Optional("overrides", default={}): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_scan_approve(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    node = await coord.approve_pending(msg["device_id"], msg["overrides"])
+    if node is None:
+        connection.send_error(msg["id"], "not_found", "Device not found")
+        return
+    connection.send_result(msg["id"], {"node": node})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/hide",
+        vol.Required("device_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_scan_hide(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    ok = await coord.hide_pending(msg["device_id"])
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Device not found")
+        return
     connection.send_result(msg["id"], {"ok": True})
+
+
+# ─── Status ──────────────────────────────────────────────────────────────────
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/status/get"})
+@websocket_api.async_response
+async def ws_status_get(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return latest status map (keyed by node id) from the coordinator."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    connection.send_result(msg["id"], coord.data or {})
