@@ -1,0 +1,36 @@
+[project]
+name = "homelable-hacs"
+version = "0.1.0"
+description = "Home Assistant integration for Homelable network visualizer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Remy Jardinet" }]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.8.0",
+  "mypy>=1.13.0",
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-homeassistant-custom-component>=0.13",
+  "homeassistant>=2024.1.0",
+  "voluptuous>=0.13",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

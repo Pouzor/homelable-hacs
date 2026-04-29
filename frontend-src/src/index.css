@@ -1,0 +1,141 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@keyframes homelable-basic-dash {
+  from { stroke-dashoffset: 10; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* Homelable dark theme — always dark */
+:root {
+    --background: #0d1117;
+    --foreground: #e6edf3;
+    --card: #21262d;
+    --card-foreground: #e6edf3;
+    --popover: #161b22;
+    --popover-foreground: #e6edf3;
+    --primary: #00d4ff;
+    --primary-foreground: #0d1117;
+    --secondary: #21262d;
+    --secondary-foreground: #e6edf3;
+    --muted: #161b22;
+    --muted-foreground: #8b949e;
+    --accent: #21262d;
+    --accent-foreground: #00d4ff;
+    --destructive: #f85149;
+    --border: #30363d;
+    --input: #21262d;
+    --ring: #00d4ff;
+    --radius: 0.5rem;
+
+    /* Status colors */
+    --status-online: #39d353;
+    --status-offline: #f85149;
+    --status-pending: #e3b341;
+    --status-unknown: #8b949e;
+
+    /* Accent colors */
+    --accent-cyan: #00d4ff;
+    --accent-green: #39d353;
+    --accent-orange: #ff6e00;
+    --accent-purple: #a855f7;
+
+    /* Surface layers */
+    --surface-base: #0d1117;
+    --surface-elevated: #161b22;
+    --surface-card: #21262d;
+}
+
+@theme inline {
+    --font-sans: 'Inter Variable', 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --radius-sm: calc(var(--radius) * 0.75);
+    --radius-md: var(--radius);
+    --radius-lg: calc(var(--radius) * 1.5);
+    --radius-xl: calc(var(--radius) * 2);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    html, body, #root {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+    }
+    body {
+        @apply bg-background text-foreground font-sans;
+        overflow: hidden;
+    }
+}
+
+/* React Flow overrides */
+.react-flow__background {
+    background-color: transparent;
+}
+.react-flow__minimap {
+    background-color: var(--surface-elevated) !important;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+.react-flow__controls {
+    background-color: var(--surface-elevated) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+.react-flow__controls-button {
+    background-color: var(--surface-elevated) !important;
+    border-bottom: 1px solid var(--border) !important;
+    color: var(--foreground) !important;
+}
+.react-flow__controls-button:hover {
+    background-color: var(--surface-card) !important;
+}
+
+/* Transparent wrapper for container node types */
+.react-flow__node-proxmox,
+.react-flow__node-group {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+}
+
+/* Mono font utility */
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Edge flow animation — dot traveling from source to target */
+@keyframes flow-dot {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: -10000; }
+}
+.edge-flow-dot {
+    animation: flow-dot 2.5s linear infinite;
+    pointer-events: none;
+}

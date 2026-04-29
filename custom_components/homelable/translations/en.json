@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Homelable",
+        "description": "Configure homelab network discovery and monitoring.",
+        "data": {
+          "scan_ranges": "Network ranges (CIDR, comma-separated)",
+          "scan_interval": "Scan interval (seconds)",
+          "status_interval": "Status check interval (seconds)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Homelable instance can be configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Homelable options",
+        "data": {
+          "scan_ranges": "Network ranges (CIDR, comma-separated)",
+          "scan_interval": "Scan interval (seconds)",
+          "status_interval": "Status check interval (seconds)"
+        }
+      }
+    }
+  }
+}

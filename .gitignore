@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node
+node_modules/
+*.log
+npm-debug.log*
+
+# Frontend build output (regenerated each release)
+custom_components/homelable/frontend/*.js
+custom_components/homelable/frontend/*.js.map
+!custom_components/homelable/frontend/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local Claude
+.claude/settings.local.json
+.claude/worktrees/
+.claude/
+
+CLAUDE.md
+
+_project_specs/
+
+# Local HA test instance
+config/
