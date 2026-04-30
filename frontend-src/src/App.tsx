@@ -387,6 +387,7 @@ export default function App() {
             onSave={handleSave}
             onNodeApproved={setEditNodeId}
             forceView={sidebarForceView}
+            onClearForceView={() => setSidebarForceView(undefined)}
             highlightPendingId={highlightPendingId}
           />
           <div className="flex flex-col flex-1 min-w-0">

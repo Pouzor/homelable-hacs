@@ -39,10 +39,11 @@ interface SidebarProps {
   onSave: () => void
   onNodeApproved: (nodeId: string) => void
   forceView?: SidebarView
+  onClearForceView?: () => void
   highlightPendingId?: string
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved, forceView, highlightPendingId }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
   const [_collapsed, setCollapsed] = useState(false)
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
   const logout = useAuthStore((s) => s.logout)
@@ -88,7 +89,10 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
             label={label}
             collapsed={collapsed}
             active={activeView === id}
-            onClick={() => setActiveView(id)}
+            onClick={() => {
+              onClearForceView?.()
+              setActiveView(id)
+            }}
           />
         ))}
       </nav>
@@ -286,7 +290,9 @@ function PendingDevicesPanel({ onNodeApproved, highlightId }: { onNodeApproved: 
         services: (device.services ?? []) as import('@/types').ServiceInfo[],
       }
       const res = await scanApi.approve(device.id, nodeData)
-      const nodeId = res.data.node_id
+      const nodeId = (res.data as { id?: string; node_id?: string }).id
+        ?? (res.data as { node_id?: string }).node_id
+      if (!nodeId) throw new Error('approve: no node id returned')
       addNode({
         id: nodeId,
         type: nodeData.type,

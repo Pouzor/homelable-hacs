@@ -31,9 +31,11 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
     try {
       await scanApi.saveConfig({ ranges: cleaned })
       const res = await scanApi.trigger()
-      const found = res.data?.devices_found ?? 0
-      const fresh = res.data?.new_devices ?? 0
-      toast.success(`Scan complete — ${found} device${found === 1 ? '' : 's'} (${fresh} new)`)
+      if (res.data?.status === 'already_running') {
+        toast.message('A scan is already running')
+      } else {
+        toast.success('Scan started — track progress in History')
+      }
       onScanNow()
       onClose()
     } catch {

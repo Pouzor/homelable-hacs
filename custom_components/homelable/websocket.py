@@ -20,6 +20,9 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_pending)
     websocket_api.async_register_command(hass, ws_scan_approve)
     websocket_api.async_register_command(hass, ws_scan_hide)
+    websocket_api.async_register_command(hass, ws_scan_runs)
+    websocket_api.async_register_command(hass, ws_scan_get_config)
+    websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
 
 
@@ -155,6 +158,44 @@ async def ws_scan_hide(
         connection.send_error(msg["id"], "not_found", "Device not found")
         return
     connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/scan/get_config"})
+@websocket_api.async_response
+async def ws_scan_get_config(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    connection.send_result(msg["id"], {"ranges": coord.get_scan_ranges()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/scan/clear"})
+@websocket_api.async_response
+async def ws_scan_clear(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    removed = await coord.clear_pending()
+    connection.send_result(msg["id"], {"removed": removed})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/scan/runs"})
+@websocket_api.async_response
+async def ws_scan_runs(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    runs = await coord.list_runs()
+    connection.send_result(msg["id"], {"runs": runs})
 
 
 # ─── Status ──────────────────────────────────────────────────────────────────

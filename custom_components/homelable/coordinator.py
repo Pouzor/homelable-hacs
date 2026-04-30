@@ -18,16 +18,24 @@ from .const import (
     DEFAULT_SCAN_RANGES,
     DEFAULT_STATUS_INTERVAL,
     DOMAIN,
+    MAX_SCAN_RUNS,
     STORAGE_KEY_CANVAS,
     STORAGE_KEY_PENDING,
+    STORAGE_KEY_RUNS,
     STORAGE_VERSION_CANVAS,
     STORAGE_VERSION_PENDING,
+    STORAGE_VERSION_RUNS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 _EMPTY_CANVAS = {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
 _EMPTY_PENDING: dict[str, Any] = {"devices": []}
+
+
+def _utc_now_iso() -> str:
+    """ISO-8601 UTC with trailing 'Z' (frontend Date() expects this form)."""
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 class HomelableCoordinator(DataUpdateCoordinator):
@@ -51,8 +59,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self.pending_store: Store = Store(
             hass, STORAGE_VERSION_PENDING, STORAGE_KEY_PENDING
         )
+        self.runs_store: Store = Store(
+            hass, STORAGE_VERSION_RUNS, STORAGE_KEY_RUNS
+        )
         self._canvas: dict[str, Any] | None = None
         self._pending: dict[str, Any] | None = None
+        self._runs: list[dict[str, Any]] | None = None
         self._scan_run_id: str | None = None
 
     # ─── Status checks (periodic) ────────────────────────────────────────────
@@ -121,6 +133,16 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 return True
         return False
 
+    async def clear_pending(self) -> int:
+        """Drop all devices currently in `pending` status. Returns count removed."""
+        store = await self._get_pending()
+        before = len(store["devices"])
+        store["devices"] = [d for d in store["devices"] if d.get("status") != "pending"]
+        removed = before - len(store["devices"])
+        if removed:
+            await self._save_pending()
+        return removed
+
     async def remove_pending(self, device_id: str) -> bool:
         """Remove a pending device from the store. Returns True if found."""
         store = await self._get_pending()
@@ -174,10 +196,44 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
     # ─── Scan ────────────────────────────────────────────────────────────────
 
-    async def trigger_scan(self) -> dict[str, Any]:
-        """Run a scan and merge results into the pending store.
+    async def _load_runs(self) -> list[dict[str, Any]]:
+        if self._runs is None:
+            stored = await self.runs_store.async_load()
+            self._runs = list(stored) if isinstance(stored, list) else []
+        return self._runs
 
-        Returns {run_id, devices_found, new_devices}.
+    async def list_runs(self) -> list[dict[str, Any]]:
+        # Newest-first for the UI.
+        return list(reversed(await self._load_runs()))
+
+    async def _record_run(self, run: dict[str, Any]) -> None:
+        """Insert or update a run entry (matched by id), trim to MAX_SCAN_RUNS."""
+        runs = await self._load_runs()
+        for i, r in enumerate(runs):
+            if r["id"] == run["id"]:
+                runs[i] = run
+                break
+        else:
+            runs.append(run)
+            if len(runs) > MAX_SCAN_RUNS:
+                del runs[: len(runs) - MAX_SCAN_RUNS]
+        await self.runs_store.async_save(runs)
+
+    def get_scan_ranges(self) -> list[str]:
+        """Return configured scan ranges (options → data → defaults)."""
+        ranges = self.entry.options.get(
+            CONF_SCAN_RANGES,
+            self.entry.data.get(CONF_SCAN_RANGES, ",".join(DEFAULT_SCAN_RANGES)),
+        )
+        if isinstance(ranges, str):
+            ranges = [r.strip() for r in ranges.split(",") if r.strip()]
+        return list(ranges)
+
+    async def trigger_scan(self) -> dict[str, Any]:
+        """Kick off a scan in the background. Returns immediately.
+
+        Response: {run_id, status: "running"|"already_running", devices_found: 0, new_devices: 0}.
+        UI polls history for progress / completion.
         """
         if self._scan_run_id is not None:
             return {
@@ -187,36 +243,75 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "new_devices": 0,
             }
 
-        ranges = self.entry.options.get(
-            CONF_SCAN_RANGES,
-            self.entry.data.get(CONF_SCAN_RANGES, ",".join(DEFAULT_SCAN_RANGES)),
-        )
-        if isinstance(ranges, str):
-            ranges = [r.strip() for r in ranges.split(",") if r.strip()]
-
+        ranges = self.get_scan_ranges()
         canvas = await self.get_canvas()
         pending = await self._get_pending()
         canvas_ips = {n["data"]["ip"] for n in canvas.get("nodes", []) if n.get("data", {}).get("ip")}
         hidden_ips = {d["ip"] for d in pending["devices"] if d.get("status") == "hidden"}
-        existing_pending_ips = {
-            d["ip"] for d in pending["devices"] if d.get("status") == "pending"
-        }
         exclude = canvas_ips | hidden_ips
 
         run_id = uuid.uuid4().hex
         self._scan_run_id = run_id
+        started_at = _utc_now_iso()
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "running",
+                "ranges": list(ranges),
+                "devices_found": 0,
+                "started_at": started_at,
+                "finished_at": None,
+                "error": None,
+            }
+        )
+
+        self.hass.async_create_task(
+            self._run_scan_task(run_id, ranges, exclude, started_at)
+        )
+        return {
+            "run_id": run_id,
+            "status": "running",
+            "devices_found": 0,
+            "new_devices": 0,
+        }
+
+    async def _run_scan_task(
+        self,
+        run_id: str,
+        ranges: list[str],
+        exclude: set[str],
+        started_at: str,
+    ) -> None:
+        """Background scan body. Records run state, merges into pending store."""
         try:
             devices = await scanner.run_scan(
                 ranges, run_id=run_id, exclude_ips=exclude
             )
+        except Exception as exc:  # noqa: BLE001 — record any failure, then exit
+            _LOGGER.exception("Scan %s failed", run_id)
+            await self._record_run(
+                {
+                    "id": run_id,
+                    "status": "error",
+                    "ranges": list(ranges),
+                    "devices_found": 0,
+                    "started_at": started_at,
+                    "finished_at": _utc_now_iso(),
+                    "error": str(exc),
+                }
+            )
+            return
         finally:
             self._scan_run_id = None
 
-        new_count = 0
-        now = datetime.now(UTC).isoformat()
+        # Re-fetch pending: it may have changed while we scanned.
+        pending = await self._get_pending()
+        existing_pending_ips = {
+            d["ip"] for d in pending["devices"] if d.get("status") == "pending"
+        }
+        now = _utc_now_iso()
         for dev in devices:
             if dev["ip"] in existing_pending_ips:
-                # Update in place
                 for stored in pending["devices"]:
                     if stored["ip"] == dev["ip"] and stored.get("status") == "pending":
                         stored.update(
@@ -247,15 +342,19 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "discovered_at": now,
                     }
                 )
-                new_count += 1
 
         await self._save_pending()
-        return {
-            "run_id": run_id,
-            "status": "done",
-            "devices_found": len(devices),
-            "new_devices": new_count,
-        }
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "done",
+                "ranges": list(ranges),
+                "devices_found": len(devices),
+                "started_at": started_at,
+                "finished_at": _utc_now_iso(),
+                "error": None,
+            }
+        )
 
     def cancel_scan(self) -> bool:
         if self._scan_run_id is None:

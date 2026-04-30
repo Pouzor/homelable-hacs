@@ -94,14 +94,20 @@ export const scanApi = {
   ignore: async (_id: string) => notImplemented('scanApi.ignore'),
   bulkApprove: async (_ids: string[]) => notImplemented('scanApi.bulkApprove'),
   bulkHide: async (_ids: string[]) => notImplemented('scanApi.bulkHide'),
-  // Run history not persisted yet — return empty so the History panel is
-  // quiet instead of throwing. Tracked under Phase 1 backlog (scan runs Store).
-  runs: async () => toAxiosLike([] as object[]),
-  clearPending: async () => notImplemented('scanApi.clearPending'),
-  // Scan ranges live in the HA options flow on the config entry. Until a WS
-  // command exposes them to the UI, expose harmless defaults so the scan
-  // modal can submit and trigger a scan against the configured ranges.
-  getConfig: async () => toAxiosLike({ ranges: [] as string[] }),
+  runs: async () => {
+    const result = await wsCall<{ runs: object[] }>('homelable/scan/runs')
+    return toAxiosLike(result.runs)
+  },
+  clearPending: async () => {
+    const result = await wsCall<{ removed: number }>('homelable/scan/clear')
+    return toAxiosLike(result)
+  },
+  getConfig: async () => {
+    const result = await wsCall<{ ranges: string[] }>('homelable/scan/get_config')
+    return toAxiosLike(result)
+  },
+  // Save not yet wired — ranges still live in the HA options flow. Accept the
+  // call so the modal can proceed; the trigger uses the entry-configured ranges.
   saveConfig: async (data: { ranges: string[] }) => toAxiosLike(data),
 }
 
