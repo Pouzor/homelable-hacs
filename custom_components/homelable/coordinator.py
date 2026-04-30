@@ -77,10 +77,17 @@ class HomelableCoordinator(DataUpdateCoordinator):
             node_id = node.get("id")
             if not node_id:
                 continue
-            data = node.get("data", {})
-            check = data.get("check_method", "ping")
-            target = data.get("target") or data.get("hostname")
-            ip = data.get("ip")
+            # The frontend serializes nodes flat (top-level ip/hostname/...);
+            # legacy/test data may put them under `data`. Read both.
+            data = node.get("data") or {}
+            check = node.get("check_method") or data.get("check_method") or "ping"
+            target = (
+                node.get("check_target")
+                or data.get("target")
+                or node.get("hostname")
+                or data.get("hostname")
+            )
+            ip = node.get("ip") or data.get("ip")
             try:
                 results[node_id] = await status_checker.check_node(
                     check, target, ip
@@ -246,7 +253,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
         ranges = self.get_scan_ranges()
         canvas = await self.get_canvas()
         pending = await self._get_pending()
-        canvas_ips = {n["data"]["ip"] for n in canvas.get("nodes", []) if n.get("data", {}).get("ip")}
+        canvas_ips = {
+            n.get("ip") or n.get("data", {}).get("ip")
+            for n in canvas.get("nodes", [])
+            if n.get("ip") or n.get("data", {}).get("ip")
+        }
         hidden_ips = {d["ip"] for d in pending["devices"] if d.get("status") == "hidden"}
         exclude = canvas_ips | hidden_ips
 

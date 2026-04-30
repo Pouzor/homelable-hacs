@@ -155,27 +155,7 @@ export interface StatusUpdate {
 export async function subscribeStatus(
   cb: (update: StatusUpdate) => void
 ): Promise<() => void> {
-  // Backend currently only exposes a get; subscription added with status push.
-  // Until then, this is a no-op subscription that polls every 30s as fallback.
-  let stopped = false
-  const tick = async () => {
-    if (stopped) return
-    try {
-      const data = await wsCall<StatusUpdate>('homelable/status/get')
-      cb(data || {})
-    } catch {
-      /* ignore */
-    }
-  }
-  void tick()
-  const handle = window.setInterval(tick, 30000)
-  return () => {
-    stopped = true
-    window.clearInterval(handle)
-  }
-  // TODO: replace with real subscription once backend exposes it:
-  // return wsSubscribe<StatusUpdate>('homelable/status/subscribe', cb)
-  void wsSubscribe // silence unused import lint
+  return wsSubscribe<StatusUpdate>('homelable/status/subscribe', cb)
 }
 
 // Re-export base `api` shim for any direct references; calls here go nowhere.

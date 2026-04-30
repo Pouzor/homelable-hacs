@@ -24,6 +24,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_get_config)
     websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
+    websocket_api.async_register_command(hass, ws_status_subscribe)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -211,3 +212,30 @@ async def ws_status_get(
         _send_not_setup(connection, msg["id"])
         return
     connection.send_result(msg["id"], coord.data or {})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/status/subscribe"}
+)
+@callback
+def ws_status_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Push the coordinator's status map on every refresh until unsubscribed."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+
+    @callback
+    def _push() -> None:
+        connection.send_message(
+            websocket_api.event_message(msg["id"], coord.data or {})
+        )
+
+    unsub = coord.async_add_listener(_push)
+    connection.subscriptions[msg["id"]] = unsub
+    connection.send_result(msg["id"])
+    # Send the current snapshot so the client doesn't have to wait for the
+    # next coordinator tick to populate.
+    _push()

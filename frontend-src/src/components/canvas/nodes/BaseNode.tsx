@@ -48,6 +48,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
         background: colors.background,
         borderColor: colors.border,
         borderWidth,
+        borderStyle: 'solid',
         boxShadow: isOnline && selected
           ? `0 0 0 ${borderWidth}px ${colors.border}, 0 0 10px ${colors.border}2e, 0 0 3px ${colors.border}1a`
           : isOnline

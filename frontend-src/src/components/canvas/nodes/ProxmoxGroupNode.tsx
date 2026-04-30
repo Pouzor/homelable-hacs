@@ -64,6 +64,7 @@ export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
         className="w-full h-full rounded-xl border-2 flex flex-col overflow-hidden"
         style={{
           borderColor: selected ? glow : `${glow}88`,
+          borderStyle: 'solid',
           background: isOnline ? `${colors.background}cc` : `${colors.background}aa`,
           boxShadow: isOnline
             ? `0 0 20px ${glow}1a, inset 0 0 40px ${glow}08`
