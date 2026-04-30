@@ -15,6 +15,7 @@ import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import App from './App'
 import { HassContext, setHass, type Hass } from './lib/hass'
+import { ShadowRootContext } from './lib/portal'
 import indexCss from './index.css?inline'
 import appCss from './App.css?inline'
 
@@ -93,7 +94,9 @@ class HomelablePanel extends HTMLElement {
     this._root.render(
       <StrictMode>
         <HassContext.Provider value={this._hass}>
-          <App />
+          <ShadowRootContext.Provider value={this._mountPoint}>
+            <App />
+          </ShadowRootContext.Provider>
         </HassContext.Provider>
       </StrictMode>
     )

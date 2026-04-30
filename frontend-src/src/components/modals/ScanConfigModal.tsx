@@ -30,7 +30,10 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
     setSaving(true)
     try {
       await scanApi.saveConfig({ ranges: cleaned })
-      await scanApi.trigger()
+      const res = await scanApi.trigger()
+      const found = res.data?.devices_found ?? 0
+      const fresh = res.data?.new_devices ?? 0
+      toast.success(`Scan complete — ${found} device${found === 1 ? '' : 's'} (${fresh} new)`)
       onScanNow()
       onClose()
     } catch {

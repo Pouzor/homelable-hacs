@@ -4,6 +4,7 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
+import { useShadowContainer } from "@/lib/portal"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
 const Select = SelectPrimitive.Root
@@ -70,8 +71,9 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   >) {
+  const shadowContainer = useShadowContainer()
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={shadowContainer}>
       <SelectPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

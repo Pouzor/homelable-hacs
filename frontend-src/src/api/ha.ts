@@ -94,11 +94,15 @@ export const scanApi = {
   ignore: async (_id: string) => notImplemented('scanApi.ignore'),
   bulkApprove: async (_ids: string[]) => notImplemented('scanApi.bulkApprove'),
   bulkHide: async (_ids: string[]) => notImplemented('scanApi.bulkHide'),
-  runs: async () => notImplemented('scanApi.runs'),
+  // Run history not persisted yet — return empty so the History panel is
+  // quiet instead of throwing. Tracked under Phase 1 backlog (scan runs Store).
+  runs: async () => toAxiosLike([] as object[]),
   clearPending: async () => notImplemented('scanApi.clearPending'),
-  getConfig: async () => notImplemented('scanApi.getConfig'),
-  saveConfig: async (_data: { ranges: string[] }) =>
-    notImplemented('scanApi.saveConfig'),
+  // Scan ranges live in the HA options flow on the config entry. Until a WS
+  // command exposes them to the UI, expose harmless defaults so the scan
+  // modal can submit and trigger a scan against the configured ranges.
+  getConfig: async () => toAxiosLike({ ranges: [] as string[] }),
+  saveConfig: async (data: { ranges: string[] }) => toAxiosLike(data),
 }
 
 // ─── Settings (stubbed: HA owns config via options flow) ────────────────────

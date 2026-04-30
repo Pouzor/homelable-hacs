@@ -62,17 +62,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
         canvas = await self.get_canvas()
         results: dict[str, dict[str, Any]] = {}
         for node in canvas.get("nodes", []):
+            node_id = node.get("id")
+            if not node_id:
+                continue
             data = node.get("data", {})
             check = data.get("check_method", "ping")
             target = data.get("target") or data.get("hostname")
             ip = data.get("ip")
             try:
-                results[node["id"]] = await status_checker.check_node(
+                results[node_id] = await status_checker.check_node(
                     check, target, ip
                 )
             except Exception as exc:
-                _LOGGER.debug("Status check error for %s: %s", node.get("id"), exc)
-                results[node["id"]] = {
+                _LOGGER.debug("Status check error for %s: %s", node_id, exc)
+                results[node_id] = {
                     "status": "unknown",
                     "response_time_ms": None,
                 }

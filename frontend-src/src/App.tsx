@@ -379,7 +379,7 @@ export default function App() {
   return (
     <TooltipProvider>
       <ReactFlowProvider>
-        <div className="flex h-screen w-screen overflow-hidden bg-[#0d1117]">
+        <div className="flex h-full w-full overflow-hidden bg-[#0d1117]">
           <Sidebar
             onAddNode={() => setAddNodeOpen(true)}
             onAddGroupRect={() => setAddGroupRectOpen(true)}
