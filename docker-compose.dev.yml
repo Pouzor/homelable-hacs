@@ -4,7 +4,13 @@ services:
     container_name: homelable-ha-dev
     restart: unless-stopped
     privileged: true
-    network_mode: host
+    # Use port mapping (works on macOS/Windows Docker Desktop). On Linux you can
+    # switch to `network_mode: host` instead — comment the `ports` block and
+    # uncomment the `network_mode` line below to gain real LAN visibility for
+    # mDNS/ARP discovery during scans.
+    ports:
+      - "8123:8123"
+    # network_mode: host
     environment:
       TZ: Europe/Paris
     volumes:

@@ -58,8 +58,11 @@ class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
 class HomelableOptionsFlow(OptionsFlow):
     """Options flow for Homelable."""
 
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
+    # `self.config_entry` is auto-populated by the base class on modern HA.
+    # Don't assign it in __init__ — it's a read-only property in HA ≥ 2024.12.
+
+    def __init__(self, config_entry) -> None:  # noqa: ARG002
+        pass
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

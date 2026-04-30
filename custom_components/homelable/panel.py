@@ -19,15 +19,18 @@ async def async_register_panel(hass: HomeAssistant) -> None:
     if DOMAIN in hass.data.get("frontend_panels", {}):
         return
 
-    bundle_files = list(_FRONTEND_DIR.glob("homelable-panel-*.js"))
-    if not bundle_files:
+    def _find_bundle() -> Path | None:
+        files = list(_FRONTEND_DIR.glob("homelable-panel-*.js"))
+        return files[0] if files else None
+
+    bundle_path = await hass.async_add_executor_job(_find_bundle)
+    if bundle_path is None:
         _LOGGER.warning(
             "No frontend bundle found in %s. Run `npm run build:ha` in frontend-src/.",
             _FRONTEND_DIR,
         )
         return
 
-    bundle_path = bundle_files[0]
     bundle_name = bundle_path.name
 
     await hass.http.async_register_static_paths(

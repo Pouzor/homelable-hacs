@@ -13,10 +13,29 @@ export default defineConfig(({ mode }) => {
   const isHaBuild = mode === 'ha'
 
   const baseConfig: UserConfig = {
+    define: {
+      // Standalone reads VERSION from disk; HA build uses package.json or a placeholder.
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
+    },
     plugins: [
       react(),
       tailwindcss(),
-      ...(isHaBuild ? [cssInjectedByJsPlugin()] : []),
+      // HA mounts panels inside its own shadow DOM; document.head <style>
+      // never reaches us. Stash CSS-module output on window.__HOMELABLE_CSS__
+      // so ha-panel.tsx can inject it into our own shadow root.
+      // (Tailwind + index.css/App.css are pulled in via `?inline` imports in
+      // ha-panel.tsx — @tailwindcss/vite emits CSS through a path this plugin
+      // doesn't intercept.)
+      ...(isHaBuild
+        ? [
+            cssInjectedByJsPlugin({
+              injectCodeFunction: function injectStashCode(cssCode: string) {
+                ;(window as unknown as Record<string, string>)
+                  .__HOMELABLE_CSS__ = cssCode
+              },
+            }),
+          ]
+        : []),
     ],
     resolve: {
       alias: {
