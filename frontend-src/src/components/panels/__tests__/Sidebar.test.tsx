@@ -2,14 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Sidebar } from '../Sidebar'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useAuthStore } from '@/stores/authStore'
 import type { Node } from '@xyflow/react'
 import type { NodeData } from '@/types'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 vi.mock('@/stores/canvasStore')
-vi.mock('@/stores/authStore')
 
 const mockBulkApprove = vi.fn()
 const mockBulkHide = vi.fn()
@@ -27,10 +25,6 @@ vi.mock('@/api/client', () => ({
     ignore: vi.fn().mockResolvedValue({ data: { ignored: true } }),
     bulkApprove: (...args: unknown[]) => mockBulkApprove(...args),
     bulkHide: (...args: unknown[]) => mockBulkHide(...args),
-  },
-  settingsApi: {
-    get: vi.fn().mockResolvedValue({ data: { interval_seconds: 60 } }),
-    save: vi.fn().mockResolvedValue({ data: { interval_seconds: 60 } }),
   },
 }))
 
@@ -62,7 +56,6 @@ const makeNode = (id: string, status: NodeData['status'], type: NodeData['type']
 })
 
 const mockToggleHideIp = vi.fn()
-const mockLogout = vi.fn()
 
 function mockStore(overrides: Partial<ReturnType<typeof useCanvasStore>> = {}) {
   vi.mocked(useCanvasStore).mockReturnValue({
@@ -74,12 +67,6 @@ function mockStore(overrides: Partial<ReturnType<typeof useCanvasStore>> = {}) {
     scanEventTs: 0,
     ...overrides,
   } as ReturnType<typeof useCanvasStore>)
-}
-
-function mockAuth() {
-  vi.mocked(useAuthStore).mockImplementation((selector: (s: { logout: () => void }) => unknown) =>
-    selector({ logout: mockLogout }) as ReturnType<typeof useAuthStore>
-  )
 }
 
 const defaultProps = {
@@ -95,7 +82,6 @@ const defaultProps = {
 describe('Sidebar', () => {
   beforeEach(() => {
     mockStore()
-    mockAuth()
     vi.clearAllMocks()
   })
 
@@ -267,29 +253,6 @@ describe('Sidebar', () => {
     await waitFor(() => expect(screen.getByText('No scans yet')).toBeInTheDocument())
   })
 
-  it('toggles Settings panel on Settings click', async () => {
-    render(<Sidebar {...defaultProps} />)
-    fireEvent.click(screen.getByText('Settings'))
-    await waitFor(() =>
-      expect(screen.getByText('Status check interval (s)')).toBeInTheDocument(),
-    )
-    // Click the nav button again to close (use role to avoid matching the panel heading)
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    expect(screen.queryByText('Status check interval (s)')).not.toBeInTheDocument()
-  })
-
-  // ── Logout ─────────────────────────────────────────────────────────────────
-
-  it('shows Logout button in normal mode', () => {
-    render(<Sidebar {...defaultProps} />)
-    expect(screen.getByText('Logout')).toBeInTheDocument()
-  })
-
-  it('calls logout when Logout is clicked', () => {
-    render(<Sidebar {...defaultProps} />)
-    fireEvent.click(screen.getByText('Logout'))
-    expect(mockLogout).toHaveBeenCalledOnce()
-  })
 })
 
 // ── PendingDevicesPanel — bulk select ─────────────────────────────────────────
@@ -321,7 +284,6 @@ const DEVICE_B = {
 describe('PendingDevicesPanel — bulk select', () => {
   beforeEach(() => {
     mockStore()
-    mockAuth()
     vi.clearAllMocks()
     mockBulkApprove.mockResolvedValue({
       data: { approved: 2, node_ids: ['n1', 'n2'], device_ids: ['dev-a', 'dev-b'], skipped: 0 },
