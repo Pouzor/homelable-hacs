@@ -74,8 +74,19 @@ export default defineConfig(({ mode }) => {
         output: {
           format: 'es',
           entryFileNames: 'homelable-panel-[hash].js',
+          chunkFileNames: 'homelable-chunk-[hash].js',
           assetFileNames: 'homelable-panel-[hash][extname]',
-          inlineDynamicImports: true,
+          manualChunks(id: string) {
+            if (id.includes('node_modules/@xyflow') || id.includes('node_modules/d3-')) {
+              return 'reactflow'
+            }
+            if (id.includes('node_modules/html-to-image') || id.includes('node_modules/jspdf') || id.includes('node_modules/dompurify')) {
+              return 'export'
+            }
+            if (id.includes('node_modules/dagre') || id.includes('node_modules/@dagrejs')) {
+              return 'layout'
+            }
+          },
         },
       },
     }

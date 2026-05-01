@@ -10,3 +10,11 @@ def auto_enable_custom_integrations(
 ) -> Generator[None, None, None]:
     """Enable custom integrations defined in the test directory."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def isolate_storage(hass_storage):  # noqa: ANN001
+    """Ensure HA Store I/O is isolated per-test (prevents cross-test leakage)."""
+    hass_storage.clear()
+    yield hass_storage
+    hass_storage.clear()

@@ -1,89 +1,131 @@
 # Homelable for Home Assistant
 
-Visualize and monitor your homelab network as an interactive topology, **inside Home Assistant**.
+## WIP ##
+Need feedbacks !
 
-This is the official Home Assistant integration for [Homelable](https://github.com/Pouzor/homelable), distributed via [HACS](https://hacs.xyz/).
+Visualize and monitor your homelab network as an interactive topology — inside
+Home Assistant.
 
-> Standalone (Docker/LXC) version: see [Pouzor/homelable](https://github.com/Pouzor/homelable).
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+This is the Home Assistant integration for
+[Homelable](https://github.com/Pouzor/homelable), packaged as a custom
+repository for [HACS](https://hacs.xyz/). Need the standalone (Docker / LXC /
+Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable).
 
 ---
 
 ## Features
 
-- 🗺️ Interactive network topology canvas as a Lovelace panel
-- 🔍 Scan local networks (nmap) and discover devices
-- 📡 Live status monitoring (ping/HTTP/SSH/TCP)
-- 🧩 11 node types (router, switch, server, Proxmox, VM, LXC, NAS, IoT, AP, …)
-- 🔌 5 edge types (ethernet, wifi, IoT, VLAN, virtual)
-- 💾 Canvas persisted via HA Storage (no external DB)
-- 🔐 No extra auth — uses your HA login
+- **Interactive topology** as a full Lovelace panel — pan, zoom, drag, group.
+- **Network discovery** with nmap, with optional ARP / OS fingerprinting.
+- **Live status checks** via ping, HTTP, TCP, or SSH.
+- **Rich modeling**: 11 node types (router, switch, server, Proxmox, VM, LXC,
+  NAS, IoT, access point, …) and 5 edge types (ethernet, Wi-Fi, IoT, VLAN,
+  virtual).
 
-**Phase 2 (planned):** HA entities (sensor/binary_sensor) per node + services + automations.
+---
+
+## Screenshots
+
+<!-- Add screenshots / GIFs here once you have them.
+     Suggested:
+       docs/screenshots/canvas.png
+       docs/screenshots/scan.png
+       docs/screenshots/details.png -->
 
 ---
 
 ## Installation
 
-### Via HACS (recommended)
+### HACS (recommended)
 
-1. HACS → Integrations → ⋮ → Custom repositories
-2. Add `https://github.com/Pouzor/homelable-hacs` as **Integration**
-3. Install **Homelable**
-4. Restart Home Assistant
-5. Settings → Devices & Services → Add Integration → search "Homelable"
+1. **HACS → Integrations → ⋮ → Custom repositories**
+2. Add `https://github.com/Pouzor/homelable-hacs` as **Integration**.
+3. Install **Homelable**.
+4. Restart Home Assistant.
+5. **Settings → Devices & Services → Add Integration** → search "Homelable".
 
 ### Manual
 
-1. Copy `custom_components/homelable/` into your HA `config/custom_components/`
-2. Restart Home Assistant
-3. Add the integration via UI
+1. Copy `custom_components/homelable/` into your HA `config/custom_components/`.
+2. Restart Home Assistant.
+3. Add the integration from the UI as above.
+
+### Requirements
+
+- Home Assistant **2024.1** or newer.
+- `nmap` available on the host. (HAOS bundles it; Container / Core users may
+  need to install it — see [Scanner privileges](#scanner-privileges).)
 
 ---
 
 ## Configuration
 
-Setup is via the HA UI (config flow). You'll be asked:
-- **Network ranges** to scan (CIDR, e.g. `192.168.1.0/24`)
-- **Scan interval** (default: 60 minutes)
-- **Status check interval** (default: 60 seconds)
+Setup is fully UI-driven (config flow). You'll be prompted for:
+
+| Field | Default | Description |
+|---|---|---|
+| Network ranges | `192.168.1.0/24` | Comma-separated CIDR blocks to scan |
+| Scan interval | 60 min | How often to look for new devices |
+| Status check interval | 60 s | How often to refresh node status |
+
+All values can be changed later from the integration's **Configure** menu.
 
 ---
 
-## Scanner Privileges
+## Usage
 
-Some scan features (ARP discovery, OS detection, SYN scans) require raw network access:
-- **HAOS / Supervised**: install the Homelable add-on (planned) for full features.
-- **Container / Core**: full features require `CAP_NET_RAW` on the HA container or `setcap cap_net_raw+ep $(which nmap)`.
-- **Without raw access**: integration falls back to TCP connect scans (slower, no MAC addresses, no OS fingerprint).
+After setup, a **Homelable** entry appears in the sidebar. From there:
+
+1. **Run a scan** to discover devices on the configured ranges.
+2. **Approve** a discovered device to drop it on the canvas as a node.
+3. **Connect** nodes by drawing edges; pick the appropriate edge type.
+4. **Save** the canvas (explicit — no autosave).
+
+Scan history, hidden devices, and scan configuration live in the side panel.
 
 ---
 
-## Development
+## Scanner privileges
 
-See [CLAUDE.md](./CLAUDE.md) for dev environment setup, testing, and conventions.
+Full discovery features (ARP, OS detection, SYN scans) need raw socket access.
+If raw access is unavailable, the scanner falls back to TCP connect scans —
+still useful, but slower and without MAC addresses or OS fingerprints.
 
-### Local HA in Docker
+| Install type | Notes |
+|---|---|
+| **HAOS / Supervised** | Companion add-on with full privileges is planned. |
+| **Container** | Run the HA container with `CAP_NET_RAW`, or `setcap cap_net_raw+ep $(which nmap)` inside the container. |
+| **Core** | `setcap cap_net_raw+ep $(which nmap)` on the host. |
 
-```bash
-./scripts/dev-ha.sh           # build frontend + start HA on :8123 + tail logs
-./scripts/dev-ha.sh restart   # rebuild frontend + restart container
-./scripts/dev-ha.sh stop      # stop the container
-./scripts/dev-ha.sh logs      # tail logs
-./scripts/dev-ha.sh shell     # bash inside the container
-```
+---
 
-First-run flow: open <http://localhost:8123> → complete HA onboarding → Settings → Devices & Services → **Add Integration** → search "Homelable".
+## Roadmap
 
-Bind mounts:
-- `./custom_components/homelable` → `/config/custom_components/homelable` (live source)
-- `./dev-config/` → `/config` (HA database, registry, secrets — gitignored, persisted between runs)
+- HA entities per canvas node (`sensor.homelable_<id>`, `binary_sensor.homelable_<id>_online`).
+- Device registry: one HA device per canvas node.
+- Services: `homelable.scan_now`, `homelable.approve_device`, `homelable.refresh_status`.
+- Events: `homelable_node_offline`, `homelable_node_online`, `homelable_device_discovered`.
+- HACS default-listing submission once stable with real users.
 
-Iteration:
-- **Python changes** → `./scripts/dev-ha.sh restart` (HA reloads).
-- **Frontend changes** → same — restart triggers `build:ha` which writes the bundle into the mounted integration dir.
+See the [issue tracker](https://github.com/Pouzor/homelable-hacs/issues) for
+the live list.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Please:
+
+- Open an issue first for non-trivial changes so we can align on scope.
+- Keep PRs focused and include tests for behavior changes.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`,
+  `fix:`, `chore:`, `docs:`, `test:`, `refactor:`).
 
 ---
 
 ## License
 
-MIT © Remy Jardinet
+[MIT](LICENSE) © Pouzor

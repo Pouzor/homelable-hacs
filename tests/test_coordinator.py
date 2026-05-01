@@ -56,8 +56,9 @@ async def test_trigger_scan_adds_new_device_to_pending(coord) -> None:  # noqa: 
         AsyncMock(return_value=fake_devices),
     ):
         result = await coord.trigger_scan()
+        assert result["status"] == "running"
+        await coord.hass.async_block_till_done()
 
-    assert result["new_devices"] == 1
     pending = await coord.list_pending()
     assert len(pending) == 1
     assert pending[0]["ip"] == "192.168.1.50"
@@ -95,6 +96,7 @@ async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: 
         "custom_components.homelable.coordinator.scanner.run_scan", _fake
     ):
         await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
 
     assert "192.168.1.1" in captured["exclude"]
     assert "192.168.1.99" in captured["exclude"]
@@ -212,9 +214,9 @@ async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  #
         "custom_components.homelable.coordinator.scanner.run_scan",
         AsyncMock(return_value=fake),
     ):
-        result = await coord.trigger_scan()
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
 
-    assert result["new_devices"] == 0
     devices = await coord.list_pending()
     assert len(devices) == 1
     assert devices[0]["mac"] == "AA:BB:CC:11:22:33"

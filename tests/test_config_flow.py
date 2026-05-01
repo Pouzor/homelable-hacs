@@ -1,10 +1,10 @@
 """Test the Homelable config flow."""
 from unittest.mock import patch
 
-import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homelable.const import (
     CONF_SCAN_INTERVAL,
@@ -14,7 +14,6 @@ from custom_components.homelable.const import (
 )
 
 
-@pytest.mark.asyncio
 async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     """A user-initiated flow with valid input creates a config entry."""
     result = await hass.config_entries.flow.async_init(
@@ -40,20 +39,9 @@ async def test_user_flow_creates_entry(hass: HomeAssistant) -> None:
     assert result2["title"] == "Homelable"
 
 
-@pytest.mark.asyncio
 async def test_single_instance_only(hass: HomeAssistant) -> None:
     """A second config entry is rejected."""
-    config_entries.ConfigEntry(
-        version=1,
-        minor_version=1,
-        domain=DOMAIN,
-        title="Homelable",
-        data={},
-        source=config_entries.SOURCE_USER,
-        unique_id=None,
-        options={},
-        discovery_keys={},
-    ).add_to_hass(hass)
+    MockConfigEntry(domain=DOMAIN, title="Homelable", data={}).add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}

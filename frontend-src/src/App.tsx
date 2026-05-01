@@ -1,6 +1,8 @@
-import { useEffect, useCallback, useRef, useState } from 'react'
+import { useEffect, useCallback, useRef, useState, lazy, Suspense } from 'react'
 import { ReactFlowProvider, type Connection, type Edge } from '@xyflow/react'
 import { type Node } from '@xyflow/react'
+
+const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
@@ -11,7 +13,6 @@ import { parseYamlToCanvas } from '@/utils/importYaml'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
-import { CanvasContainer } from '@/components/canvas/CanvasContainer'
 import { Sidebar } from '@/components/panels/Sidebar'
 import { Toolbar } from '@/components/panels/Toolbar'
 import { DetailPanel } from '@/components/panels/DetailPanel'
@@ -405,20 +406,22 @@ export default function App() {
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
-                <CanvasContainer
-                  onConnect={handleEdgeConnect}
-                  onEdgeDoubleClick={handleEdgeDoubleClick}
-                  onNodeDoubleClick={handleNodeDoubleClick}
-                  onNodeDragStart={snapshotHistory}
-                  onOpenPending={(deviceId) => {
-                    setHighlightPendingId(undefined)
-                    setSidebarForceView(undefined)
-                    setTimeout(() => {
-                      setHighlightPendingId(deviceId)
-                      setSidebarForceView('pending')
-                    }, 0)
-                  }}
-                />
+                <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">Loading canvas…</div>}>
+                  <LazyCanvas
+                    onConnect={handleEdgeConnect}
+                    onEdgeDoubleClick={handleEdgeDoubleClick}
+                    onNodeDoubleClick={handleNodeDoubleClick}
+                    onNodeDragStart={snapshotHistory}
+                    onOpenPending={(deviceId) => {
+                      setHighlightPendingId(undefined)
+                      setSidebarForceView(undefined)
+                      setTimeout(() => {
+                        setHighlightPendingId(deviceId)
+                        setSidebarForceView('pending')
+                      }, 0)
+                    }}
+                  />
+                </Suspense>
               </div>
               {(selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
             </div>

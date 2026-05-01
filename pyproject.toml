@@ -15,6 +15,7 @@ dev = [
   "pytest-asyncio>=0.23",
   "pytest-homeassistant-custom-component>=0.13",
   "homeassistant>=2024.1.0",
+  "home-assistant-frontend",
   "voluptuous>=0.13",
 ]
 

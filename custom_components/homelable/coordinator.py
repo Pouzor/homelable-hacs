@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Homelable."""
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -104,7 +105,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
     async def get_canvas(self) -> dict[str, Any]:
         if self._canvas is None:
-            self._canvas = (await self.canvas_store.async_load()) or dict(
+            self._canvas = (await self.canvas_store.async_load()) or copy.deepcopy(
                 _EMPTY_CANVAS
             )
         return self._canvas
@@ -117,7 +118,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
     async def _get_pending(self) -> dict[str, Any]:
         if self._pending is None:
-            self._pending = (await self.pending_store.async_load()) or dict(
+            self._pending = (await self.pending_store.async_load()) or copy.deepcopy(
                 _EMPTY_PENDING
             )
         return self._pending
