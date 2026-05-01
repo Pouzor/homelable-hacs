@@ -14,7 +14,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - name: Install dev dependencies
+        run: |
+          pip install -e ".[dev]"
+          # Drop the editable install of the project itself: HA's loader
+          # iterates the phantom path-hook entry and crashes. The integration
+          # is loaded from custom_components/homelable/ via the
+          # enable_custom_integrations fixture in tests/conftest.py.
+          pip uninstall -y homelable-hacs
       - run: ruff check custom_components/
       - run: pytest
 
