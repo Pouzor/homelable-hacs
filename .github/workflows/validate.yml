@@ -23,3 +23,8 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # `brands` requires a PR to home-assistant/brands; `hacsjson` and
+          # `integration_manifest` cascade from the same missing-brand lookup.
+          # Skip until the brand assets are submitted; everything else is
+          # a hard requirement.
+          ignore: brands hacsjson integration_manifest
