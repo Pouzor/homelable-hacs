@@ -1,8 +1,8 @@
 # Homelable for Home Assistant
 
 ## WIP ##
-/!\ Attention /!\
-THis is a WIP project. If you'r interested to test it and give feedback, you are very welcome.
+/!\ Attention /!\ 
+This is a WIP project. If you are interested to test it and give feedback, you are very welcome.
 Need feedbacks !
 
 ---
