@@ -1,0 +1,7 @@
+# Dev-only image. Extends the official HA image to bundle nmap-scripts so
+# `-sV` (service / version detection) works in the dev container — the
+# upstream image ships nmap without nse_main.lua, which makes every -sV
+# scan fail and the panel show "no services detected".
+FROM ghcr.io/home-assistant/home-assistant:stable
+
+RUN apk add --no-cache nmap-scripts

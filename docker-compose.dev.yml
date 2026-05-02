@@ -1,6 +1,9 @@
 services:
   homeassistant:
-    image: ghcr.io/home-assistant/home-assistant:stable
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: homelable-ha-dev:latest
     container_name: homelable-ha-dev
     restart: unless-stopped
     privileged: true
