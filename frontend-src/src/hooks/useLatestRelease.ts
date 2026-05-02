@@ -15,7 +15,7 @@ export function useLatestRelease(currentVersion: string) {
   useEffect(() => {
     if (cache !== null) return
     cache = 'pending'
-    fetch('https://api.github.com/repos/Pouzor/homelable/releases/latest', {
+    fetch('https://api.github.com/repos/Pouzor/homelable-hacs/releases/latest', {
       headers: { Accept: 'application/vnd.github+json' },
     })
       .then((res) => {

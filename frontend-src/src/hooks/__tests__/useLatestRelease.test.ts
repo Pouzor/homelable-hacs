@@ -26,7 +26,7 @@ describe('useLatestRelease', () => {
   })
 
   it('returns no update when latest version matches current', async () => {
-    mockFetch({ tag_name: 'v1.8.3', html_url: 'https://github.com/Pouzor/homelable/releases/tag/v1.8.3' })
+    mockFetch({ tag_name: 'v1.8.3', html_url: 'https://github.com/Pouzor/homelable-hacs/releases/tag/v1.8.3' })
     const useLatestRelease = await freshHook()
     const { result } = renderHook(() => useLatestRelease(CURRENT))
     await waitFor(() => expect(result.current.latest).not.toBeNull())
@@ -34,12 +34,12 @@ describe('useLatestRelease', () => {
   })
 
   it('returns update when latest version is newer', async () => {
-    mockFetch({ tag_name: 'v1.9.0', html_url: 'https://github.com/Pouzor/homelable/releases/tag/v1.9.0' })
+    mockFetch({ tag_name: 'v1.9.0', html_url: 'https://github.com/Pouzor/homelable-hacs/releases/tag/v1.9.0' })
     const useLatestRelease = await freshHook()
     const { result } = renderHook(() => useLatestRelease(CURRENT))
     await waitFor(() => expect(result.current.hasUpdate).toBe(true))
     expect(result.current.latest?.version).toBe('1.9.0')
-    expect(result.current.latest?.url).toBe('https://github.com/Pouzor/homelable/releases/tag/v1.9.0')
+    expect(result.current.latest?.url).toBe('https://github.com/Pouzor/homelable-hacs/releases/tag/v1.9.0')
   })
 
   it('strips leading v from tag_name', async () => {
