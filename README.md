@@ -1,7 +1,11 @@
 # Homelable for Home Assistant
 
 ## WIP ##
+/!\ Attention /!\
+THis is a WIP project. If you'r interested to test it and give feedback, you are very welcome.
 Need feedbacks !
+
+---
 
 Visualize and monitor your homelab network as an interactive topology — inside
 Home Assistant.
