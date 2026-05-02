@@ -10,12 +10,14 @@ import ipaddress
 import logging
 import os
 import re
+import shutil
 import socket
 import subprocess
 import threading
 from typing import Any
 
 from .fingerprint import fingerprint_ports, suggest_node_type
+from .tcp_scanner import tcp_connect_scan
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +36,8 @@ _EXTRA_PORTS = (
     "16686,34567,37777,51413,64738"
 )
 
+_PORT_LIST: tuple[int, ...] = tuple(int(p) for p in _EXTRA_PORTS.split(","))
+
 _MDNS_SERVICE_TYPES = [
     "_http._tcp.local.",
     "_shelly._tcp.local.",
@@ -46,9 +50,24 @@ _MDNS_SERVICE_TYPES = [
 try:
     import nmap
 
-    _NMAP_AVAILABLE = True
+    _NMAP_LIB_AVAILABLE = True
 except ImportError:
-    _NMAP_AVAILABLE = False
+    _NMAP_LIB_AVAILABLE = False
+
+# python-nmap is a wrapper that shells out to the `nmap` binary. The lib alone
+# is not enough — HA OS ships the lib (we list it in requirements) but not the
+# binary, which is what causes service detection to silently return nothing.
+_NMAP_BINARY_AVAILABLE = shutil.which("nmap") is not None
+_NMAP_AVAILABLE = _NMAP_LIB_AVAILABLE and _NMAP_BINARY_AVAILABLE
+
+if _NMAP_AVAILABLE:
+    _LOGGER.info("Scanner mode: nmap (binary + python-nmap detected)")
+elif _NMAP_LIB_AVAILABLE and not _NMAP_BINARY_AVAILABLE:
+    _LOGGER.info(
+        "Scanner mode: TCP fallback (python-nmap present but nmap binary "
+        "missing — typical on HA OS)"
+    )
+else:
     _LOGGER.warning("python-nmap not available — scanner will run in mock mode")
 
 try:
@@ -196,7 +215,7 @@ async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
 
 
 def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
-    """Phase 2: per-IP service detection. Blocking — call via to_thread."""
+    """Phase 2 (nmap path): per-IP service detection. Blocking — call via to_thread."""
     ip = host_dict["ip"]
     if not _NMAP_AVAILABLE:
         return host_dict
@@ -233,21 +252,31 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     return host_dict
 
 
-async def _nmap_port_scan(
+async def _phase2_port_scan(
     alive: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Phase 2: per-IP port scan with bounded concurrency (10 hosts at a time)."""
+    """Phase 2: per-IP port scan with bounded concurrency (10 hosts at a time).
+
+    Dispatches to nmap when the binary is available, falls back to a pure-Python
+    TCP connect scan otherwise. Both paths produce the same host_dict shape.
+    """
     if not alive:
         return []
 
     semaphore = asyncio.Semaphore(10)
 
-    async def _scan_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
+    async def _nmap_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
             return await asyncio.to_thread(_nmap_scan_single, host_dict)
 
+    async def _tcp_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
+        async with semaphore:
+            return await tcp_connect_scan(host_dict, _PORT_LIST)
+
+    runner = _nmap_with_sem if _NMAP_AVAILABLE else _tcp_with_sem
+
     raw = await asyncio.gather(
-        *[_scan_with_sem(h) for h in alive.values()],
+        *[runner(h) for h in alive.values()],
         return_exceptions=True,
     )
     results: list[dict[str, Any]] = []
@@ -260,11 +289,15 @@ async def _nmap_port_scan(
 
 
 async def _nmap_scan(target: str) -> list[dict[str, Any]]:
-    """Two-phase scan for a CIDR range (ping → port scan)."""
-    if not _NMAP_AVAILABLE:
+    """Two-phase scan for a CIDR range (ping → port scan).
+
+    Falls back to a pure-Python TCP connect scan when the nmap binary is
+    missing. Returns mock data only when python-nmap itself is missing.
+    """
+    if not _NMAP_LIB_AVAILABLE:
         return _mock_scan(target)
     alive = await _ping_sweep(target)
-    return await _nmap_port_scan(alive)
+    return await _phase2_port_scan(alive)
 
 
 async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:

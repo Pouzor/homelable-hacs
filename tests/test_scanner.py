@@ -128,6 +128,55 @@ async def test_run_scan_cancel_short_circuits() -> None:
     assert devices == []
 
 
+@pytest.mark.asyncio
+async def test_phase2_falls_back_to_tcp_scanner_when_nmap_binary_missing() -> None:
+    """Without the nmap binary, port scan dispatches to tcp_connect_scan."""
+    alive = {
+        "10.0.0.5": {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
+    }
+
+    async def _fake_tcp(host: dict, ports: tuple[int, ...]) -> dict:
+        host["open_ports"] = [{"port": 80, "protocol": "tcp", "banner": "nginx"}]
+        return host
+
+    with (
+        patch.object(scanner, "_NMAP_AVAILABLE", False),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+    ):
+        results = await scanner._phase2_port_scan(alive)
+
+    assert len(results) == 1
+    assert results[0]["open_ports"] == [{"port": 80, "protocol": "tcp", "banner": "nginx"}]
+
+
+@pytest.mark.asyncio
+async def test_phase2_uses_nmap_when_available() -> None:
+    """With nmap available, port scan dispatches to _nmap_scan_single."""
+    alive = {
+        "10.0.0.5": {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
+    }
+    tcp_called = False
+
+    async def _fake_tcp(host: dict, ports: tuple[int, ...]) -> dict:
+        nonlocal tcp_called
+        tcp_called = True
+        return host
+
+    def _fake_nmap_single(host: dict) -> dict:
+        host["open_ports"] = [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}]
+        return host
+
+    with (
+        patch.object(scanner, "_NMAP_AVAILABLE", True),
+        patch.object(scanner, "_nmap_scan_single", _fake_nmap_single),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+    ):
+        results = await scanner._phase2_port_scan(alive)
+
+    assert tcp_called is False
+    assert results[0]["open_ports"] == [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}]
+
+
 def test_request_cancel_records_run_id() -> None:
     """request_cancel marks the run_id; _is_cancelled reflects it."""
     scanner.request_cancel("my-run")
