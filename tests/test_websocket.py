@@ -280,3 +280,28 @@ async def test_get_canvas_not_setup_returns_error(
     msg = await client.receive_json()
     assert msg["success"] is False
     assert msg["error"]["code"] == "not_setup"
+
+
+# ─── Admin gating ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        {"type": "homelable/save_canvas", "canvas": {"nodes": [], "edges": [], "viewport": {}}},
+        {"type": "homelable/scan/start"},
+        {"type": "homelable/scan/cancel"},
+        {"type": "homelable/scan/approve", "device_id": "x"},
+        {"type": "homelable/scan/hide", "device_id": "x"},
+        {"type": "homelable/scan/clear"},
+    ],
+)
+async def test_mutating_commands_reject_non_admin(
+    hass: HomeAssistant, hass_ws_client, hass_read_only_access_token, setup_ws, command  # noqa: ANN001
+) -> None:
+    """Non-admin users must not be able to scan, save, approve, hide, or clear."""
+    client = await hass_ws_client(hass, hass_read_only_access_token)
+    await client.send_json({"id": 1, **command})
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "unauthorized"

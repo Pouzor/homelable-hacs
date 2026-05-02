@@ -60,6 +60,7 @@ async def ws_get_canvas(
         vol.Required("canvas"): dict,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_save_canvas(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -75,6 +76,7 @@ async def ws_save_canvas(
 # ─── Scan ────────────────────────────────────────────────────────────────────
 
 @websocket_api.websocket_command({vol.Required("type"): "homelable/scan/start"})
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_start(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -88,6 +90,7 @@ async def ws_scan_start(
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homelable/scan/cancel"})
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_cancel(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -125,6 +128,7 @@ async def ws_scan_pending(
         vol.Optional("overrides", default={}): dict,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_approve(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -146,6 +150,7 @@ async def ws_scan_approve(
         vol.Required("device_id"): str,
     }
 )
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_hide(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -174,6 +179,7 @@ async def ws_scan_get_config(
 
 
 @websocket_api.websocket_command({vol.Required("type"): "homelable/scan/clear"})
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_clear(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]

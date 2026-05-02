@@ -73,6 +73,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Run a status check on every canvas node. Return {node_id: status_dict}."""
         canvas = await self.get_canvas()
+        # Hosts that resolve to loopback / link-local / multicast / reserved
+        # IPs are only allowed if the admin explicitly opted into that subnet.
+        allowed_networks = status_checker._parse_allowed_networks(
+            self.get_scan_ranges()
+        )
         results: dict[str, dict[str, Any]] = {}
         for node in canvas.get("nodes", []):
             node_id = node.get("id")
@@ -91,7 +96,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             ip = node.get("ip") or data.get("ip")
             try:
                 results[node_id] = await status_checker.check_node(
-                    check, target, ip
+                    check, target, ip, allowed_networks=allowed_networks
                 )
             except Exception as exc:
                 _LOGGER.debug("Status check error for %s: %s", node_id, exc)

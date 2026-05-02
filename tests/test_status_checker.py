@@ -6,6 +6,17 @@ import pytest
 from custom_components.homelable import status_checker
 
 
+@pytest.fixture(autouse=True)
+def _allow_all_hosts():
+    """Bypass the SSRF host filter so unit tests can use synthetic hostnames.
+
+    The filter resolves DNS, which is blocked under pytest-socket. Tests that
+    care about the filter live in `test_status_checker_security`.
+    """
+    with patch.object(status_checker, "_host_is_allowed", return_value=True):
+        yield
+
+
 @pytest.mark.asyncio
 async def test_check_none_returns_online() -> None:
     """check_method='none' always reports online without probing."""
@@ -58,7 +69,7 @@ async def test_check_http_prepends_scheme() -> None:
     """http check adds http:// when target lacks scheme."""
     with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)) as mock:
         await status_checker.check_node("http", "example.com", None)
-    mock.assert_awaited_once_with("http://example.com")
+    mock.assert_awaited_once_with("http://example.com", verify=False)
 
 
 @pytest.mark.asyncio

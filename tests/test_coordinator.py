@@ -171,7 +171,7 @@ async def test_async_update_data_runs_status_check_per_node(coord) -> None:  # n
         }
     )
 
-    async def _fake_check(method, target, ip):
+    async def _fake_check(method, target, ip, **_kw):
         return {"status": "online", "response_time_ms": 5}
 
     with patch(
