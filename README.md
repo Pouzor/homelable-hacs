@@ -15,7 +15,9 @@ Home Assistant.
 
 This is the Home Assistant integration for
 [Homelable](https://github.com/Pouzor/homelable), packaged as a custom
-repository for [HACS](https://hacs.xyz/). Need the standalone (Docker / LXC /
+repository for [HACS](https://hacs.xyz/). 
+
+Need the standalone (Docker / LXC /
 Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable).
 
 ---
