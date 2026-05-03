@@ -3,6 +3,7 @@
   "name": "Homelable",
   "codeowners": ["@Pouzor"],
   "config_flow": true,
+  "after_dependencies": ["zeroconf"],
   "dependencies": [
     "frontend",
     "http",
