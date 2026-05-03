@@ -1,9 +1,9 @@
 {
   "domain": "homelable",
   "name": "Homelable",
+  "after_dependencies": ["zeroconf"],
   "codeowners": ["@Pouzor"],
   "config_flow": true,
-  "after_dependencies": ["zeroconf"],
   "dependencies": [
     "frontend",
     "http",
@@ -16,5 +16,5 @@
   "requirements": [
     "python-nmap>=0.7.1"
   ],
-  "version": "0.1.4"
+  "version": "0.1.5"
 }
