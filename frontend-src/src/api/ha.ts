@@ -158,6 +158,45 @@ export async function subscribeStatus(
   return wsSubscribe<StatusUpdate>('homelable/status/subscribe', cb)
 }
 
+// ─── Scan event subscription (progressive scan) ─────────────────────────────
+
+export type ScanEvent =
+  | {
+      event: 'device_discovered'
+      run_id?: string
+      device: {
+        id?: string
+        ip: string
+        mac: string | null
+        hostname: string | null
+        discovery_source?: string | null
+      }
+    }
+  | {
+      event: 'device_enriched'
+      run_id?: string
+      device: {
+        id?: string
+        ip: string
+        mac: string | null
+        hostname: string | null
+        os: string | null
+        open_ports: Array<{ port: number; protocol: string; banner?: string }>
+        services: object[]
+        suggested_type: string | null
+        discovery_source?: string | null
+      }
+    }
+  | { event: 'scan_phase'; run_id?: string; phase: string }
+  | { event: 'scan_finished'; run_id?: string; devices_found: number; cancelled?: boolean }
+  | { event: 'scan_error'; run_id?: string; error: string }
+
+export async function subscribeScan(
+  cb: (event: ScanEvent) => void
+): Promise<() => void> {
+  return wsSubscribe<ScanEvent>('homelable/scan/subscribe', cb)
+}
+
 // Re-export base `api` shim for any direct references; calls here go nowhere.
 export const api = {
   get: async (_url: string) =>

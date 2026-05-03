@@ -9,6 +9,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -20,6 +21,7 @@ from .const import (
     DEFAULT_STATUS_INTERVAL,
     DOMAIN,
     MAX_SCAN_RUNS,
+    SCAN_SIGNAL,
     STORAGE_KEY_CANVAS,
     STORAGE_KEY_PENDING,
     STORAGE_KEY_RUNS,
@@ -292,6 +294,97 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "new_devices": 0,
         }
 
+    async def _handle_scan_event(
+        self, run_id: str, payload: dict[str, Any]
+    ) -> None:
+        """Apply a scanner event to in-memory pending state and broadcast it.
+
+        Mutates the pending dict in place so list_pending and the WS subscriber
+        see consistent state during the scan. Persisted once at scan end via
+        _save_pending — one event-per-host on a /24 would otherwise hammer Store.
+        """
+        event = payload.get("event")
+        device = payload.get("device") or {}
+        ip = device.get("ip")
+
+        # Augment payload with run_id so subscribers can filter overlapping runs.
+        out = {**payload, "run_id": run_id}
+
+        if event == "device_discovered" and ip:
+            pending = await self._get_pending()
+            existing = next(
+                (d for d in pending["devices"] if d.get("ip") == ip),
+                None,
+            )
+            if existing is None:
+                pending["devices"].append(
+                    {
+                        "id": f"pd-{uuid.uuid4().hex[:8]}",
+                        "ip": ip,
+                        "mac": device.get("mac"),
+                        "hostname": device.get("hostname"),
+                        "os": None,
+                        "open_ports": [],
+                        "services": [],
+                        "suggested_type": None,
+                        "discovery_source": device.get("discovery_source"),
+                        "status": "discovering",
+                        "discovered_at": _utc_now_iso(),
+                    }
+                )
+            elif existing.get("status") in ("discovering", "pending"):
+                # Refresh meta if we got better info this run.
+                existing["mac"] = device.get("mac") or existing.get("mac")
+                existing["hostname"] = (
+                    device.get("hostname") or existing.get("hostname")
+                )
+
+        elif event == "device_enriched" and ip:
+            pending = await self._get_pending()
+            existing = next(
+                (d for d in pending["devices"] if d.get("ip") == ip),
+                None,
+            )
+            if existing is None:
+                # mDNS-only path can land here without a prior discovery event
+                # for hosts that didn't answer ping. Create the entry directly.
+                pending["devices"].append(
+                    {
+                        "id": f"pd-{uuid.uuid4().hex[:8]}",
+                        "ip": ip,
+                        "mac": device.get("mac"),
+                        "hostname": device.get("hostname"),
+                        "os": device.get("os"),
+                        "open_ports": device.get("open_ports", []),
+                        "services": device.get("services", []),
+                        "suggested_type": device.get("suggested_type"),
+                        "discovery_source": device.get("discovery_source"),
+                        "status": "pending",
+                        "discovered_at": _utc_now_iso(),
+                    }
+                )
+            elif existing.get("status") in ("discovering", "pending"):
+                existing.update(
+                    {
+                        "mac": device.get("mac") or existing.get("mac"),
+                        "hostname": device.get("hostname") or existing.get("hostname"),
+                        "os": device.get("os") or existing.get("os"),
+                        "open_ports": device.get("open_ports", []),
+                        "services": device.get("services", []),
+                        "suggested_type": device.get("suggested_type"),
+                        "discovery_source": device.get("discovery_source"),
+                        "status": "pending",
+                    }
+                )
+            # Echo the stored device id back so the frontend can reconcile.
+            stored = next(
+                (d for d in pending["devices"] if d.get("ip") == ip), None
+            )
+            if stored is not None:
+                out["device"] = {**device, "id": stored["id"]}
+
+        async_dispatcher_send(self.hass, SCAN_SIGNAL, out)
+
     async def _run_scan_task(
         self,
         run_id: str,
@@ -300,12 +393,24 @@ class HomelableCoordinator(DataUpdateCoordinator):
         started_at: str,
     ) -> None:
         """Background scan body. Records run state, merges into pending store."""
+        async def _on_event(payload: dict[str, Any]) -> None:
+            await self._handle_scan_event(run_id, payload)
+
         try:
             devices = await scanner.run_scan(
-                ranges, run_id=run_id, exclude_ips=exclude
+                ranges,
+                run_id=run_id,
+                exclude_ips=exclude,
+                on_event=_on_event,
             )
         except Exception as exc:  # noqa: BLE001 — record any failure, then exit
             _LOGGER.exception("Scan %s failed", run_id)
+            async_dispatcher_send(
+                self.hass,
+                SCAN_SIGNAL,
+                {"event": "scan_error", "run_id": run_id, "error": str(exc)},
+            )
+            await self._save_pending()
             await self._record_run(
                 {
                     "id": run_id,
@@ -321,29 +426,18 @@ class HomelableCoordinator(DataUpdateCoordinator):
         finally:
             self._scan_run_id = None
 
-        # Re-fetch pending: it may have changed while we scanned.
+        # Streaming events have already mutated the pending store as the scan
+        # ran. Reconcile here as a safety net for hosts that didn't go through
+        # the event path (defensive — should be a no-op in the happy path).
         pending = await self._get_pending()
-        existing_pending_ips = {
-            d["ip"] for d in pending["devices"] if d.get("status") == "pending"
-        }
         now = _utc_now_iso()
+        scanned_ips = {dev["ip"] for dev in devices}
         for dev in devices:
-            if dev["ip"] in existing_pending_ips:
-                for stored in pending["devices"]:
-                    if stored["ip"] == dev["ip"] and stored.get("status") == "pending":
-                        stored.update(
-                            {
-                                "mac": dev.get("mac") or stored.get("mac"),
-                                "hostname": dev.get("hostname") or stored.get("hostname"),
-                                "os": dev.get("os") or stored.get("os"),
-                                "open_ports": dev.get("open_ports", []),
-                                "services": dev.get("services", []),
-                                "suggested_type": dev.get("suggested_type"),
-                                "discovery_source": dev.get("discovery_source"),
-                            }
-                        )
-                        break
-            else:
+            existing = next(
+                (d for d in pending["devices"] if d.get("ip") == dev["ip"]),
+                None,
+            )
+            if existing is None:
                 pending["devices"].append(
                     {
                         "id": f"pd-{uuid.uuid4().hex[:8]}",
@@ -359,6 +453,25 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "discovered_at": now,
                     }
                 )
+            elif existing.get("status") in ("discovering", "pending"):
+                existing.update(
+                    {
+                        "mac": dev.get("mac") or existing.get("mac"),
+                        "hostname": dev.get("hostname") or existing.get("hostname"),
+                        "os": dev.get("os") or existing.get("os"),
+                        "open_ports": dev.get("open_ports", []),
+                        "services": dev.get("services", []),
+                        "suggested_type": dev.get("suggested_type"),
+                        "discovery_source": dev.get("discovery_source"),
+                        "status": "pending",
+                    }
+                )
+
+        # Promote any leftover `discovering` entries from this scan that we
+        # have data for, and drop ones that never enriched (cancelled mid-run).
+        for d in list(pending["devices"]):
+            if d.get("status") == "discovering" and d["ip"] not in scanned_ips:
+                pending["devices"].remove(d)
 
         await self._save_pending()
         await self._record_run(
@@ -371,6 +484,15 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "finished_at": _utc_now_iso(),
                 "error": None,
             }
+        )
+        async_dispatcher_send(
+            self.hass,
+            SCAN_SIGNAL,
+            {
+                "event": "scan_finished",
+                "run_id": run_id,
+                "devices_found": len(devices),
+            },
         )
 
     def cancel_scan(self) -> bool:

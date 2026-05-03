@@ -23,6 +23,11 @@ DEFAULT_SCAN_RANGES = ["192.168.1.0/24"]
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
 DEFAULT_STATUS_INTERVAL = 60   # seconds
 
+# Dispatcher signal for live scan events (device_discovered / device_enriched
+# / scan_phase / scan_finished / scan_cancelled). Subscribers receive a single
+# dict payload; see websocket.ws_scan_subscribe.
+SCAN_SIGNAL = f"{DOMAIN}_scan_event"
+
 # Frontend panel
 PANEL_URL = "/homelable_files"
 PANEL_TITLE = "Homelable"

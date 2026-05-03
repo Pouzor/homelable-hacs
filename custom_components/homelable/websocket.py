@@ -6,8 +6,9 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from .const import DOMAIN
+from .const import DOMAIN, SCAN_SIGNAL
 
 
 @callback
@@ -25,6 +26,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
     websocket_api.async_register_command(hass, ws_status_subscribe)
+    websocket_api.async_register_command(hass, ws_scan_subscribe)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -245,3 +247,25 @@ def ws_status_subscribe(
     # Send the current snapshot so the client doesn't have to wait for the
     # next coordinator tick to populate.
     _push()
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/scan/subscribe"}
+)
+@callback
+def ws_scan_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Stream live scan events (device_discovered / device_enriched / phase / finished)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+
+    @callback
+    def _forward(payload: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+    unsub = async_dispatcher_connect(hass, SCAN_SIGNAL, _forward)
+    connection.subscriptions[msg["id"]] = unsub
+    connection.send_result(msg["id"])

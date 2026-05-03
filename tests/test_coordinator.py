@@ -88,7 +88,7 @@ async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: 
 
     captured: dict = {}
 
-    async def _fake(ranges, run_id=None, *, exclude_ips=None):
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
         captured["exclude"] = exclude_ips
         return []
 
@@ -100,6 +100,107 @@ async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: 
 
     assert "192.168.1.1" in captured["exclude"]
     assert "192.168.1.99" in captured["exclude"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # noqa: ANN001
+    """device_discovered → 'discovering' entry; device_enriched → 'pending' with services."""
+    captured_events: list[dict] = []
+
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.homelable.const import SCAN_SIGNAL
+
+    unsub = async_dispatcher_connect(
+        coord.hass, SCAN_SIGNAL, lambda p: captured_events.append(p)
+    )
+
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
+        await on_event(
+            {
+                "event": "device_discovered",
+                "device": {"ip": "10.0.0.7", "mac": None, "hostname": None},
+            }
+        )
+        # Mid-scan: pending must already reflect the discovery.
+        mid = await coord.list_pending(status="discovering")
+        assert any(d["ip"] == "10.0.0.7" for d in mid)
+        await on_event(
+            {
+                "event": "device_enriched",
+                "device": {
+                    "ip": "10.0.0.7",
+                    "mac": "AA:BB:CC:DD:EE:FF",
+                    "hostname": "host.lan",
+                    "os": None,
+                    "open_ports": [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}],
+                    "services": [{"port": 22, "name": "ssh"}],
+                    "suggested_type": "generic",
+                    "discovery_source": "nmap",
+                },
+            }
+        )
+        return [
+            {
+                "ip": "10.0.0.7",
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "hostname": "host.lan",
+                "os": None,
+                "open_ports": [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}],
+                "services": [{"port": 22, "name": "ssh"}],
+                "suggested_type": "generic",
+                "discovery_source": "nmap",
+            }
+        ]
+
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan", _fake
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
+
+    unsub()
+
+    pending = await coord.list_pending()
+    assert len(pending) == 1
+    assert pending[0]["ip"] == "10.0.0.7"
+    assert pending[0]["status"] == "pending"
+    assert pending[0]["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert pending[0]["services"] == [{"port": 22, "name": "ssh"}]
+
+    discovered = [e for e in captured_events if e.get("event") == "device_discovered"]
+    enriched = [e for e in captured_events if e.get("event") == "device_enriched"]
+    finished = [e for e in captured_events if e.get("event") == "scan_finished"]
+    assert len(discovered) == 1
+    assert len(enriched) == 1
+    assert len(finished) == 1
+    assert enriched[0]["device"]["ip"] == "10.0.0.7"
+    # Coordinator echoes the stored device id back so the frontend can reconcile.
+    assert enriched[0]["device"]["id"] == pending[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_streaming_discovering_entry_dropped_when_never_enriched(coord) -> None:  # noqa: ANN001
+    """If a host was discovered but never enriched (e.g. cancelled), drop it at scan end."""
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
+        await on_event(
+            {
+                "event": "device_discovered",
+                "device": {"ip": "10.0.0.99"},
+            }
+        )
+        return []  # No enrichment
+
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan", _fake
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
+
+    pending = await coord.list_pending(status="discovering")
+    assert pending == []
+    pending_done = await coord.list_pending()
+    assert pending_done == []
 
 
 @pytest.mark.asyncio
