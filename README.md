@@ -35,11 +35,8 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 
 ## Screenshots
 
-<!-- Add screenshots / GIFs here once you have them.
-     Suggested:
-       docs/screenshots/canvas.png
-       docs/screenshots/scan.png
-       docs/screenshots/details.png -->
+<img width="2627" height="1466" alt="homelable-canvas (8)" src="https://github.com/user-attachments/assets/b20c06c8-c042-408c-9fa5-455eb346d00a" />
+
 
 ---
 
