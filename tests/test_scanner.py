@@ -17,7 +17,7 @@ async def test_run_scan_invalid_cidr_raises() -> None:
 async def test_run_scan_returns_enriched_devices() -> None:
     """Scan output carries services + suggested_type + discovery_source."""
 
-    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
         return [
             {
                 "ip": "10.0.0.5",
@@ -28,11 +28,11 @@ async def test_run_scan_returns_enriched_devices() -> None:
             }
         ]
 
-    async def _no_mdns(timeout: float = 4.0) -> list[dict]:
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
         return []
 
     with (
-        patch.object(scanner, "_nmap_scan", _fake_nmap),
+        patch.object(scanner, "_scan_target", _fake_scan),
         patch.object(scanner, "_mdns_discover", _no_mdns),
     ):
         devices = await scanner.run_scan(["10.0.0.0/24"])
@@ -40,7 +40,7 @@ async def test_run_scan_returns_enriched_devices() -> None:
     assert len(devices) == 1
     dev = devices[0]
     assert dev["ip"] == "10.0.0.5"
-    assert dev["discovery_source"] == "nmap"
+    assert dev["discovery_source"] == "tcp"
     assert "services" in dev
     assert "suggested_type" in dev
 
@@ -49,17 +49,17 @@ async def test_run_scan_returns_enriched_devices() -> None:
 async def test_run_scan_excludes_ips() -> None:
     """IPs in exclude_ips are skipped."""
 
-    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
         return [
             {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
             {"ip": "10.0.0.6", "hostname": None, "mac": None, "os": None, "open_ports": []},
         ]
 
-    async def _no_mdns(timeout: float = 4.0) -> list[dict]:
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
         return []
 
     with (
-        patch.object(scanner, "_nmap_scan", _fake_nmap),
+        patch.object(scanner, "_scan_target", _fake_scan),
         patch.object(scanner, "_mdns_discover", _no_mdns),
     ):
         devices = await scanner.run_scan(
@@ -71,20 +71,20 @@ async def test_run_scan_excludes_ips() -> None:
 
 @pytest.mark.asyncio
 async def test_run_scan_dedups_across_sources() -> None:
-    """Same IP from nmap + mdns surfaces once (nmap wins)."""
+    """Same IP from TCP scan + mdns surfaces once (TCP wins)."""
 
-    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
         return [
             {
                 "ip": "10.0.0.7",
-                "hostname": "from-nmap",
+                "hostname": "from-tcp",
                 "mac": "AA:BB:CC:00:00:01",
                 "os": None,
                 "open_ports": [],
             }
         ]
 
-    async def _fake_mdns(timeout: float = 4.0) -> list[dict]:
+    async def _fake_mdns(*_args, **_kwargs) -> list[dict]:
         return [
             {
                 "ip": "10.0.0.7",
@@ -96,31 +96,31 @@ async def test_run_scan_dedups_across_sources() -> None:
         ]
 
     with (
-        patch.object(scanner, "_nmap_scan", _fake_nmap),
+        patch.object(scanner, "_scan_target", _fake_scan),
         patch.object(scanner, "_mdns_discover", _fake_mdns),
     ):
         devices = await scanner.run_scan(["10.0.0.0/24"])
 
     assert len(devices) == 1
-    assert devices[0]["discovery_source"] == "nmap"
-    assert devices[0]["hostname"] == "from-nmap"
+    assert devices[0]["discovery_source"] == "tcp"
+    assert devices[0]["hostname"] == "from-tcp"
 
 
 @pytest.mark.asyncio
 async def test_run_scan_cancel_short_circuits() -> None:
     """Cancelling a run_id prevents further hosts from being processed."""
 
-    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
         scanner.request_cancel("test-run")
         return [
             {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []}
         ]
 
-    async def _no_mdns(timeout: float = 4.0) -> list[dict]:
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
         return []
 
     with (
-        patch.object(scanner, "_nmap_scan", _fake_nmap),
+        patch.object(scanner, "_scan_target", _fake_scan),
         patch.object(scanner, "_mdns_discover", _no_mdns),
     ):
         devices = await scanner.run_scan(["10.0.0.0/24"], run_id="test-run")
@@ -129,8 +129,8 @@ async def test_run_scan_cancel_short_circuits() -> None:
 
 
 @pytest.mark.asyncio
-async def test_phase2_falls_back_to_tcp_scanner_when_nmap_binary_missing() -> None:
-    """Without the nmap binary, port scan dispatches to tcp_connect_scan."""
+async def test_phase2_dispatches_to_tcp_connect_scan() -> None:
+    """_phase2_port_scan delegates per-host work to tcp_connect_scan."""
     alive = {
         "10.0.0.5": {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
     }
@@ -139,10 +139,7 @@ async def test_phase2_falls_back_to_tcp_scanner_when_nmap_binary_missing() -> No
         host["open_ports"] = [{"port": 80, "protocol": "tcp", "banner": "nginx"}]
         return host
 
-    with (
-        patch.object(scanner, "_NMAP_AVAILABLE", False),
-        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
-    ):
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp):
         results = await scanner._phase2_port_scan(alive)
 
     assert len(results) == 1
@@ -150,31 +147,26 @@ async def test_phase2_falls_back_to_tcp_scanner_when_nmap_binary_missing() -> No
 
 
 @pytest.mark.asyncio
-async def test_phase2_uses_nmap_when_available() -> None:
-    """With nmap available, port scan dispatches to _nmap_scan_single."""
+async def test_phase2_invokes_on_host_done_callback() -> None:
+    """Per-host callback fires once tcp_connect_scan returns."""
     alive = {
         "10.0.0.5": {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
     }
-    tcp_called = False
+    seen: list[dict] = []
 
     async def _fake_tcp(host: dict, ports: tuple[int, ...]) -> dict:
-        nonlocal tcp_called
-        tcp_called = True
+        host["open_ports"] = [{"port": 22, "protocol": "tcp", "banner": ""}]
         return host
 
-    def _fake_nmap_single(host: dict) -> dict:
-        host["open_ports"] = [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}]
-        return host
+    async def _on_done(host: dict) -> None:
+        seen.append(host)
 
-    with (
-        patch.object(scanner, "_NMAP_AVAILABLE", True),
-        patch.object(scanner, "_nmap_scan_single", _fake_nmap_single),
-        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
-    ):
-        results = await scanner._phase2_port_scan(alive)
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp):
+        await scanner._phase2_port_scan(alive, on_host_done=_on_done)
 
-    assert tcp_called is False
-    assert results[0]["open_ports"] == [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}]
+    assert len(seen) == 1
+    assert seen[0]["ip"] == "10.0.0.5"
+    assert seen[0]["open_ports"][0]["port"] == 22
 
 
 def test_request_cancel_records_run_id() -> None:

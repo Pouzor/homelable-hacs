@@ -48,7 +48,7 @@ async def test_trigger_scan_adds_new_device_to_pending(coord) -> None:  # noqa: 
             "open_ports": [{"port": 80, "protocol": "tcp", "banner": "nginx"}],
             "services": [],
             "suggested_type": "generic",
-            "discovery_source": "nmap",
+            "discovery_source": "tcp",
         }
     ]
     with patch(
@@ -136,7 +136,7 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
                     "open_ports": [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}],
                     "services": [{"port": 22, "name": "ssh"}],
                     "suggested_type": "generic",
-                    "discovery_source": "nmap",
+                    "discovery_source": "tcp",
                 },
             }
         )
@@ -149,7 +149,7 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
                 "open_ports": [{"port": 22, "protocol": "tcp", "banner": "OpenSSH"}],
                 "services": [{"port": 22, "name": "ssh"}],
                 "suggested_type": "generic",
-                "discovery_source": "nmap",
+                "discovery_source": "tcp",
             }
         ]
 
@@ -308,7 +308,7 @@ async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  #
             "open_ports": [],
             "services": [],
             "suggested_type": "generic",
-            "discovery_source": "nmap",
+            "discovery_source": "tcp",
         }
     ]
     with patch(

@@ -1,16 +1,20 @@
-"""Network scanner: ping sweep + ARP cache + nmap service detection + mDNS discovery.
+"""Network scanner: ping sweep + ARP cache + TCP service detection + mDNS discovery.
 
 HA-adapted: pure scan logic, returns device dicts. No DB, no persistence.
 The caller (coordinator) is responsible for filtering, dedup, and storage.
+
+Phase 2 service detection runs through a pure-Python TCP connect scan. We
+previously had an nmap path too, but it proved unreliable on HA OS (nmap
+binary present but python-nmap parsed empty output) so it was removed —
+the TCP path is deterministic and works on every install without root or
+external binaries.
 """
 from __future__ import annotations
 
 import asyncio
 import ipaddress
 import logging
-import os
 import re
-import shutil
 import socket
 import subprocess
 import threading
@@ -69,29 +73,6 @@ _MDNS_SERVICE_TYPES = [
 ]
 
 try:
-    import nmap
-
-    _NMAP_LIB_AVAILABLE = True
-except ImportError:
-    _NMAP_LIB_AVAILABLE = False
-
-# python-nmap is a wrapper that shells out to the `nmap` binary. The lib alone
-# is not enough — HA OS ships the lib (we list it in requirements) but not the
-# binary, which is what causes service detection to silently return nothing.
-_NMAP_BINARY_AVAILABLE = shutil.which("nmap") is not None
-_NMAP_AVAILABLE = _NMAP_LIB_AVAILABLE and _NMAP_BINARY_AVAILABLE
-
-if _NMAP_AVAILABLE:
-    _LOGGER.info("Scanner mode: nmap (binary + python-nmap detected)")
-elif _NMAP_LIB_AVAILABLE and not _NMAP_BINARY_AVAILABLE:
-    _LOGGER.info(
-        "Scanner mode: TCP fallback (python-nmap present but nmap binary "
-        "missing — typical on HA OS)"
-    )
-else:
-    _LOGGER.warning("python-nmap not available — scanner will run in mock mode")
-
-try:
     from zeroconf import ServiceStateChange
     from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
@@ -119,16 +100,6 @@ def _resolve_hostname(ip: str) -> str | None:
         return socket.gethostbyaddr(ip)[0]
     except Exception:
         return None
-
-
-def _extract_os(nm: object, host: str) -> str | None:
-    try:
-        osmatch = nm[host].get("osmatch", [])  # type: ignore[index]
-        if osmatch:
-            return str(osmatch[0]["name"])
-    except Exception:
-        pass
-    return None
 
 
 def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
@@ -255,58 +226,12 @@ async def _ping_sweep(
     return alive
 
 
-def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
-    """Phase 2 (nmap path): per-IP service detection. Blocking — call via to_thread."""
-    ip = host_dict["ip"]
-    if not _NMAP_AVAILABLE:
-        return host_dict
-
-    is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
-    base = "-sS" if is_root else "-sT"
-    scan_args = f"{base} -sV --open -T4 -Pn --host-timeout 60s -p {_EXTRA_PORTS}"
-
-    nm = nmap.PortScanner()
-    try:
-        nm.scan(hosts=ip, arguments=scan_args)
-    except Exception as exc:
-        _LOGGER.warning("[Phase 2] nmap failed for %s (%s)", ip, exc)
-        return host_dict
-
-    if ip not in nm.all_hosts():
-        return host_dict
-
-    open_ports = []
-    for proto in nm[ip].all_protocols():
-        for port, info in nm[ip][proto].items():
-            if info["state"] == "open":
-                banner = (
-                    info.get("product", "") + " " + info.get("version", "")
-                ).strip()
-                open_ports.append(
-                    {"port": port, "protocol": proto, "banner": banner}
-                )
-
-    host_dict["open_ports"] = open_ports
-    if not host_dict.get("mac"):
-        host_dict["mac"] = nm[ip].get("addresses", {}).get("mac")
-    host_dict["os"] = _extract_os(nm, ip)
-    _LOGGER.info(
-        "[trace] nmap_scan_single ip=%s open_ports=%d",
-        ip,
-        len(open_ports),
-    )
-    return host_dict
-
-
 async def _phase2_port_scan(
     alive: dict[str, dict[str, Any]],
     *,
     on_host_done: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Phase 2: per-IP port scan with bounded concurrency (10 hosts at a time).
-
-    Dispatches to nmap when the binary is available, falls back to a pure-Python
-    TCP connect scan otherwise. Both paths produce the same host_dict shape.
+    """Phase 2: per-IP TCP connect scan with bounded concurrency.
 
     `on_host_done` (if provided) is awaited per host as soon as that host's
     scan completes — the caller uses this to stream `device_enriched` events.
@@ -316,18 +241,9 @@ async def _phase2_port_scan(
 
     semaphore = asyncio.Semaphore(10)
 
-    async def _nmap_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
-        async with semaphore:
-            return await asyncio.to_thread(_nmap_scan_single, host_dict)
-
-    async def _tcp_with_sem(host_dict: dict[str, Any]) -> dict[str, Any]:
-        async with semaphore:
-            return await tcp_connect_scan(host_dict, _PORT_LIST)
-
-    runner = _nmap_with_sem if _NMAP_AVAILABLE else _tcp_with_sem
-
     async def _scan_and_notify(host_dict: dict[str, Any]) -> dict[str, Any]:
-        result = await runner(host_dict)
+        async with semaphore:
+            result = await tcp_connect_scan(host_dict, _PORT_LIST)
         if on_host_done is not None:
             try:
                 await on_host_done(result)
@@ -348,19 +264,13 @@ async def _phase2_port_scan(
     return results
 
 
-async def _nmap_scan(
+async def _scan_target(
     target: str,
     *,
     on_phase1_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_phase2_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Two-phase scan for a CIDR range (ping → port scan).
-
-    Falls back to a pure-Python TCP connect scan when the nmap binary is
-    missing. Returns mock data only when python-nmap itself is missing.
-    """
-    if not _NMAP_LIB_AVAILABLE:
-        return _mock_scan(target)
+    """Two-phase scan for a CIDR range (ping → TCP port scan)."""
     alive = await _ping_sweep(target, on_host=on_phase1_host)
     return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
 
@@ -448,22 +358,6 @@ async def _mdns_discover(
     return list(discovered.values())
 
 
-def _mock_scan(target: str) -> list[dict[str, Any]]:
-    """Fake results for dev/test without nmap."""
-    return [
-        {
-            "ip": "192.168.1.99",
-            "hostname": "unknown-device.lan",
-            "mac": "AA:BB:CC:DD:EE:FF",
-            "os": None,
-            "open_ports": [
-                {"port": 80, "protocol": "tcp", "banner": "nginx"},
-                {"port": 22, "protocol": "tcp", "banner": "OpenSSH 9.0"},
-            ],
-        }
-    ]
-
-
 def _enrich(host: dict[str, Any], discovery_source: str) -> dict[str, Any]:
     """Add fingerprint + suggested_type + discovery_source to a host dict."""
     services = fingerprint_ports(host.get("open_ports", []))
@@ -528,7 +422,7 @@ async def run_scan(
                     "ip": ip,
                     "mac": host.get("mac"),
                     "hostname": host.get("hostname"),
-                    "discovery_source": "nmap",
+                    "discovery_source": "tcp",
                 },
             },
         )
@@ -541,13 +435,7 @@ async def run_scan(
         # already gated, but a host could enter via the ARP-only path).
         if ip in exclude_ips:
             return
-        enriched = _enrich(host, discovery_source="nmap")
-        _LOGGER.info(
-            "[trace] emit_phase2 ip=%s open_ports=%d services=%d",
-            ip,
-            len(enriched.get("open_ports", [])),
-            len(enriched.get("services", [])),
-        )
+        enriched = _enrich(host, discovery_source="tcp")
         await _safe_emit(
             on_event,
             {"event": "device_enriched", "device": enriched},
@@ -562,7 +450,7 @@ async def run_scan(
         for cidr in ranges:
             if _is_cancelled(run_id):
                 break
-            hosts = await _nmap_scan(
+            hosts = await _scan_target(
                 cidr,
                 on_phase1_host=_emit_phase1,
                 on_phase2_host=_emit_phase2,
@@ -576,7 +464,7 @@ async def run_scan(
                 # seen_ips was populated by _emit_phase1 above; for hosts that
                 # only came through the ARP fallback (no ping), add now.
                 seen_ips.add(ip)
-                devices.append(_enrich(host, discovery_source="nmap"))
+                devices.append(_enrich(host, discovery_source="tcp"))
 
         if not _is_cancelled(run_id):
             mdns_hosts = await mdns_task
