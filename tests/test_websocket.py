@@ -267,6 +267,30 @@ async def test_status_subscribe_pushes_initial_snapshot(
     assert snapshot["event"] == {"n1": {"status": "online"}}
 
 
+async def test_scan_subscribe_forwards_dispatcher_events(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    """Events fired on SCAN_SIGNAL reach the subscribed WS client."""
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    from custom_components.homelable.const import SCAN_SIGNAL
+
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/scan/subscribe"})
+    ack = await client.receive_json()
+    assert ack["success"] is True
+
+    payload = {
+        "event": "device_discovered",
+        "run_id": "r-1",
+        "device": {"ip": "10.0.0.5", "mac": None, "hostname": None},
+    }
+    async_dispatcher_send(hass, SCAN_SIGNAL, payload)
+    msg = await client.receive_json()
+    assert msg["type"] == "event"
+    assert msg["event"] == payload
+
+
 # ─── Not setup ───────────────────────────────────────────────────────────────
 
 

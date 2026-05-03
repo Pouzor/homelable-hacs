@@ -17,7 +17,7 @@ async def test_run_scan_invalid_cidr_raises() -> None:
 async def test_run_scan_returns_enriched_devices() -> None:
     """Scan output carries services + suggested_type + discovery_source."""
 
-    async def _fake_nmap(target: str) -> list[dict]:
+    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
         return [
             {
                 "ip": "10.0.0.5",
@@ -49,7 +49,7 @@ async def test_run_scan_returns_enriched_devices() -> None:
 async def test_run_scan_excludes_ips() -> None:
     """IPs in exclude_ips are skipped."""
 
-    async def _fake_nmap(target: str) -> list[dict]:
+    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
         return [
             {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
             {"ip": "10.0.0.6", "hostname": None, "mac": None, "os": None, "open_ports": []},
@@ -73,7 +73,7 @@ async def test_run_scan_excludes_ips() -> None:
 async def test_run_scan_dedups_across_sources() -> None:
     """Same IP from nmap + mdns surfaces once (nmap wins)."""
 
-    async def _fake_nmap(target: str) -> list[dict]:
+    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
         return [
             {
                 "ip": "10.0.0.7",
@@ -110,7 +110,7 @@ async def test_run_scan_dedups_across_sources() -> None:
 async def test_run_scan_cancel_short_circuits() -> None:
     """Cancelling a run_id prevents further hosts from being processed."""
 
-    async def _fake_nmap(target: str) -> list[dict]:
+    async def _fake_nmap(target: str, **_kwargs) -> list[dict]:
         scanner.request_cancel("test-run")
         return [
             {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []}

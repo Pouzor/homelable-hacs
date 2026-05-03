@@ -26,6 +26,7 @@ vi.mock('@/api/client', () => ({
     bulkApprove: (...args: unknown[]) => mockBulkApprove(...args),
     bulkHide: (...args: unknown[]) => mockBulkHide(...args),
   },
+  subscribeScan: vi.fn().mockResolvedValue(() => {}),
 }))
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
@@ -349,5 +350,53 @@ describe('PendingDevicesPanel — bulk select', () => {
     fireEvent.click(screen.getByText(/Hide \(2\)/))
     await waitFor(() => expect(mockBulkHide).toHaveBeenCalledWith(['dev-a', 'dev-b']))
     await waitFor(() => expect(screen.queryByText('host-b')).not.toBeInTheDocument())
+  })
+})
+
+describe('PendingDevicesPanel — live scan stream', () => {
+  beforeEach(() => {
+    mockStore()
+    vi.clearAllMocks()
+  })
+
+  async function renderEmpty() {
+    const { scanApi } = await import('@/api/client')
+    vi.mocked(scanApi.pending).mockResolvedValue({ data: [] } as never)
+    render(<Sidebar {...defaultProps} forceView="pending" />)
+    await waitFor(() => expect(screen.getByText('No pending devices')).toBeInTheDocument())
+  }
+
+  it('inserts a discovering placeholder on device_discovered then enriches it on device_enriched', async () => {
+    let handler: ((e: unknown) => void) | null = null
+    const { subscribeScan } = await import('@/api/client')
+    vi.mocked(subscribeScan).mockImplementation(async (cb) => {
+      handler = cb as (e: unknown) => void
+      return () => {}
+    })
+
+    await renderEmpty()
+    await waitFor(() => expect(handler).not.toBeNull())
+
+    handler!({
+      event: 'device_discovered',
+      device: { ip: '10.0.0.42', mac: null, hostname: null, discovery_source: 'nmap' },
+    })
+    await waitFor(() => expect(screen.getByText('10.0.0.42')).toBeInTheDocument())
+
+    handler!({
+      event: 'device_enriched',
+      device: {
+        id: 'pd-real',
+        ip: '10.0.0.42',
+        mac: 'AA:BB:CC:DD:EE:FF',
+        hostname: 'host.lan',
+        os: null,
+        services: [],
+        suggested_type: 'generic',
+        discovery_source: 'nmap',
+        open_ports: [],
+      },
+    })
+    await waitFor(() => expect(screen.getByText('host.lan')).toBeInTheDocument())
   })
 })

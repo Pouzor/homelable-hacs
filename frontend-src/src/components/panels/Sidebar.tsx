@@ -3,7 +3,7 @@ import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { scanApi } from '@/api/client'
+import { scanApi, subscribeScan, type ScanEvent } from '@/api/client'
 import { toast } from 'sonner'
 import { useLatestRelease } from '@/hooks/useLatestRelease'
 
@@ -254,6 +254,67 @@ function PendingDevicesPanel({ onNodeApproved, highlightId }: { onNodeApproved: 
     if (scanEventTs > 0) load()
   }, [scanEventTs, load])
 
+  // Live scan subscription — patch the pending list as events arrive so the
+  // user sees devices appear with just an IP, then fill in services/hostname
+  // as enrichment finishes per host.
+  useEffect(() => {
+    let unsub: (() => void) | null = null
+    let cancelled = false
+    subscribeScan((event: ScanEvent) => {
+      if (event.event === 'device_discovered') {
+        const { ip, mac, hostname } = event.device
+        setDevices((prev) => {
+          if (prev.some((d) => d.ip === ip)) return prev
+          const placeholder: PendingDevice = {
+            id: `discovering:${ip}`,
+            ip,
+            mac,
+            hostname,
+            os: null,
+            services: [],
+            suggested_type: null,
+            status: 'discovering',
+            discovery_source: event.device.discovery_source ?? null,
+            discovered_at: new Date().toISOString(),
+          }
+          return [placeholder, ...prev]
+        })
+      } else if (event.event === 'device_enriched') {
+        const dev = event.device
+        setDevices((prev) => {
+          const idx = prev.findIndex((d) => d.ip === dev.ip)
+          const enriched: PendingDevice = {
+            id: dev.id ?? prev[idx]?.id ?? `pd-${dev.ip}`,
+            ip: dev.ip,
+            mac: dev.mac,
+            hostname: dev.hostname,
+            os: dev.os,
+            services: (dev.services ?? []) as PendingDevice['services'],
+            suggested_type: dev.suggested_type,
+            status: 'pending',
+            discovery_source: dev.discovery_source ?? null,
+            discovered_at: prev[idx]?.discovered_at ?? new Date().toISOString(),
+          }
+          if (idx === -1) return [enriched, ...prev]
+          const next = [...prev]
+          next[idx] = enriched
+          return next
+        })
+      } else if (event.event === 'scan_finished') {
+        // Reconcile with the source of truth — discovering placeholders that
+        // never enriched are cleaned up server-side, so just refetch.
+        load()
+      }
+    }).then((u) => {
+      if (cancelled) u()
+      else unsub = u
+    })
+    return () => {
+      cancelled = true
+      if (unsub) unsub()
+    }
+  }, [load])
+
   useEffect(() => {
     if (!highlightId || loading) return
     highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -371,22 +432,28 @@ function PendingDevicesPanel({ onNodeApproved, highlightId }: { onNodeApproved: 
           const sourceColor = d.discovery_source === 'mdns' ? '#a855f7' : '#8b949e'
           const sourceLabel = d.discovery_source === 'mdns' ? 'mDNS' : d.discovery_source === 'arp' ? 'ARP' : null
           const isHighlighted = d.id === highlightId
+          const isDiscovering = d.status === 'discovering'
           return (
             <button
               key={d.id}
               ref={isHighlighted ? highlightRef : null}
-              onClick={() => setSelected(d)}
-              className={`w-full mb-1.5 p-2 rounded-md text-xs text-left transition-colors border ${isHighlighted ? 'bg-[#2d3748] border-[#e3b341]' : checkedIds.has(d.id) ? 'bg-[#21262d] border-[#00d4ff]/40' : 'bg-[#21262d] border-transparent hover:bg-[#30363d] hover:border-[#30363d]'}`}
+              onClick={() => { if (!isDiscovering) setSelected(d) }}
+              disabled={isDiscovering}
+              className={`w-full mb-1.5 p-2 rounded-md text-xs text-left transition-colors border ${isHighlighted ? 'bg-[#2d3748] border-[#e3b341]' : checkedIds.has(d.id) ? 'bg-[#21262d] border-[#00d4ff]/40' : 'bg-[#21262d] border-transparent hover:bg-[#30363d] hover:border-[#30363d]'} ${isDiscovering ? 'opacity-60 cursor-progress animate-pulse' : ''}`}
             >
               <div className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
                   checked={checkedIds.has(d.id)}
+                  disabled={isDiscovering}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => { e.stopPropagation(); toggleCheck(d.id, e as unknown as React.MouseEvent) }}
-                  className="w-3 h-3 accent-[#00d4ff] cursor-pointer shrink-0"
+                  className="w-3 h-3 accent-[#00d4ff] cursor-pointer shrink-0 disabled:cursor-not-allowed"
                 />
                 <span className="text-foreground truncate font-medium">{title}</span>
+                {isDiscovering && (
+                  <Loader2 size={10} className="animate-spin text-muted-foreground shrink-0" />
+                )}
               </div>
               {showIpBelow && (
                 <div className="font-mono text-muted-foreground truncate pl-3 text-[10px] mt-0.5">{d.ip}</div>

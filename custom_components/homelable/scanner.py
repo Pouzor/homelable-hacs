@@ -14,10 +14,31 @@ import shutil
 import socket
 import subprocess
 import threading
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .fingerprint import fingerprint_ports, suggest_node_type
 from .tcp_scanner import tcp_connect_scan
+
+# Coroutine the caller can pass to receive incremental scan events. Schema:
+#   {"event": "scan_phase", "phase": "discovery"|"enrichment", "total": int}
+#   {"event": "device_discovered", "device": {ip, mac?, hostname?, discovery_source}}
+#   {"event": "device_enriched",   "device": {ip, ...full enriched dict}}
+# Errors raised inside the callback are caught and logged — they never abort
+# the scan.
+ScanEventCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+async def _safe_emit(
+    on_event: ScanEventCallback | None, payload: dict[str, Any]
+) -> None:
+    """Invoke `on_event` swallowing any error so subscribers can't kill a scan."""
+    if on_event is None:
+        return
+    try:
+        await on_event(payload)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("scan event subscriber raised %s: %s", type(exc).__name__, exc)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -168,8 +189,17 @@ def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
         return {}
 
 
-async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
-    """Phase 1: Concurrent ICMP ping sweep + ARP cache."""
+async def _ping_sweep(
+    target: str,
+    *,
+    on_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Phase 1: Concurrent ICMP ping sweep + ARP cache.
+
+    `on_host` (if provided) is awaited per alive host with its bare host_dict
+    once ping + hostname + ARP have settled. Used to stream `device_discovered`
+    events before phase 2 starts.
+    """
     net = ipaddress.ip_network(target, strict=False)
     all_ips = [str(ip) for ip in net.hosts()]
     _LOGGER.info("[Phase 1] Pinging %d hosts in %s", len(all_ips), target)
@@ -199,17 +229,28 @@ async def _ping_sweep(target: str) -> dict[str, dict[str, Any]]:
     for ip in alive_ips:
         mac = arp_cache.get(ip, {}).get("mac")
         hostname = await asyncio.to_thread(_resolve_hostname, ip)
-        alive[ip] = {
+        host_dict = {
             "ip": ip,
             "mac": mac,
             "hostname": hostname,
             "os": None,
             "open_ports": [],
         }
+        alive[ip] = host_dict
+        if on_host is not None:
+            try:
+                await on_host(host_dict)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning("[Phase 1] on_host raised: %s", exc)
 
     for ip, host in arp_cache.items():
         if ip not in alive:
             alive[ip] = host
+            if on_host is not None:
+                try:
+                    await on_host(host)
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.warning("[Phase 1] on_host raised: %s", exc)
 
     return alive
 
@@ -254,11 +295,16 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
 
 async def _phase2_port_scan(
     alive: dict[str, dict[str, Any]],
+    *,
+    on_host_done: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
     """Phase 2: per-IP port scan with bounded concurrency (10 hosts at a time).
 
     Dispatches to nmap when the binary is available, falls back to a pure-Python
     TCP connect scan otherwise. Both paths produce the same host_dict shape.
+
+    `on_host_done` (if provided) is awaited per host as soon as that host's
+    scan completes — the caller uses this to stream `device_enriched` events.
     """
     if not alive:
         return []
@@ -275,8 +321,17 @@ async def _phase2_port_scan(
 
     runner = _nmap_with_sem if _NMAP_AVAILABLE else _tcp_with_sem
 
+    async def _scan_and_notify(host_dict: dict[str, Any]) -> dict[str, Any]:
+        result = await runner(host_dict)
+        if on_host_done is not None:
+            try:
+                await on_host_done(result)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning("[Phase 2] on_host_done raised: %s", exc)
+        return result
+
     raw = await asyncio.gather(
-        *[runner(h) for h in alive.values()],
+        *[_scan_and_notify(h) for h in alive.values()],
         return_exceptions=True,
     )
     results: list[dict[str, Any]] = []
@@ -288,7 +343,12 @@ async def _phase2_port_scan(
     return results
 
 
-async def _nmap_scan(target: str) -> list[dict[str, Any]]:
+async def _nmap_scan(
+    target: str,
+    *,
+    on_phase1_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_phase2_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+) -> list[dict[str, Any]]:
     """Two-phase scan for a CIDR range (ping → port scan).
 
     Falls back to a pure-Python TCP connect scan when the nmap binary is
@@ -296,8 +356,8 @@ async def _nmap_scan(target: str) -> list[dict[str, Any]]:
     """
     if not _NMAP_LIB_AVAILABLE:
         return _mock_scan(target)
-    alive = await _ping_sweep(target)
-    return await _phase2_port_scan(alive)
+    alive = await _ping_sweep(target, on_host=on_phase1_host)
+    return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
 
 
 async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
@@ -389,6 +449,7 @@ async def run_scan(
     run_id: str | None = None,
     *,
     exclude_ips: set[str] | None = None,
+    on_event: ScanEventCallback | None = None,
 ) -> list[dict[str, Any]]:
     """Execute a scan for the given CIDR ranges.
 
@@ -402,6 +463,9 @@ async def run_scan(
         ranges: list of CIDR strings (e.g., ["192.168.1.0/24"]).
         run_id: optional cancellation token; pair with `request_cancel(run_id)`.
         exclude_ips: IPs to skip (e.g., already on canvas or hidden by user).
+        on_event: optional async callback invoked with progressive scan events
+            (`device_discovered`, `device_enriched`, `scan_phase`). Subscribers
+            crashing won't abort the scan.
 
     Raises:
         ValueError: if any range is not a valid CIDR.
@@ -416,20 +480,62 @@ async def run_scan(
     devices: list[dict[str, Any]] = []
     seen_ips: set[str] = set()
 
+    async def _emit_phase1(host: dict[str, Any]) -> None:
+        ip = host.get("ip")
+        if not ip or ip in exclude_ips or ip in seen_ips:
+            return
+        seen_ips.add(ip)
+        await _safe_emit(
+            on_event,
+            {
+                "event": "device_discovered",
+                "device": {
+                    "ip": ip,
+                    "mac": host.get("mac"),
+                    "hostname": host.get("hostname"),
+                    "discovery_source": "nmap",
+                },
+            },
+        )
+
+    async def _emit_phase2(host: dict[str, Any]) -> None:
+        ip = host.get("ip")
+        if not ip:
+            return
+        # Honor exclude_ips even on the enrichment side (defensive — phase 1
+        # already gated, but a host could enter via the ARP-only path).
+        if ip in exclude_ips:
+            return
+        await _safe_emit(
+            on_event,
+            {
+                "event": "device_enriched",
+                "device": _enrich(host, discovery_source="nmap"),
+            },
+        )
+
     mdns_task: asyncio.Task[list[dict[str, Any]]] | None = None
     try:
         mdns_task = asyncio.create_task(_mdns_discover())
 
+        await _safe_emit(on_event, {"event": "scan_phase", "phase": "discovery"})
+
         for cidr in ranges:
             if _is_cancelled(run_id):
                 break
-            hosts = await _nmap_scan(cidr)
+            hosts = await _nmap_scan(
+                cidr,
+                on_phase1_host=_emit_phase1,
+                on_phase2_host=_emit_phase2,
+            )
             for host in hosts:
                 if _is_cancelled(run_id):
                     break
                 ip = host["ip"]
-                if ip in exclude_ips or ip in seen_ips:
+                if ip in exclude_ips:
                     continue
+                # seen_ips was populated by _emit_phase1 above; for hosts that
+                # only came through the ARP fallback (no ping), add now.
                 seen_ips.add(ip)
                 devices.append(_enrich(host, discovery_source="nmap"))
 
@@ -442,9 +548,36 @@ async def run_scan(
                 if ip in exclude_ips or ip in seen_ips:
                     continue
                 seen_ips.add(ip)
-                devices.append(_enrich(host, discovery_source="mdns"))
+                enriched = _enrich(host, discovery_source="mdns")
+                devices.append(enriched)
+                # mDNS is single-shot: emit discovery + enrichment together so
+                # the UI gets a fully populated card in one frame.
+                await _safe_emit(
+                    on_event,
+                    {
+                        "event": "device_discovered",
+                        "device": {
+                            "ip": ip,
+                            "mac": host.get("mac"),
+                            "hostname": host.get("hostname"),
+                            "discovery_source": "mdns",
+                        },
+                    },
+                )
+                await _safe_emit(
+                    on_event, {"event": "device_enriched", "device": enriched}
+                )
         elif mdns_task and not mdns_task.done():
             mdns_task.cancel()
+
+        await _safe_emit(
+            on_event,
+            {
+                "event": "scan_finished",
+                "devices_found": len(devices),
+                "cancelled": _is_cancelled(run_id),
+            },
+        )
 
         return devices
     finally:
