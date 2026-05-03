@@ -88,7 +88,7 @@ async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: 
 
     captured: dict = {}
 
-    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None, **_kw):
         captured["exclude"] = exclude_ips
         return []
 
@@ -115,7 +115,7 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
         coord.hass, SCAN_SIGNAL, lambda p: captured_events.append(p)
     )
 
-    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None, **_kw):
         await on_event(
             {
                 "event": "device_discovered",
@@ -182,7 +182,7 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
 @pytest.mark.asyncio
 async def test_streaming_discovering_entry_dropped_when_never_enriched(coord) -> None:  # noqa: ANN001
     """If a host was discovered but never enriched (e.g. cancelled), drop it at scan end."""
-    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None):
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None, **_kw):
         await on_event(
             {
                 "event": "device_discovered",

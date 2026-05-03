@@ -402,6 +402,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 run_id=run_id,
                 exclude_ips=exclude,
                 on_event=_on_event,
+                hass=self.hass,
             )
         except Exception as exc:  # noqa: BLE001 — record any failure, then exit
             _LOGGER.exception("Scan %s failed", run_id)
