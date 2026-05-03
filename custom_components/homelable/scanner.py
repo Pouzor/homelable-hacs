@@ -290,6 +290,11 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     if not host_dict.get("mac"):
         host_dict["mac"] = nm[ip].get("addresses", {}).get("mac")
     host_dict["os"] = _extract_os(nm, ip)
+    _LOGGER.info(
+        "[trace] nmap_scan_single ip=%s open_ports=%d",
+        ip,
+        len(open_ports),
+    )
     return host_dict
 
 
@@ -360,8 +365,15 @@ async def _nmap_scan(
     return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
 
 
-async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
-    """Passive mDNS sweep for IoT device types."""
+async def _mdns_discover(
+    hass: Any | None = None, timeout: float = 4.0
+) -> list[dict[str, Any]]:
+    """Passive mDNS sweep for IoT device types.
+
+    Uses Home Assistant's shared Zeroconf instance when `hass` is provided —
+    HA logs a warning otherwise, and creating a second Zeroconf binds another
+    UDP listener on 5353 which can interfere with HA's own discovery.
+    """
     if not _ZEROCONF_AVAILABLE:
         return []
 
@@ -378,38 +390,60 @@ async def _mdns_discover(timeout: float = 4.0) -> list[dict[str, Any]]:
 
     discovered: dict[str, dict[str, Any]] = {}
 
+    # Acquire a Zeroconf instance: prefer HA's shared one, fall back to a
+    # fresh one when called outside HA (tests / standalone smoke).
+    azc: Any = None
+    owned = False
     try:
-        async with AsyncZeroconf() as azc:
-            browser = AsyncServiceBrowser(
-                azc.zeroconf, _MDNS_SERVICE_TYPES, handlers=[_on_change]
-            )
+        if hass is not None:
+            try:
+                from homeassistant.components import zeroconf as ha_zeroconf
+
+                azc = await ha_zeroconf.async_get_async_instance(hass)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Shared zeroconf unavailable, creating own: %s", exc)
+        if azc is None:
+            azc = AsyncZeroconf()
+            owned = True
+
+        browser = AsyncServiceBrowser(
+            azc.zeroconf, _MDNS_SERVICE_TYPES, handlers=[_on_change]
+        )
+        try:
             await asyncio.sleep(timeout)
+        finally:
             await browser.async_cancel()
 
-            for service_type, name in found_services:
-                try:
-                    info = AsyncServiceInfo(service_type, name)
-                    await info.async_request(azc.zeroconf, 3000)
-                    if not info.addresses:
-                        continue
-                    ip = str(ipaddress.IPv4Address(info.addresses[0]))
-                    if ip in discovered:
-                        continue
-                    discovered[ip] = {
-                        "ip": ip,
-                        "hostname": info.server,
-                        "mac": None,
-                        "os": None,
-                        "open_ports": (
-                            [{"port": info.port, "protocol": "tcp", "banner": ""}]
-                            if info.port
-                            else []
-                        ),
-                    }
-                except Exception as exc:
-                    _LOGGER.debug("mDNS resolve failed for %s: %s", name, exc)
+        for service_type, name in found_services:
+            try:
+                info = AsyncServiceInfo(service_type, name)
+                await info.async_request(azc.zeroconf, 3000)
+                if not info.addresses:
+                    continue
+                ip = str(ipaddress.IPv4Address(info.addresses[0]))
+                if ip in discovered:
+                    continue
+                discovered[ip] = {
+                    "ip": ip,
+                    "hostname": info.server,
+                    "mac": None,
+                    "os": None,
+                    "open_ports": (
+                        [{"port": info.port, "protocol": "tcp", "banner": ""}]
+                        if info.port
+                        else []
+                    ),
+                }
+            except Exception as exc:
+                _LOGGER.debug("mDNS resolve failed for %s: %s", name, exc)
     except Exception as exc:
         _LOGGER.warning("mDNS discovery error: %s", exc)
+    finally:
+        if owned and azc is not None:
+            try:
+                await azc.async_close()
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("AsyncZeroconf close failed: %s", exc)
 
     return list(discovered.values())
 
@@ -450,6 +484,7 @@ async def run_scan(
     *,
     exclude_ips: set[str] | None = None,
     on_event: ScanEventCallback | None = None,
+    hass: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Execute a scan for the given CIDR ranges.
 
@@ -506,17 +541,21 @@ async def run_scan(
         # already gated, but a host could enter via the ARP-only path).
         if ip in exclude_ips:
             return
+        enriched = _enrich(host, discovery_source="nmap")
+        _LOGGER.info(
+            "[trace] emit_phase2 ip=%s open_ports=%d services=%d",
+            ip,
+            len(enriched.get("open_ports", [])),
+            len(enriched.get("services", [])),
+        )
         await _safe_emit(
             on_event,
-            {
-                "event": "device_enriched",
-                "device": _enrich(host, discovery_source="nmap"),
-            },
+            {"event": "device_enriched", "device": enriched},
         )
 
     mdns_task: asyncio.Task[list[dict[str, Any]]] | None = None
     try:
-        mdns_task = asyncio.create_task(_mdns_discover())
+        mdns_task = asyncio.create_task(_mdns_discover(hass))
 
         await _safe_emit(on_event, {"event": "scan_phase", "phase": "discovery"})
 
