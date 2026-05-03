@@ -382,6 +382,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
             )
             if stored is not None:
                 out["device"] = {**device, "id": stored["id"]}
+                _LOGGER.info(
+                    "[trace] handle_scan_event enriched ip=%s stored_services=%d status=%s",
+                    ip,
+                    len(stored.get("services", [])),
+                    stored.get("status"),
+                )
 
         async_dispatcher_send(self.hass, SCAN_SIGNAL, out)
 
@@ -470,9 +476,28 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         # Promote any leftover `discovering` entries from this scan that we
         # have data for, and drop ones that never enriched (cancelled mid-run).
+        dropped = 0
         for d in list(pending["devices"]):
             if d.get("status") == "discovering" and d["ip"] not in scanned_ips:
                 pending["devices"].remove(d)
+                dropped += 1
+
+        pending_count = sum(
+            1 for d in pending["devices"] if d.get("status") == "pending"
+        )
+        services_total = sum(
+            len(d.get("services", []))
+            for d in pending["devices"]
+            if d.get("status") == "pending"
+        )
+        _LOGGER.info(
+            "[trace] scan_done devices_returned=%d pending_in_store=%d "
+            "services_total=%d discovering_dropped=%d",
+            len(devices),
+            pending_count,
+            services_total,
+            dropped,
+        )
 
         await self._save_pending()
         await self._record_run(

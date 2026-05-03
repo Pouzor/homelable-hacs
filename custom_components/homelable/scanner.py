@@ -290,6 +290,11 @@ def _nmap_scan_single(host_dict: dict[str, Any]) -> dict[str, Any]:
     if not host_dict.get("mac"):
         host_dict["mac"] = nm[ip].get("addresses", {}).get("mac")
     host_dict["os"] = _extract_os(nm, ip)
+    _LOGGER.info(
+        "[trace] nmap_scan_single ip=%s open_ports=%d",
+        ip,
+        len(open_ports),
+    )
     return host_dict
 
 
@@ -536,12 +541,16 @@ async def run_scan(
         # already gated, but a host could enter via the ARP-only path).
         if ip in exclude_ips:
             return
+        enriched = _enrich(host, discovery_source="nmap")
+        _LOGGER.info(
+            "[trace] emit_phase2 ip=%s open_ports=%d services=%d",
+            ip,
+            len(enriched.get("open_ports", [])),
+            len(enriched.get("services", [])),
+        )
         await _safe_emit(
             on_event,
-            {
-                "event": "device_enriched",
-                "device": _enrich(host, discovery_source="nmap"),
-            },
+            {"event": "device_enriched", "device": enriched},
         )
 
     mdns_task: asyncio.Task[list[dict[str, Any]]] | None = None

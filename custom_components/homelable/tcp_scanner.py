@@ -177,4 +177,9 @@ async def tcp_connect_scan(
 
     results = await asyncio.gather(*[_bound(p) for p in ports])
     host["open_ports"] = [r for r in results if r is not None]
+    _LOGGER.info(
+        "[trace] tcp_connect_scan ip=%s open_ports=%d",
+        ip,
+        len(host["open_ports"]),
+    )
     return host
