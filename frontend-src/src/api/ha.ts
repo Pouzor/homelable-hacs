@@ -106,9 +106,6 @@ export const scanApi = {
     const result = await wsCall<{ ranges: string[] }>('homelable/scan/get_config')
     return toAxiosLike(result)
   },
-  // Save not yet wired — ranges still live in the HA options flow. Accept the
-  // call so the modal can proceed; the trigger uses the entry-configured ranges.
-  saveConfig: async (data: { ranges: string[] }) => toAxiosLike(data),
 }
 
 // ─── Settings (stubbed: HA owns config via options flow) ────────────────────
