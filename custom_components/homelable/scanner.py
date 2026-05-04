@@ -270,9 +270,43 @@ async def _scan_target(
     on_phase1_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_phase2_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Two-phase scan for a CIDR range (ping → TCP port scan)."""
+    """Two-phase scan for a CIDR range (ping → TCP port scan).
+
+    If ping + ARP yield zero hosts (foreign subnet, unprivileged container with
+    no CAP_NET_RAW, ICMP-blocked LAN), fall back to a full TCP sweep across
+    every IP in the CIDR. Slower but catches cases where ping is the blocker.
+    """
     alive = await _ping_sweep(target, on_host=on_phase1_host)
-    return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
+    if alive:
+        return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
+
+    _LOGGER.info(
+        "[Phase 1] no hosts via ping/ARP for %s — full TCP sweep fallback", target
+    )
+    net = ipaddress.ip_network(target, strict=False)
+    full_alive: dict[str, dict[str, Any]] = {
+        str(ip): {
+            "ip": str(ip),
+            "mac": None,
+            "hostname": None,
+            "os": None,
+            "open_ports": [],
+        }
+        for ip in net.hosts()
+    }
+
+    async def _filtered_phase2(host: dict[str, Any]) -> None:
+        if not host.get("open_ports"):
+            return
+        if host.get("hostname") is None:
+            host["hostname"] = await asyncio.to_thread(_resolve_hostname, host["ip"])
+        if on_phase1_host is not None:
+            await on_phase1_host(host)
+        if on_phase2_host is not None:
+            await on_phase2_host(host)
+
+    results = await _phase2_port_scan(full_alive, on_host_done=_filtered_phase2)
+    return [h for h in results if h.get("open_ports")]
 
 
 async def _mdns_discover(

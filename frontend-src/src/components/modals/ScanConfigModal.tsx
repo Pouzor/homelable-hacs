@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Settings } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,22 +14,23 @@ interface ScanConfigModalProps {
 }
 
 export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalProps) {
-  const [ranges, setRanges] = useState<string[]>([''])
+  const [ranges, setRanges] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!open) return
     scanApi.getConfig()
-      .then((res) => setRanges(res.data.ranges.length > 0 ? res.data.ranges : ['']))
-      .catch(() => {/* use defaults */})
+      .then((res) => setRanges(res.data.ranges))
+      .catch(() => setRanges([]))
   }, [open])
 
   const handleScanNow = async () => {
-    const cleaned = ranges.map((r) => r.trim()).filter(Boolean)
-    if (cleaned.length === 0) { toast.error('Add at least one IP range'); return }
+    if (ranges.length === 0) {
+      toast.error('No IP ranges configured — set them in the integration options')
+      return
+    }
     setSaving(true)
     try {
-      await scanApi.saveConfig({ ranges: cleaned })
       const res = await scanApi.trigger()
       if (res.data?.status === 'already_running') {
         toast.message('A scan is already running')
@@ -53,45 +54,31 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* IP Ranges */}
           <div className="space-y-2">
             <Label className="text-sm text-muted-foreground">IP Ranges (CIDR)</Label>
-            {ranges.map((r, i) => (
-              <div key={i} className="flex gap-2">
+            {ranges.length === 0 ? (
+              <p className="text-sm text-muted-foreground italic">
+                No ranges configured.
+              </p>
+            ) : (
+              ranges.map((r, i) => (
                 <Input
+                  key={i}
                   value={r}
-                  onChange={(e) => {
-                    const next = [...ranges]
-                    next[i] = e.target.value
-                    setRanges(next)
-                  }}
-                  placeholder="192.168.1.0/24"
+                  readOnly
+                  disabled
                   className="font-mono text-sm bg-[#0d1117] border-border"
                 />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="shrink-0 text-muted-foreground hover:text-[#f85149]"
-                  onClick={() => setRanges(ranges.filter((_, j) => j !== i))}
-                  disabled={ranges.length === 1}
-                >
-                  <Trash2 size={14} />
-                </Button>
-              </div>
-            ))}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={() => setRanges([...ranges, ''])}
-            >
-              <Plus size={13} /> Add range
-            </Button>
+              ))
+            )}
           </div>
 
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-            <Settings size={11} />
-            Status check interval can be configured in the sidebar Settings.
+          <p className="text-xs text-muted-foreground flex items-start gap-1.5">
+            <Settings size={11} className="mt-0.5 shrink-0" />
+            <span>
+              Ranges are managed in <strong>Settings → Devices &amp; services → Homelable → Configure</strong>.
+              Status check interval is configured there too.
+            </span>
           </p>
         </div>
 
@@ -99,7 +86,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             onClick={handleScanNow}
-            disabled={saving}
+            disabled={saving || ranges.length === 0}
             style={{ background: '#00d4ff', color: '#0d1117' }}
           >
             Scan Now
