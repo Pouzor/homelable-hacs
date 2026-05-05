@@ -241,9 +241,14 @@ export default function App() {
     setEditNodeId(id)
   }, [])
 
-  const handleUpdateNode = useCallback((data: Partial<NodeData>) => {
+  const handleUpdateNode = useCallback((data: Partial<NodeData> & { _delete?: boolean }) => {
     if (!editNodeId) return
     snapshotHistory()
+    if (data._delete) {
+      deleteNode(editNodeId)
+      setEditNodeId(null)
+      return
+    }
     const existingNode = nodes.find((n) => n.id === editNodeId)
     updateNode(editNodeId, data)
     // If container_mode changed, apply structural changes (children parentId, node dimensions)
@@ -276,7 +281,7 @@ export default function App() {
       }
     }
     setEditNodeId(null)
-  }, [editNodeId, updateNode, setProxmoxContainerMode, nodes, edges, deleteEdge, onConnect, snapshotHistory])
+  }, [editNodeId, updateNode, deleteNode, setProxmoxContainerMode, nodes, edges, deleteEdge, onConnect, snapshotHistory])
 
   const handleAutoLayout = useCallback(() => {
     const laid = applyDagreLayout(nodes, edges)
