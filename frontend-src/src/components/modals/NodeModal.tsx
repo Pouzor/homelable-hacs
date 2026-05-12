@@ -75,8 +75,11 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
     setLabelError(false)
     const selectedType = (form.type ?? 'generic') as NodeType
     const canUseContainerMode = CONTAINER_MODE_TYPES.includes(selectedType)
+    const isZigbee = selectedType.startsWith('zigbee_')
     onSubmit({
       ...form,
+      check_method: isZigbee ? 'none' : form.check_method,
+      check_target: isZigbee ? undefined : form.check_target,
       container_mode: canUseContainerMode ? !!form.container_mode : false,
     })
     onClose()
@@ -243,31 +246,34 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               <span className="text-[10px] text-muted-foreground/50">comma-separated</span>
             </div>
 
-            {/* Check method */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Check Method</Label>
-              <Select value={form.check_method ?? 'ping'} onValueChange={(v) => set('check_method', v as CheckMethod)}>
-                <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Check method selector">
-                  <SelectValue>{CHECK_METHOD_LABELS[(form.check_method ?? 'ping') as CheckMethod]}</SelectValue>
-                </SelectTrigger>
-                <SelectContent className="bg-[#21262d] border-[#30363d]">
-                  {CHECK_METHODS.map((m) => (
-                    <SelectItem key={m} value={m} className="text-sm">{CHECK_METHOD_LABELS[m]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {/* Check method — hidden for Zigbee (one-shot import, no live check) */}
+            {!(form.type ?? '').toString().startsWith('zigbee_') && (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Check Method</Label>
+                  <Select value={form.check_method ?? 'ping'} onValueChange={(v) => set('check_method', v as CheckMethod)}>
+                    <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Check method selector">
+                      <SelectValue>{CHECK_METHOD_LABELS[(form.check_method ?? 'ping') as CheckMethod]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#21262d] border-[#30363d]">
+                      {CHECK_METHODS.map((m) => (
+                        <SelectItem key={m} value={m} className="text-sm">{CHECK_METHOD_LABELS[m]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            {/* Check target */}
-            <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Check Target</Label>
-              <Input
-                value={form.check_target ?? ''}
-                onChange={(e) => set('check_target', e.target.value)}
-                placeholder="http://..."
-                className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
-              />
-            </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Check Target</Label>
+                  <Input
+                    value={form.check_target ?? ''}
+                    onChange={(e) => set('check_target', e.target.value)}
+                    placeholder="http://..."
+                    className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
+                  />
+                </div>
+              </>
+            )}
 
             {/* Parent container */}
             {form.type !== 'groupRect' && form.type !== 'group' && filteredParentNodes.length > 0 && (

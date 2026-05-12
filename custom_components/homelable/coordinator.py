@@ -90,7 +90,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
             # The frontend serializes nodes flat (top-level ip/hostname/...);
             # legacy/test data may put them under `data`. Read both.
             data = node.get("data") or {}
-            check = node.get("check_method") or data.get("check_method") or "ping"
+            node_type = node.get("type") or data.get("type") or ""
+            if node_type.startswith("zigbee_"):
+                # Zigbee devices are one-shot imports from Z2M; no live check.
+                check = "none"
+            else:
+                check = node.get("check_method") or data.get("check_method") or "ping"
             target = (
                 node.get("check_target")
                 or data.get("target")
@@ -263,6 +268,13 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         overrides = node_overrides or {}
         node_type = overrides.get("type") or device.get("suggested_type") or "generic"
+        # Zigbee devices are imported one-shot from Z2M; no live status check
+        # is possible, so default check_method to "none" (status_checker treats
+        # "none" as always-online).
+        is_zigbee = (
+            device.get("source") == "zigbee" or node_type.startswith("zigbee_")
+        )
+        default_check = "none" if is_zigbee else "ping"
         # Zigbee devices carry their own canonical fields (ieee_address, model,
         # vendor, lqi, parent_id) under data_extras; merge them so the node on
         # the canvas has everything the zigbee node component renders.
@@ -283,7 +295,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "hostname": device.get("hostname"),
                 "os": device.get("os"),
                 "services": device.get("services", []),
-                "check_method": overrides.get("check_method", "ping"),
+                "check_method": overrides.get("check_method", default_check),
                 **data_extras,
                 **overrides.get("data", {}),
             },
