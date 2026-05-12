@@ -18,10 +18,16 @@ MAX_SCAN_RUNS = 50
 CONF_SCAN_RANGES = "scan_ranges"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_STATUS_INTERVAL = "status_interval"
+CONF_ZIGBEE_BASE_TOPIC = "zigbee_base_topic"
 
 DEFAULT_SCAN_RANGES = ["192.168.1.0/24"]
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
 DEFAULT_STATUS_INTERVAL = 60   # seconds
+DEFAULT_ZIGBEE_BASE_TOPIC = "zigbee2mqtt"
+
+# Zigbee networkmap timeouts (seconds). Large meshes (>50 devices) routinely
+# take 2-4 minutes; coordinator polls every router for routing tables.
+ZIGBEE_NETWORKMAP_TIMEOUT = 300.0
 
 # Dispatcher signal for live scan events (device_discovered / device_enriched
 # / scan_phase / scan_finished / scan_cancelled). Subscribers receive a single

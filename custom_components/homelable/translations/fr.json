@@ -7,7 +7,8 @@
         "data": {
           "scan_ranges": "Plages réseau (CIDR, séparées par des virgules)",
           "scan_interval": "Intervalle de scan (secondes)",
-          "status_interval": "Intervalle de vérification d'état (secondes)"
+          "status_interval": "Intervalle de vérification d'état (secondes)",
+          "zigbee_base_topic": "Topic de base Zigbee2MQTT"
         }
       }
     },
@@ -22,7 +23,8 @@
         "data": {
           "scan_ranges": "Plages réseau (CIDR, séparées par des virgules)",
           "scan_interval": "Intervalle de scan (secondes)",
-          "status_interval": "Intervalle de vérification d'état (secondes)"
+          "status_interval": "Intervalle de vérification d'état (secondes)",
+          "zigbee_base_topic": "Topic de base Zigbee2MQTT"
         }
       }
     }

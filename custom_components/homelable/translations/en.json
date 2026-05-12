@@ -7,7 +7,8 @@
         "data": {
           "scan_ranges": "Network ranges (CIDR, comma-separated)",
           "scan_interval": "Scan interval (seconds)",
-          "status_interval": "Status check interval (seconds)"
+          "status_interval": "Status check interval (seconds)",
+          "zigbee_base_topic": "Zigbee2MQTT base topic"
         }
       }
     },
@@ -22,7 +23,8 @@
         "data": {
           "scan_ranges": "Network ranges (CIDR, comma-separated)",
           "scan_interval": "Scan interval (seconds)",
-          "status_interval": "Status check interval (seconds)"
+          "status_interval": "Status check interval (seconds)",
+          "zigbee_base_topic": "Zigbee2MQTT base topic"
         }
       }
     }

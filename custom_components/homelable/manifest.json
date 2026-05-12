@@ -1,7 +1,7 @@
 {
   "domain": "homelable",
   "name": "Homelable",
-  "after_dependencies": ["zeroconf"],
+  "after_dependencies": ["zeroconf", "mqtt"],
   "codeowners": ["@Pouzor"],
   "config_flow": true,
   "dependencies": [
@@ -14,5 +14,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Pouzor/homelable-hacs/issues",
   "requirements": [],
-  "version": "0.2.1"
+  "version": "0.4.0"
 }

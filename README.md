@@ -30,6 +30,9 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 - **Rich modeling**: 11 node types (router, switch, server, Proxmox, VM, LXC,
   NAS, IoT, access point, …) and 5 edge types (ethernet, Wi-Fi, IoT, VLAN,
   virtual).
+- **Zigbee2MQTT import**: fetch your Zigbee mesh through HA's MQTT integration
+  and add coordinator / routers / end devices to the canvas. No extra broker
+  config — uses the broker HA already talks to.
 
 ---
 
