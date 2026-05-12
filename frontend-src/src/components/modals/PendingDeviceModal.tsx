@@ -12,7 +12,7 @@ interface Service {
 
 export interface PendingDevice {
   id: string
-  ip: string
+  ip: string | null
   mac: string | null
   hostname: string | null
   os: string | null
@@ -20,6 +20,13 @@ export interface PendingDevice {
   suggested_type: string | null
   status: string
   discovery_source: string | null
+  source?: 'scan' | 'zigbee' | null
+  ieee_address?: string | null
+  friendly_name?: string | null
+  device_subtype?: string | null
+  model?: string | null
+  vendor?: string | null
+  lqi?: number | null
   discovered_at: string
 }
 

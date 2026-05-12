@@ -47,6 +47,17 @@ vi.mock('@/components/modals/PendingDeviceModal', () => ({
   PendingDeviceModal: () => null,
 }))
 
+// Replace heavy modal subtrees with stubs that just announce open/closed state.
+vi.mock('@/components/modals/PendingDevicesModal', () => ({
+  PendingDevicesModal: ({ open, initialStatus }: { open: boolean; initialStatus?: string }) =>
+    open ? <div data-testid="pending-devices-modal" data-initial-status={initialStatus ?? 'pending'} /> : null,
+}))
+
+vi.mock('@/components/zigbee/ZigbeeImportModal', () => ({
+  ZigbeeImportModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="zigbee-import-modal" /> : null,
+}))
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const makeNode = (id: string, status: NodeData['status'], type: NodeData['type'] = 'server'): Node<NodeData> => ({
@@ -236,16 +247,24 @@ describe('Sidebar', () => {
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
-  it('shows Pending panel when Pending Devices nav item is clicked', async () => {
+  it('opens PendingDevicesModal with status=pending when Pending Devices nav item is clicked', async () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Pending Devices'))
-    await waitFor(() => expect(screen.getByText('No pending devices')).toBeInTheDocument())
+    await waitFor(() => {
+      const modal = screen.getByTestId('pending-devices-modal')
+      expect(modal).toBeInTheDocument()
+      expect(modal).toHaveAttribute('data-initial-status', 'pending')
+    })
   })
 
-  it('shows Hidden panel when Hidden Devices nav item is clicked', async () => {
+  it('opens PendingDevicesModal with status=hidden when Hidden Devices nav item is clicked', async () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Hidden Devices'))
-    await waitFor(() => expect(screen.getByText('No hidden devices')).toBeInTheDocument())
+    await waitFor(() => {
+      const modal = screen.getByTestId('pending-devices-modal')
+      expect(modal).toBeInTheDocument()
+      expect(modal).toHaveAttribute('data-initial-status', 'hidden')
+    })
   })
 
   it('shows History panel when Scan History nav item is clicked', async () => {
@@ -254,149 +273,15 @@ describe('Sidebar', () => {
     await waitFor(() => expect(screen.getByText('No scans yet')).toBeInTheDocument())
   })
 
+  it('opens ZigbeeImportModal when Import Zigbee is clicked', async () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Import Zigbee'))
+    await waitFor(() => expect(screen.getByTestId('zigbee-import-modal')).toBeInTheDocument())
+  })
+
 })
 
-// ── PendingDevicesPanel — bulk select ─────────────────────────────────────────
-
-const DEVICE_A = {
-  id: 'dev-a',
-  ip: '192.168.1.10',
-  hostname: 'host-a',
-  mac: null,
-  os: null,
-  services: [],
-  suggested_type: 'generic',
-  status: 'pending',
-  discovery_source: 'arp',
-}
-
-const DEVICE_B = {
-  id: 'dev-b',
-  ip: '192.168.1.11',
-  hostname: 'host-b',
-  mac: null,
-  os: null,
-  services: [],
-  suggested_type: 'generic',
-  status: 'pending',
-  discovery_source: 'arp',
-}
-
-describe('PendingDevicesPanel — bulk select', () => {
-  beforeEach(() => {
-    mockStore()
-    vi.clearAllMocks()
-    mockBulkApprove.mockResolvedValue({
-      data: { approved: 2, node_ids: ['n1', 'n2'], device_ids: ['dev-a', 'dev-b'], skipped: 0 },
-    })
-    mockBulkHide.mockResolvedValue({ data: { hidden: 2, skipped: 0 } })
-  })
-
-  async function renderWithDevices() {
-    const { scanApi } = await import('@/api/client')
-    vi.mocked(scanApi.pending).mockResolvedValue({ data: [DEVICE_A, DEVICE_B] } as never)
-    render(<Sidebar {...defaultProps} forceView="pending" />)
-    await waitFor(() => expect(screen.getByText('host-a')).toBeInTheDocument())
-  }
-
-  it('renders checkboxes for each device', async () => {
-    await renderWithDevices()
-    const checkboxes = screen.getAllByRole('checkbox')
-    // select-all + 2 device checkboxes
-    expect(checkboxes.length).toBe(3)
-  })
-
-  it('shows bulk action bar when a device is checked', async () => {
-    await renderWithDevices()
-    const [, firstDeviceCheckbox] = screen.getAllByRole('checkbox')
-    fireEvent.click(firstDeviceCheckbox)
-    await waitFor(() => expect(screen.getByText(/Approve \(1\)/)).toBeInTheDocument())
-    expect(screen.getByText(/Hide \(1\)/)).toBeInTheDocument()
-  })
-
-  it('hides bulk action bar when no device is checked', async () => {
-    await renderWithDevices()
-    expect(screen.queryByText(/Approve \(/)).not.toBeInTheDocument()
-  })
-
-  it('select-all checks all devices', async () => {
-    await renderWithDevices()
-    const [selectAll] = screen.getAllByRole('checkbox')
-    fireEvent.click(selectAll)
-    await waitFor(() => expect(screen.getByText(/Approve \(2\)/)).toBeInTheDocument())
-  })
-
-  it('select-all unchecks all when all are selected', async () => {
-    await renderWithDevices()
-    const [selectAll] = screen.getAllByRole('checkbox')
-    fireEvent.click(selectAll) // select all
-    fireEvent.click(selectAll) // deselect all
-    await waitFor(() => expect(screen.queryByText(/Approve \(/)).not.toBeInTheDocument())
-  })
-
-  it('calls bulkApprove with checked ids and removes devices from list', async () => {
-    await renderWithDevices()
-    const [selectAll] = screen.getAllByRole('checkbox')
-    fireEvent.click(selectAll)
-    fireEvent.click(screen.getByText(/Approve \(2\)/))
-    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalledWith(['dev-a', 'dev-b']))
-    await waitFor(() => expect(screen.queryByText('host-a')).not.toBeInTheDocument())
-  })
-
-  it('calls bulkHide with checked ids and removes devices from list', async () => {
-    await renderWithDevices()
-    const [selectAll] = screen.getAllByRole('checkbox')
-    fireEvent.click(selectAll)
-    fireEvent.click(screen.getByText(/Hide \(2\)/))
-    await waitFor(() => expect(mockBulkHide).toHaveBeenCalledWith(['dev-a', 'dev-b']))
-    await waitFor(() => expect(screen.queryByText('host-b')).not.toBeInTheDocument())
-  })
-})
-
-describe('PendingDevicesPanel — live scan stream', () => {
-  beforeEach(() => {
-    mockStore()
-    vi.clearAllMocks()
-  })
-
-  async function renderEmpty() {
-    const { scanApi } = await import('@/api/client')
-    vi.mocked(scanApi.pending).mockResolvedValue({ data: [] } as never)
-    render(<Sidebar {...defaultProps} forceView="pending" />)
-    await waitFor(() => expect(screen.getByText('No pending devices')).toBeInTheDocument())
-  }
-
-  it('inserts a discovering placeholder on device_discovered then enriches it on device_enriched', async () => {
-    let handler: ((e: unknown) => void) | null = null
-    const { subscribeScan } = await import('@/api/client')
-    vi.mocked(subscribeScan).mockImplementation(async (cb) => {
-      handler = cb as (e: unknown) => void
-      return () => {}
-    })
-
-    await renderEmpty()
-    await waitFor(() => expect(handler).not.toBeNull())
-
-    handler!({
-      event: 'device_discovered',
-      device: { ip: '10.0.0.42', mac: null, hostname: null, discovery_source: 'nmap' },
-    })
-    await waitFor(() => expect(screen.getByText('10.0.0.42')).toBeInTheDocument())
-
-    handler!({
-      event: 'device_enriched',
-      device: {
-        id: 'pd-real',
-        ip: '10.0.0.42',
-        mac: 'AA:BB:CC:DD:EE:FF',
-        hostname: 'host.lan',
-        os: null,
-        services: [],
-        suggested_type: 'generic',
-        discovery_source: 'nmap',
-        open_ports: [],
-      },
-    })
-    await waitFor(() => expect(screen.getByText('host.lan')).toBeInTheDocument())
-  })
-})
+// PendingDevicesPanel inline view + its live-scan-stream subscription were
+// removed in favour of PendingDevicesModal. Coverage for batch select +
+// live updates belongs in tests targeting PendingDevicesModal directly
+// (tracked as a follow-up, see PR description).

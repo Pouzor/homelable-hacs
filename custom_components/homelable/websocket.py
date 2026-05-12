@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN, SCAN_SIGNAL
+from .zigbee import ZigbeeMqttNotReadyError
 
 
 @callback
@@ -27,6 +28,13 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_status_get)
     websocket_api.async_register_command(hass, ws_status_subscribe)
     websocket_api.async_register_command(hass, ws_scan_subscribe)
+    websocket_api.async_register_command(hass, ws_scan_approve_batch)
+    websocket_api.async_register_command(hass, ws_scan_hide_batch)
+    websocket_api.async_register_command(hass, ws_scan_ignore)
+    websocket_api.async_register_command(hass, ws_scan_restore)
+    websocket_api.async_register_command(hass, ws_scan_restore_batch)
+    websocket_api.async_register_command(hass, ws_zigbee_devices)
+    websocket_api.async_register_command(hass, ws_zigbee_import)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -109,6 +117,7 @@ async def ws_scan_cancel(
     {
         vol.Required("type"): "homelable/scan/pending",
         vol.Optional("status", default="pending"): vol.In(["pending", "hidden"]),
+        vol.Optional("source"): vol.In(["scan", "zigbee"]),
     }
 )
 @websocket_api.async_response
@@ -119,7 +128,7 @@ async def ws_scan_pending(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    devices = await coord.list_pending(status=msg["status"])
+    devices = await coord.list_pending(status=msg["status"], source=msg.get("source"))
     connection.send_result(msg["id"], {"devices": devices})
 
 
@@ -143,7 +152,17 @@ async def ws_scan_approve(
     if node is None:
         connection.send_error(msg["id"], "not_found", "Device not found")
         return
-    connection.send_result(msg["id"], {"node": node})
+    auto_edge = await coord._create_zigbee_parent_edge(node)
+    edges = [auto_edge] if auto_edge else []
+    connection.send_result(
+        msg["id"],
+        {
+            "node": node,
+            "node_id": node["id"],
+            "edges": edges,
+            "edges_created": len(edges),
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -269,3 +288,195 @@ def ws_scan_subscribe(
     unsub = async_dispatcher_connect(hass, SCAN_SIGNAL, _forward)
     connection.subscriptions[msg["id"]] = unsub
     connection.send_result(msg["id"])
+
+
+# ─── Pending devices: batch ops ──────────────────────────────────────────────
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/approve_batch",
+        vol.Required("device_ids"): [str],
+        vol.Optional("overrides", default={}): dict,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_approve_batch(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    nodes: list[dict[str, Any]] = []
+    device_ids: list[str] = []
+    node_ids: list[str] = []
+    edges: list[dict[str, Any]] = []
+    not_found: list[str] = []
+    for device_id in msg["device_ids"]:
+        node = await coord.approve_pending(device_id, msg["overrides"])
+        if node is None:
+            not_found.append(device_id)
+            continue
+        nodes.append(node)
+        device_ids.append(device_id)
+        node_ids.append(node["id"])
+        auto_edge = await coord._create_zigbee_parent_edge(node)
+        if auto_edge:
+            edges.append(auto_edge)
+    connection.send_result(
+        msg["id"],
+        {
+            "approved": len(nodes),
+            "nodes": nodes,
+            "device_ids": device_ids,
+            "node_ids": node_ids,
+            "edges": edges,
+            "edges_created": len(edges),
+            "not_found": not_found,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/hide_batch",
+        vol.Required("device_ids"): [str],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_hide_batch(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    hidden = 0
+    for device_id in msg["device_ids"]:
+        if await coord.hide_pending(device_id):
+            hidden += 1
+    connection.send_result(msg["id"], {"hidden": hidden})
+
+
+# ─── Pending devices: single ignore + restore ────────────────────────────────
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/ignore",
+        vol.Required("device_id"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_ignore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Remove a pending or hidden device from the store (permanently drop)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    ok = await coord.remove_pending(msg["device_id"])
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Device not found")
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/restore",
+        vol.Required("device_id"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_restore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Flip a hidden device back to pending."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    ok = await coord.restore_pending(msg["device_id"])
+    if not ok:
+        connection.send_error(msg["id"], "not_found", "Device not found or not hidden")
+        return
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/restore_batch",
+        vol.Required("device_ids"): [str],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_restore_batch(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    restored = 0
+    for device_id in msg["device_ids"]:
+        if await coord.restore_pending(device_id):
+            restored += 1
+    connection.send_result(msg["id"], {"restored": restored})
+
+
+# ─── Zigbee2MQTT ─────────────────────────────────────────────────────────────
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/zigbee/devices"}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_zigbee_devices(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Fetch the Z2M networkmap and return parsed nodes + edges."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        nodes, edges = await coord.fetch_zigbee_networkmap()
+    except ZigbeeMqttNotReadyError as exc:
+        connection.send_error(msg["id"], "mqtt_not_configured", str(exc))
+        return
+    except TimeoutError as exc:
+        connection.send_error(msg["id"], "timeout", str(exc))
+        return
+    except ValueError as exc:
+        connection.send_error(msg["id"], "bad_response", str(exc))
+        return
+    connection.send_result(
+        msg["id"],
+        {"nodes": nodes, "edges": edges, "base_topic": coord.get_zigbee_base_topic()},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/zigbee/import",
+        vol.Required("devices"): [dict],
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_zigbee_import(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Push selected Z2M devices into the pending devices store."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    result = await coord.import_zigbee_devices(msg["devices"])
+    connection.send_result(msg["id"], result)

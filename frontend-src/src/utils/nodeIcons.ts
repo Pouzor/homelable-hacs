@@ -139,6 +139,9 @@ export const NODE_TYPE_DEFAULT_ICONS: Record<NodeType, LucideIcon> = {
   generic:           Circle,
   group:        Circle,
   groupRect:    Circle,
+  zigbee_coordinator: Radio,
+  zigbee_router:      Zap,
+  zigbee_enddevice:   Lightbulb,
 }
 
 /** Resolve the display icon for a node — custom_icon takes priority over type default. */

@@ -11,9 +11,11 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
     CONF_STATUS_INTERVAL,
+    CONF_ZIGBEE_BASE_TOPIC,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_RANGES,
     DEFAULT_STATUS_INTERVAL,
+    DEFAULT_ZIGBEE_BASE_TOPIC,
     DOMAIN,
 )
 
@@ -44,6 +46,9 @@ class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_STATUS_INTERVAL, default=DEFAULT_STATUS_INTERVAL
                 ): int,
+                vol.Optional(
+                    CONF_ZIGBEE_BASE_TOPIC, default=DEFAULT_ZIGBEE_BASE_TOPIC
+                ): str,
             }
         )
         return self.async_show_form(step_id="user", data_schema=schema)
@@ -86,6 +91,12 @@ class HomelableOptionsFlow(OptionsFlow):
                     CONF_STATUS_INTERVAL,
                     default=data.get(CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL),
                 ): int,
+                vol.Optional(
+                    CONF_ZIGBEE_BASE_TOPIC,
+                    default=data.get(
+                        CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC
+                    ),
+                ): str,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

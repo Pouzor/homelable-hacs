@@ -1,13 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Trash2, RefreshCw, Loader2, Square, Eye, StopCircle, X } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, RefreshCw, Loader2, Square, Eye, StopCircle, Radio } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { scanApi, subscribeScan, type ScanEvent } from '@/api/client'
+import { scanApi } from '@/api/client'
 import { toast } from 'sonner'
 import { useLatestRelease } from '@/hooks/useLatestRelease'
 
-import { PendingDeviceModal, type PendingDevice } from '@/components/modals/PendingDeviceModal'
+import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
+import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -42,9 +43,12 @@ interface SidebarProps {
   highlightPendingId?: string
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved: _onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
   const [_collapsed, setCollapsed] = useState(false)
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
+  const [zigbeeOpen, setZigbeeOpen] = useState(false)
+  const [pendingModalOpen, setPendingModalOpen] = useState(false)
+  const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
 
   // When forceView is set, override local state without useEffect
   const collapsed = forceView ? false : _collapsed
@@ -89,17 +93,25 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
             active={activeView === id}
             onClick={() => {
               onClearForceView?.()
+              if (id === 'pending') {
+                setPendingModalStatus('pending')
+                setPendingModalOpen(true)
+                return
+              }
+              if (id === 'hidden') {
+                setPendingModalStatus('hidden')
+                setPendingModalOpen(true)
+                return
+              }
               setActiveView(id)
             }}
           />
         ))}
       </nav>
 
-      {/* View content (only when expanded) */}
-      {!collapsed && activeView !== 'canvas' && (
+      {/* View content (only when expanded) — pending/hidden moved to modal */}
+      {!collapsed && activeView !== 'canvas' && activeView !== 'pending' && activeView !== 'hidden' && (
         <div className="flex-1 min-h-0 overflow-y-auto border-t border-border">
-          {activeView === 'pending' && <PendingDevicesPanel onNodeApproved={onNodeApproved} highlightId={highlightPendingId} />}
-          {activeView === 'hidden' && <HiddenDevicesPanel />}
           {activeView === 'history' && <ScanHistoryPanel />}
         </div>
       )}
@@ -132,6 +144,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
         <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
         <SidebarItem icon={Square} label="Add Zone" collapsed={collapsed} onClick={onAddGroupRect} />
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
+        <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
         <SidebarItem
           icon={hideIp ? EyeOff : Eye}
           label={hideIp ? 'Show IPs' : 'Hide IPs'}
@@ -150,396 +163,21 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
       </div>
 
       {!collapsed && <VersionBadge />}
-    </aside>
-  )
-}
 
-const COMMON_PORTS = new Set([22, 80, 443])
-
-function PendingDevicesPanel({ onNodeApproved, highlightId }: { onNodeApproved: (nodeId: string) => void; highlightId?: string }) {
-  const [devices, setDevices] = useState<PendingDevice[]>([])
-  const [loading, setLoading] = useState(false)
-  const [selected, setSelected] = useState<PendingDevice | null>(null)
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
-  const { addNode, scanEventTs } = useCanvasStore()
-  const highlightRef = useRef<HTMLButtonElement>(null)
-
-  const allChecked = devices.length > 0 && checkedIds.size === devices.length
-  const someChecked = checkedIds.size > 0
-
-  const toggleCheck = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setCheckedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
-
-  const toggleAll = () => {
-    setCheckedIds(allChecked ? new Set() : new Set(devices.map((d) => d.id)))
-  }
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await scanApi.pending()
-      setDevices(res.data)
-    } catch {
-      toast.error('Failed to load pending devices')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  const handleClearAll = async () => {
-    try {
-      await scanApi.clearPending()
-      setDevices([])
-      setCheckedIds(new Set())
-      toast.success('Pending devices cleared')
-    } catch {
-      toast.error('Failed to clear pending devices')
-    }
-  }
-
-  const handleBulkApprove = async () => {
-    const ids = [...checkedIds]
-    try {
-      const res = await scanApi.bulkApprove(ids)
-      const deviceToNode: Record<string, string> = {}
-      res.data.device_ids.forEach((did, i) => { deviceToNode[did] = res.data.node_ids[i] })
-      const approvedDevices = devices.filter((d) => ids.includes(d.id))
-      approvedDevices.forEach((d, i) => {
-        const nodeId = deviceToNode[d.id]
-        if (!nodeId) return
-        addNode({
-          id: nodeId,
-          type: (d.suggested_type ?? 'generic') as import('@/types').NodeType,
-          position: { x: 400 + (i % 4) * 160, y: 300 + Math.floor(i / 4) * 100 },
-          data: {
-            label: d.hostname ?? d.ip,
-            type: (d.suggested_type ?? 'generic') as import('@/types').NodeType,
-            ip: d.ip,
-            hostname: d.hostname ?? undefined,
-            status: 'unknown' as const,
-            services: (d.services ?? []) as import('@/types').ServiceInfo[],
-          },
-        })
-        onNodeApproved(nodeId)
-      })
-      setDevices((prev) => prev.filter((d) => !ids.includes(d.id)))
-      setCheckedIds(new Set())
-      toast.success(`Approved ${res.data.approved} device${res.data.approved !== 1 ? 's' : ''}`)
-    } catch {
-      toast.error('Failed to bulk approve devices')
-    }
-  }
-
-  const handleBulkHide = async () => {
-    const ids = [...checkedIds]
-    try {
-      const res = await scanApi.bulkHide(ids)
-      setDevices((prev) => prev.filter((d) => !ids.includes(d.id)))
-      setCheckedIds(new Set())
-      toast.success(`Hidden ${res.data.hidden} device${res.data.hidden !== 1 ? 's' : ''}`)
-    } catch {
-      toast.error('Failed to bulk hide devices')
-    }
-  }
-
-  useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    if (scanEventTs > 0) load()
-  }, [scanEventTs, load])
-
-  // Live scan subscription — patch the pending list as events arrive so the
-  // user sees devices appear with just an IP, then fill in services/hostname
-  // as enrichment finishes per host.
-  useEffect(() => {
-    let unsub: (() => void) | null = null
-    let cancelled = false
-    subscribeScan((event: ScanEvent) => {
-      if (event.event === 'device_discovered') {
-        const { ip, mac, hostname } = event.device
-        setDevices((prev) => {
-          if (prev.some((d) => d.ip === ip)) return prev
-          const placeholder: PendingDevice = {
-            id: `discovering:${ip}`,
-            ip,
-            mac,
-            hostname,
-            os: null,
-            services: [],
-            suggested_type: null,
-            status: 'discovering',
-            discovery_source: event.device.discovery_source ?? null,
-            discovered_at: new Date().toISOString(),
-          }
-          return [placeholder, ...prev]
-        })
-      } else if (event.event === 'device_enriched') {
-        const dev = event.device
-        setDevices((prev) => {
-          const idx = prev.findIndex((d) => d.ip === dev.ip)
-          const enriched: PendingDevice = {
-            id: dev.id ?? prev[idx]?.id ?? `pd-${dev.ip}`,
-            ip: dev.ip,
-            mac: dev.mac,
-            hostname: dev.hostname,
-            os: dev.os,
-            services: (dev.services ?? []) as PendingDevice['services'],
-            suggested_type: dev.suggested_type,
-            status: 'pending',
-            discovery_source: dev.discovery_source ?? null,
-            discovered_at: prev[idx]?.discovered_at ?? new Date().toISOString(),
-          }
-          if (idx === -1) return [enriched, ...prev]
-          const next = [...prev]
-          next[idx] = enriched
-          return next
-        })
-      } else if (event.event === 'scan_finished') {
-        // Reconcile with the source of truth — discovering placeholders that
-        // never enriched are cleaned up server-side, so just refetch.
-        load()
-      }
-    }).then((u) => {
-      if (cancelled) u()
-      else unsub = u
-    })
-    return () => {
-      cancelled = true
-      if (unsub) unsub()
-    }
-  }, [load])
-
-  useEffect(() => {
-    if (!highlightId || loading) return
-    highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [highlightId, loading])
-
-  const handleApprove = async (device: PendingDevice) => {
-    try {
-      const nodeData = {
-        label: device.hostname ?? device.ip,
-        type: (device.suggested_type ?? 'generic') as import('@/types').NodeType,
-        ip: device.ip,
-        hostname: device.hostname ?? undefined,
-        status: 'unknown',
-        services: (device.services ?? []) as import('@/types').ServiceInfo[],
-      }
-      const res = await scanApi.approve(device.id, nodeData)
-      const nodeId = (res.data as { id?: string; node_id?: string }).id
-        ?? (res.data as { node_id?: string }).node_id
-      if (!nodeId) throw new Error('approve: no node id returned')
-      addNode({
-        id: nodeId,
-        type: nodeData.type,
-        position: { x: 400, y: 300 },
-        data: { ...nodeData, status: 'unknown' as const },
-      })
-      toast.success(`Approved ${nodeData.label}`)
-      setDevices((prev) => prev.filter((d) => d.id !== device.id))
-      setSelected(null)
-      onNodeApproved(nodeId)
-    } catch {
-      toast.error('Failed to approve device')
-    }
-  }
-
-  const handleHide = async (device: PendingDevice) => {
-    try {
-      await scanApi.hide(device.id)
-      setDevices((prev) => prev.filter((d) => d.id !== device.id))
-      toast.success('Device hidden')
-    } catch {
-      toast.error('Failed to hide device')
-    }
-  }
-
-  const handleIgnore = async (device: PendingDevice) => {
-    try {
-      await scanApi.ignore(device.id)
-      setDevices((prev) => prev.filter((d) => d.id !== device.id))
-    } catch {
-      toast.error('Failed to ignore device')
-    }
-  }
-
-  return (
-    <>
-      <div className="p-2">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-1.5">
-            {devices.length > 0 && (
-              <input
-                type="checkbox"
-                checked={allChecked}
-                ref={(el) => { if (el) el.indeterminate = someChecked && !allChecked }}
-                onChange={toggleAll}
-                className="w-3 h-3 accent-[#00d4ff] cursor-pointer"
-                title="Select all"
-              />
-            )}
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pending</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5" title="Refresh">
-              <RefreshCw size={12} />
-            </button>
-            {devices.length > 0 && (
-              <button onClick={handleClearAll} className="text-muted-foreground hover:text-[#f85149] p-0.5" title="Clear all pending">
-                <X size={12} />
-              </button>
-            )}
-          </div>
-        </div>
-        {someChecked && (
-          <div className="flex items-center gap-1 mb-2">
-            <button
-              onClick={handleBulkApprove}
-              className="flex-1 text-[10px] py-1 px-2 rounded bg-[#39d353]/20 text-[#39d353] hover:bg-[#39d353]/30 transition-colors font-medium"
-            >
-              Approve ({checkedIds.size})
-            </button>
-            <button
-              onClick={handleBulkHide}
-              className="flex-1 text-[10px] py-1 px-2 rounded bg-[#8b949e]/20 text-[#8b949e] hover:bg-[#8b949e]/30 transition-colors font-medium"
-            >
-              Hide ({checkedIds.size})
-            </button>
-          </div>
-        )}
-        {loading && <Loader2 size={14} className="animate-spin text-muted-foreground mx-auto my-4" />}
-        {!loading && devices.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-4">No pending devices</p>
-        )}
-        {devices.map((d) => {
-          const namedService = d.services.find((s) => s.category != null && s.port != null && !COMMON_PORTS.has(s.port))
-          const titleService = namedService
-            ?? d.services.find((s) => s.port === 80)
-            ?? d.services.find((s) => s.port === 443)
-            ?? d.services.find((s) => s.port === 22)
-          const title = titleService?.service_name ?? d.hostname ?? d.ip
-          const showIpBelow = title !== d.ip
-          const hasSsh = d.services.some((s) => s.port === 22)
-          const hasHttp = d.services.some((s) => s.port === 80)
-          const hasHttps = d.services.some((s) => s.port === 443)
-          const otherCount = d.services.filter((s) => s.port !== 22 && s.port !== 80 && s.port !== 443).length
-          const virtualBadge = detectVirtualBadge(d.mac)
-          const sourceColor = d.discovery_source === 'mdns' ? '#a855f7' : '#8b949e'
-          const sourceLabel = d.discovery_source === 'mdns' ? 'mDNS' : d.discovery_source === 'arp' ? 'ARP' : null
-          const isHighlighted = d.id === highlightId
-          const isDiscovering = d.status === 'discovering'
-          return (
-            <button
-              key={d.id}
-              ref={isHighlighted ? highlightRef : null}
-              onClick={() => { if (!isDiscovering) setSelected(d) }}
-              disabled={isDiscovering}
-              className={`w-full mb-1.5 p-2 rounded-md text-xs text-left transition-colors border ${isHighlighted ? 'bg-[#2d3748] border-[#e3b341]' : checkedIds.has(d.id) ? 'bg-[#21262d] border-[#00d4ff]/40' : 'bg-[#21262d] border-transparent hover:bg-[#30363d] hover:border-[#30363d]'} ${isDiscovering ? 'opacity-60 cursor-progress animate-pulse' : ''}`}
-            >
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  checked={checkedIds.has(d.id)}
-                  disabled={isDiscovering}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => { e.stopPropagation(); toggleCheck(d.id, e as unknown as React.MouseEvent) }}
-                  className="w-3 h-3 accent-[#00d4ff] cursor-pointer shrink-0 disabled:cursor-not-allowed"
-                />
-                <span className="text-foreground truncate font-medium">{title}</span>
-                {isDiscovering && (
-                  <Loader2 size={10} className="animate-spin text-muted-foreground shrink-0" />
-                )}
-              </div>
-              {showIpBelow && (
-                <div className="font-mono text-muted-foreground truncate pl-3 text-[10px] mt-0.5">{d.ip}</div>
-              )}
-              {(hasSsh || hasHttp || hasHttps || otherCount > 0 || virtualBadge || sourceLabel) && (
-                <div className="flex items-center gap-1 pl-3 mt-1.5 flex-wrap">
-                  {sourceLabel && <ServiceBadge label={sourceLabel} color={sourceColor} />}
-                  {virtualBadge && (
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <span><ServiceBadge label={virtualBadge.label} color="#ff6e00" /></span>
-                      </TooltipTrigger>
-                      <TooltipContent side="right">{virtualBadge.title}</TooltipContent>
-                    </Tooltip>
-                  )}
-                  {hasSsh && <ServiceBadge label="SSH" color="#a855f7" />}
-                  {hasHttp && <ServiceBadge label="HTTP" color="#00d4ff" />}
-                  {hasHttps && <ServiceBadge label="HTTPS" color="#39d353" />}
-                  {otherCount > 0 && <ServiceBadge label={`+${otherCount}`} color="#8b949e" />}
-                </div>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      <PendingDeviceModal
-        device={selected}
-        onClose={() => setSelected(null)}
-        onApprove={handleApprove}
-        onHide={handleHide}
-        onIgnore={handleIgnore}
+      <ZigbeeImportModal
+        open={zigbeeOpen}
+        onClose={() => setZigbeeOpen(false)}
+        onImported={() => {
+          useCanvasStore.getState().notifyScanDeviceFound()
+        }}
       />
-    </>
-  )
-}
-
-function HiddenDevicesPanel() {
-  const [devices, setDevices] = useState<PendingDevice[]>([])
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await scanApi.hidden()
-      setDevices(res.data)
-    } catch {
-      toast.error('Failed to load hidden devices')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const handleIgnore = async (id: string) => {
-    try {
-      await scanApi.ignore(id)
-      setDevices((prev) => prev.filter((d) => d.id !== id))
-    } catch {
-      toast.error('Failed to remove device')
-    }
-  }
-
-  return (
-    <div className="p-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Hidden</span>
-        <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5">
-          <RefreshCw size={12} />
-        </button>
-      </div>
-      {loading && <Loader2 size={14} className="animate-spin text-muted-foreground mx-auto my-4" />}
-      {!loading && devices.length === 0 && (
-        <p className="text-xs text-muted-foreground text-center py-4">No hidden devices</p>
-      )}
-      {devices.map((d) => (
-        <div key={d.id} className="mb-2 p-2 rounded-md bg-[#21262d] text-xs">
-          <div className="font-mono text-foreground">{d.ip}</div>
-          {d.hostname && <div className="text-muted-foreground truncate">{d.hostname}</div>}
-          <div className="flex gap-1 mt-1.5">
-            <ActionButton icon={Trash2} label="Remove" color="red" onClick={() => handleIgnore(d.id)} />
-          </div>
-        </div>
-      ))}
-    </div>
+      <PendingDevicesModal
+        open={pendingModalOpen}
+        onClose={() => setPendingModalOpen(false)}
+        highlightId={highlightPendingId}
+        initialStatus={pendingModalStatus}
+      />
+    </aside>
   )
 }
 
@@ -685,54 +323,6 @@ function VersionBadge() {
   )
 }
 
-const MAC_OUI: Record<string, { label: string; title: string }> = {
-  '52:54:00': { label: 'QEMU', title: 'QEMU/KVM Virtual Machine' },
-  'bc:24:11': { label: 'PVE',  title: 'Proxmox Virtual Machine or LXC' },
-  '00:50:56': { label: 'VMware', title: 'VMware Virtual Machine' },
-  '00:0c:29': { label: 'VMware', title: 'VMware Virtual Machine' },
-  '08:00:27': { label: 'VBox',  title: 'VirtualBox Virtual Machine' },
-  '00:15:5d': { label: 'Hyper-V', title: 'Hyper-V Virtual Machine' },
-}
-
-function detectVirtualBadge(mac: string | null) {
-  if (!mac) return null
-  return MAC_OUI[mac.toLowerCase().slice(0, 8)] ?? null
-}
-
-function ServiceBadge({ label, color }: { label: string; color: string }) {
-  return (
-    <span
-      className="px-1 py-0.5 rounded text-[9px] font-mono font-medium leading-none border"
-      style={{ color, borderColor: `${color}40`, backgroundColor: `${color}15` }}
-    >
-      {label}
-    </span>
-  )
-}
-
-interface ActionButtonProps {
-  icon: React.ElementType
-  label: string
-  color?: 'green' | 'red'
-  onClick: () => void
-}
-
-function ActionButton({ icon: Icon, label, color, onClick }: ActionButtonProps) {
-  const colorClass =
-    color === 'green' ? 'text-[#39d353] hover:bg-[#39d353]/10' :
-    color === 'red' ? 'text-[#f85149] hover:bg-[#f85149]/10' :
-    'text-muted-foreground hover:text-foreground hover:bg-[#30363d]'
-  return (
-    <Tooltip>
-      <TooltipTrigger>
-        <button onClick={onClick} className={`p-1 rounded ${colorClass} transition-colors`}>
-          <Icon size={11} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
-  )
-}
 
 interface SidebarItemProps {
   icon: React.ElementType

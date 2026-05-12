@@ -13,12 +13,14 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from . import scanner, status_checker
+from . import scanner, status_checker, zigbee
 from .const import (
     CONF_SCAN_RANGES,
     CONF_STATUS_INTERVAL,
+    CONF_ZIGBEE_BASE_TOPIC,
     DEFAULT_SCAN_RANGES,
     DEFAULT_STATUS_INTERVAL,
+    DEFAULT_ZIGBEE_BASE_TOPIC,
     DOMAIN,
     MAX_SCAN_RUNS,
     SCAN_SIGNAL,
@@ -134,9 +136,33 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if self._pending is not None:
             await self.pending_store.async_save(self._pending)
 
-    async def list_pending(self, *, status: str = "pending") -> list[dict[str, Any]]:
+    async def list_pending(
+        self, *, status: str = "pending", source: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return pending devices filtered by status and (optionally) source.
+
+        Devices written before the `source` field existed are treated as "scan".
+        Zigbee-specific fields (`ieee_address`, `friendly_name`, ...) are
+        stored under `data_extras` to keep the schema additive; flatten them
+        into the top-level dict for the wire so the frontend sees one shape.
+        """
         store = await self._get_pending()
-        return [d for d in store["devices"] if d.get("status") == status]
+        out = [d for d in store["devices"] if d.get("status") == status]
+        if source is not None:
+            out = [d for d in out if (d.get("source") or "scan") == source]
+        return [self._flatten_pending(d) for d in out]
+
+    @staticmethod
+    def _flatten_pending(device: dict[str, Any]) -> dict[str, Any]:
+        extras = device.get("data_extras") or {}
+        if not extras:
+            return device
+        merged = dict(device)
+        # data_extras keys never collide with the base shape (ip/mac/hostname...);
+        # if they ever do, the base wins to keep scan-discovered data primary.
+        for k, v in extras.items():
+            merged.setdefault(k, v)
+        return merged
 
     async def hide_pending(self, device_id: str) -> bool:
         """Mark a pending device as hidden. Returns True if found."""
@@ -168,6 +194,59 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return True
         return False
 
+    async def restore_pending(self, device_id: str) -> bool:
+        """Flip a hidden device back to pending. Returns True if found."""
+        store = await self._get_pending()
+        for d in store["devices"]:
+            if d["id"] == device_id and d.get("status") == "hidden":
+                d["status"] = "pending"
+                await self._save_pending()
+                return True
+        return False
+
+    async def _create_zigbee_parent_edge(
+        self, child_node: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """If child is a zigbee node with a known parent on the canvas,
+        append a parent → child edge to the canvas and return it.
+
+        Idempotent: skips if an edge with the same source+target already exists.
+        """
+        data = child_node.get("data") or {}
+        parent_ieee = data.get("parent_id")
+        if not parent_ieee:
+            return None
+        canvas = await self.get_canvas()
+        parent = next(
+            (
+                n
+                for n in canvas.get("nodes", [])
+                if (n.get("data") or {}).get("ieee_address") == parent_ieee
+            ),
+            None,
+        )
+        if parent is None:
+            return None
+        edge_id = f"e-{parent['id']}-{child_node['id']}"
+        existing = canvas.setdefault("edges", [])
+        if any(
+            e.get("source") == parent["id"] and e.get("target") == child_node["id"]
+            for e in existing
+        ):
+            return None
+        edge = {
+            "id": edge_id,
+            "source": parent["id"],
+            "target": child_node["id"],
+            "sourceHandle": "bottom",
+            "targetHandle": "top-t",
+            "type": "iot",
+            "data": {"type": "iot"},
+        }
+        existing.append(edge)
+        await self.save_canvas(canvas)
+        return edge
+
     async def approve_pending(
         self, device_id: str, node_overrides: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
@@ -184,20 +263,28 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         overrides = node_overrides or {}
         node_type = overrides.get("type") or device.get("suggested_type") or "generic"
+        # Zigbee devices carry their own canonical fields (ieee_address, model,
+        # vendor, lqi, parent_id) under data_extras; merge them so the node on
+        # the canvas has everything the zigbee node component renders.
+        data_extras = device.get("data_extras") or {}
         node = {
-            "id": overrides.get("id") or f"node-{uuid.uuid4().hex[:8]}",
+            "id": overrides.get("id")
+            or device.get("data_extras", {}).get("ieee_address")
+            or f"node-{uuid.uuid4().hex[:8]}",
             "type": node_type,
             "position": overrides.get("position") or {"x": 0, "y": 0},
             "data": {
                 "label": overrides.get("label")
                 or device.get("hostname")
-                or device.get("ip"),
+                or device.get("ip")
+                or data_extras.get("friendly_name"),
                 "ip": device.get("ip"),
                 "mac": device.get("mac"),
                 "hostname": device.get("hostname"),
                 "os": device.get("os"),
                 "services": device.get("services", []),
                 "check_method": overrides.get("check_method", "ping"),
+                **data_extras,
                 **overrides.get("data", {}),
             },
         }
@@ -501,3 +588,84 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return False
         scanner.request_cancel(self._scan_run_id)
         return True
+
+    # ─── Zigbee2MQTT ─────────────────────────────────────────────────────────
+
+    def get_zigbee_base_topic(self) -> str:
+        return self.entry.options.get(
+            CONF_ZIGBEE_BASE_TOPIC,
+            self.entry.data.get(CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC),
+        )
+
+    async def fetch_zigbee_networkmap(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Trigger a Z2M networkmap request and return parsed (nodes, edges)."""
+        return await zigbee.fetch_networkmap(self.hass, self.get_zigbee_base_topic())
+
+    async def import_zigbee_devices(
+        self, devices: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Push selected Zigbee devices into the pending store.
+
+        Each entry in `devices` is a parsed networkmap node dict from
+        ``zigbee.parse_networkmap``. Already-pending or already-on-canvas
+        IEEE addresses are skipped.
+
+        Returns: ``{"added": N, "skipped": M}``.
+        """
+        pending = await self._get_pending()
+        canvas = await self.get_canvas()
+
+        # IEEE addresses already represented anywhere — avoid duplicates.
+        on_canvas = {
+            n.get("data", {}).get("ieee_address")
+            for n in canvas.get("nodes", [])
+            if n.get("data", {}).get("ieee_address")
+        }
+        already_pending = {
+            d.get("data_extras", {}).get("ieee_address")
+            for d in pending["devices"]
+            if d.get("source") == "zigbee"
+        }
+        existing = on_canvas | already_pending
+
+        added = 0
+        skipped = 0
+        now = _utc_now_iso()
+        for dev in devices:
+            ieee = dev.get("ieee_address") or dev.get("id")
+            if not ieee or ieee in existing:
+                skipped += 1
+                continue
+            pending["devices"].append(
+                {
+                    "id": f"pd-{uuid.uuid4().hex[:8]}",
+                    "ip": None,
+                    "mac": None,
+                    "hostname": dev.get("friendly_name"),
+                    "os": None,
+                    "open_ports": [],
+                    "services": [],
+                    "suggested_type": dev.get("type"),
+                    "discovery_source": "zigbee2mqtt",
+                    "source": "zigbee",
+                    "status": "pending",
+                    "discovered_at": now,
+                    "data_extras": {
+                        "ieee_address": ieee,
+                        "friendly_name": dev.get("friendly_name"),
+                        "device_type": dev.get("device_type"),
+                        "model": dev.get("model"),
+                        "vendor": dev.get("vendor"),
+                        "lqi": dev.get("lqi"),
+                        "parent_id": dev.get("parent_id"),
+                    },
+                }
+            )
+            existing.add(ieee)
+            added += 1
+
+        if added:
+            await self._save_pending()
+        return {"added": added, "skipped": skipped}
