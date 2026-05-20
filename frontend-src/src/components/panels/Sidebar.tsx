@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, RefreshCw, Loader2, Square, Eye, StopCircle, Radio } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, RefreshCw, Loader2, Square, Eye, StopCircle, Radio, Type } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -35,6 +35,7 @@ interface ScanRun {
 interface SidebarProps {
   onAddNode: () => void
   onAddGroupRect: () => void
+  onAddText: () => void
   onScan: () => void
   onSave: () => void
   onNodeApproved: (nodeId: string) => void
@@ -43,7 +44,7 @@ interface SidebarProps {
   highlightPendingId?: string
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeApproved: _onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, onNodeApproved: _onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
   const [_collapsed, setCollapsed] = useState(false)
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
   const [zigbeeOpen, setZigbeeOpen] = useState(false)
@@ -56,7 +57,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
 
   const { nodes, hasUnsavedChanges, hideIp, toggleHideIp } = useCanvasStore()
 
-  const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect')
+  const networkNodes = nodes.filter((n) => n.data.type !== 'groupRect' && n.data.type !== 'text')
   const onlineCount = networkNodes.filter((n) => n.data.status === 'online').length
   const offlineCount = networkNodes.filter((n) => n.data.status === 'offline').length
 
@@ -143,6 +144,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onScan, onSave, onNodeAppro
       <div className="flex flex-col gap-0.5 p-2 border-t border-border">
         <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
         <SidebarItem icon={Square} label="Add Zone" collapsed={collapsed} onClick={onAddGroupRect} />
+        <SidebarItem icon={Type} label="Add Text" collapsed={collapsed} onClick={onAddText} />
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
         <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
         <SidebarItem
