@@ -145,7 +145,9 @@ async def test_scan_approve_existing(
     )
     msg = await client.receive_json()
     assert msg["success"] is True
-    assert msg["result"]["node"]["data"]["ip"] == "10.0.0.6"
+    # Node is returned (and stored) flat — top-level ip, not nested under data.
+    assert msg["result"]["node"]["ip"] == "10.0.0.6"
+    assert msg["result"]["node"]["pos_x"] == 1
 
 
 async def test_scan_approve_unknown_returns_error(

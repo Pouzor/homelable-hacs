@@ -217,8 +217,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         Idempotent: skips if an edge with the same source+target already exists.
         """
+        # Nodes may be flat (top-level fields) or nested ({data: {...}}) depending
+        # on whether they were just approved or round-tripped through the
+        # frontend; read both shapes.
         data = child_node.get("data") or {}
-        parent_ieee = data.get("parent_id")
+        parent_ieee = child_node.get("parent_id") or data.get("parent_id")
         if not parent_ieee:
             return None
         canvas = await self.get_canvas()
@@ -226,7 +229,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
             (
                 n
                 for n in canvas.get("nodes", [])
-                if (n.get("data") or {}).get("ieee_address") == parent_ieee
+                if (n.get("ieee_address") or (n.get("data") or {}).get("ieee_address"))
+                == parent_ieee
             ),
             None,
         )
@@ -279,26 +283,33 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # vendor, lqi, parent_id) under data_extras; merge them so the node on
         # the canvas has everything the zigbee node component renders.
         data_extras = device.get("data_extras") or {}
+        # Canvas nodes are stored FLAT (top-level ip/services/pos_x/...), to
+        # match what the frontend serializes on Save and reads back on load
+        # (deserializeApiNode). Building a nested {position, data:{...}} node
+        # here would deserialize to an empty node (undefined ip/services/pos)
+        # on the next reload, until the user happens to press Save and the
+        # frontend rewrites every node flat. Keep it flat from the start.
+        position = overrides.get("position") or {"x": 0, "y": 0}
         node = {
             "id": overrides.get("id")
-            or device.get("data_extras", {}).get("ieee_address")
+            or data_extras.get("ieee_address")
             or f"node-{uuid.uuid4().hex[:8]}",
             "type": node_type,
-            "position": overrides.get("position") or {"x": 0, "y": 0},
-            "data": {
-                "label": overrides.get("label")
-                or device.get("hostname")
-                or device.get("ip")
-                or data_extras.get("friendly_name"),
-                "ip": device.get("ip"),
-                "mac": device.get("mac"),
-                "hostname": device.get("hostname"),
-                "os": device.get("os"),
-                "services": device.get("services", []),
-                "check_method": overrides.get("check_method", default_check),
-                **data_extras,
-                **overrides.get("data", {}),
-            },
+            "label": overrides.get("label")
+            or device.get("hostname")
+            or device.get("ip")
+            or data_extras.get("friendly_name"),
+            "ip": device.get("ip"),
+            "mac": device.get("mac"),
+            "hostname": device.get("hostname"),
+            "os": device.get("os"),
+            "services": device.get("services", []),
+            "status": overrides.get("status", "unknown"),
+            "check_method": overrides.get("check_method", default_check),
+            "pos_x": position.get("x", 0),
+            "pos_y": position.get("y", 0),
+            **data_extras,
+            **overrides.get("data", {}),
         }
 
         canvas = await self.get_canvas()
@@ -630,10 +641,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
         canvas = await self.get_canvas()
 
         # IEEE addresses already represented anywhere — avoid duplicates.
+        # Canvas nodes may be flat (top-level ieee_address) or nested under
+        # `data`; read both so an approved zigbee node isn't re-imported.
         on_canvas = {
-            n.get("data", {}).get("ieee_address")
+            ieee
             for n in canvas.get("nodes", [])
-            if n.get("data", {}).get("ieee_address")
+            if (ieee := n.get("ieee_address") or n.get("data", {}).get("ieee_address"))
         }
         already_pending = {
             d.get("data_extras", {}).get("ieee_address")

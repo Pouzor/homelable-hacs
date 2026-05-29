@@ -133,9 +133,27 @@ export function serializeEdge(e: Edge<EdgeData>): Record<string, unknown> {
 // ── Deserialization (API response → RF node/edge) ────────────────────────────
 
 export function deserializeApiNode(
-  n: ApiNode,
+  rawNode: ApiNode,
   proxmoxContainerMap: Map<string, boolean>,
 ): Node<NodeData> {
+  // Defensive: most nodes are stored flat (top-level ip/services/pos_x), but a
+  // node appended server-side (e.g. an approved scan device on older builds)
+  // may arrive nested as { position, data: {...} }. Flatten it so the rest of
+  // this function — and the canvas — sees one consistent shape.
+  const nested = rawNode as ApiNode & {
+    position?: { x?: number; y?: number }
+    data?: Record<string, unknown>
+  }
+  const n: ApiNode =
+    nested.data && typeof nested.data === 'object' && nested.pos_x === undefined
+      ? ({
+          ...nested.data,
+          id: nested.id,
+          type: nested.type ?? (nested.data.type as string),
+          pos_x: nested.position?.x ?? 0,
+          pos_y: nested.position?.y ?? 0,
+        } as ApiNode)
+      : rawNode
   const normalizedType = n.type === 'docker' ? 'docker_host' : n.type
   if (n.type === 'groupRect') {
     const w = (n.custom_colors?.width as number | undefined) ?? 360
