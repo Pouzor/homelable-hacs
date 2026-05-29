@@ -431,6 +431,27 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <span>{MIN_BOTTOM_HANDLES}</span>
                   <span>{MAX_BOTTOM_HANDLES}</span>
                 </div>
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex flex-col gap-0.5">
+                    <Label className="text-xs text-muted-foreground">Show Port Numbers</Label>
+                    <span className="text-[10px] text-muted-foreground/60">Label each bottom connection point</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!!form.show_port_numbers}
+                    onClick={() => set('show_port_numbers', !form.show_port_numbers)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none ${modalStyles['modal-interactive']}`}
+                    tabIndex={0}
+                    aria-label="Toggle port numbers"
+                    style={{ background: form.show_port_numbers ? '#ff6e00' : '#30363d' }}
+                  >
+                    <span
+                      className="pointer-events-none absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all"
+                      style={{ left: form.show_port_numbers ? 'calc(100% - 18px)' : '2px' }}
+                    />
+                  </button>
+                </div>
               </div>
             )}
 

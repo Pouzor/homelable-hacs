@@ -59,6 +59,13 @@ describe('EdgeModal', () => {
     expect(onSubmit.mock.calls[0][0].label).toBeUndefined()
   })
 
+  it('round-trips the fibre type through submit (issue #21)', () => {
+    const onSubmit = vi.fn()
+    render(<EdgeModal open onClose={vi.fn()} onSubmit={onSubmit} initial={{ type: 'fibre' }} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(onSubmit.mock.calls[0][0].type).toBe('fibre')
+  })
+
   // ── VLAN ID field ─────────────────────────────────────────────────────────
 
   it('does not show VLAN ID field for ethernet type', () => {

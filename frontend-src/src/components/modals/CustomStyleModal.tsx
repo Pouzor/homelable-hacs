@@ -24,7 +24,7 @@ const EDITABLE_NODE_TYPES: NodeType[] = [
   'docker_container', 'generic',
 ]
 
-const EDITABLE_EDGE_TYPES: EdgeType[] = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster']
+const EDITABLE_EDGE_TYPES: EdgeType[] = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster', 'fibre']
 
 const NODE_ICONS: Record<string, LucideIcon> = {
   isp: Globe, router: Router, firewall: Flame, switch: Network, server: Server, proxmox: Layers,
