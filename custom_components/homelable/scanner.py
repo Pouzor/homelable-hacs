@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .fingerprint import fingerprint_ports, suggest_node_type
+from .fingerprint import preload as preload_fingerprints
 from .tcp_scanner import tcp_connect_scan
 
 # Coroutine the caller can pass to receive incremental scan events. Schema:
@@ -439,6 +440,11 @@ async def run_scan(
             ipaddress.ip_network(r, strict=False)
         except ValueError as err:
             raise ValueError(f"Invalid CIDR range: {r!r}") from err
+
+    # Warm the fingerprint signature cache off the event loop. _enrich() runs
+    # synchronously inside the async scan loop, so the first (blocking) file
+    # read otherwise trips HA's blocking-call detector.
+    await asyncio.to_thread(preload_fingerprints)
 
     devices: list[dict[str, Any]] = []
     seen_ips: set[str] = set()
