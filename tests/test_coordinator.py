@@ -243,13 +243,113 @@ async def test_approve_pending_creates_canvas_node(coord) -> None:  # noqa: ANN0
 
     assert node is not None
     assert node["type"] == "server"
-    assert node["data"]["ip"] == "10.0.0.5"
-    assert node["position"] == {"x": 100, "y": 50}
+    # Nodes are stored FLAT (top-level fields), matching what the frontend
+    # serializes on Save and reads back via deserializeApiNode. A nested
+    # {position, data:{...}} node would deserialize to empty (no ip/services)
+    # on the next reload. See approve_pending.
+    assert "data" not in node
+    assert node["ip"] == "10.0.0.5"
+    assert node["hostname"] == "myhost"
+    assert node["services"] == []
+    assert node["label"] == "myhost"
+    assert node["status"] == "unknown"
+    assert node["pos_x"] == 100
+    assert node["pos_y"] == 50
 
     canvas = await coord.get_canvas()
     assert len(canvas["nodes"]) == 1
+    # the persisted node carries ip/services flat, so a frontend reload sees them
+    stored = canvas["nodes"][0]
+    assert stored["ip"] == "10.0.0.5"
+    assert stored["services"] == []
+    assert stored["pos_x"] == 100
     # device removed from pending
     assert await coord.list_pending() == []
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_node_has_services_flat(coord) -> None:  # noqa: ANN001
+    """Regression: approved scan devices must keep ip + services on the node.
+
+    Previously approve_pending emitted a nested {position, data:{...}} node;
+    the frontend deserializer reads flat top-level keys, so on the next reload
+    ip/services were undefined and the node rendered empty (issue homelable#164).
+    """
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-svc",
+            "ip": "192.168.1.20",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "hostname": "nas",
+            "os": "linux",
+            "services": [{"name": "http", "port": 80}],
+            "suggested_type": "nas",
+            "status": "pending",
+        }
+    )
+    await coord._save_pending()
+
+    node = await coord.approve_pending("pd-svc")
+
+    assert node["ip"] == "192.168.1.20"
+    assert node["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert node["os"] == "linux"
+    assert node["services"] == [{"name": "http", "port": 80}]
+    assert node["check_method"] == "ping"
+
+
+@pytest.mark.asyncio
+async def test_approve_zigbee_child_links_to_flat_parent(coord) -> None:  # noqa: ANN001
+    """Approving a zigbee child should link to an already-approved (flat) parent.
+
+    Both parent and child are stored flat (ieee_address / parent_id top-level),
+    so _create_zigbee_parent_edge must match on the flat shape.
+    """
+    # Parent already approved → flat node on the canvas.
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-parent",
+            "ip": None,
+            "mac": None,
+            "hostname": "Router",
+            "os": None,
+            "services": [],
+            "suggested_type": "zigbee_router",
+            "source": "zigbee",
+            "status": "pending",
+            "data_extras": {"ieee_address": "0xR1", "parent_id": None},
+        }
+    )
+    await coord._save_pending()
+    parent_node = await coord.approve_pending("pd-parent")
+    assert parent_node["ieee_address"] == "0xR1"
+    assert "data" not in parent_node
+
+    # Child references the parent by ieee_address.
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-child",
+            "ip": None,
+            "mac": None,
+            "hostname": "Bulb",
+            "os": None,
+            "services": [],
+            "suggested_type": "zigbee_router",
+            "source": "zigbee",
+            "status": "pending",
+            "data_extras": {"ieee_address": "0xC1", "parent_id": "0xR1"},
+        }
+    )
+    await coord._save_pending()
+    child_node = await coord.approve_pending("pd-child")
+
+    edge = await coord._create_zigbee_parent_edge(child_node)
+    assert edge is not None
+    assert edge["source"] == parent_node["id"]
+    assert edge["target"] == child_node["id"]
 
 
 @pytest.mark.asyncio

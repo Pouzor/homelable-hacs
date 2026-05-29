@@ -1,7 +1,9 @@
 """Tests for the fingerprint module."""
+from custom_components.homelable import fingerprint
 from custom_components.homelable.fingerprint import (
     fingerprint_ports,
     match_port,
+    preload,
     suggest_node_type,
     suggest_type_from_mac,
 )
@@ -49,3 +51,27 @@ def test_suggest_node_type_iot_mac_wins_over_http() -> None:
 
 def test_suggest_node_type_no_signal_falls_back_to_generic() -> None:
     assert suggest_node_type([]) == "generic"
+
+
+def test_preload_populates_cache_so_match_port_does_no_io() -> None:
+    """preload() warms the cache; subsequent matches must not touch the file.
+
+    The scanner calls preload() in a thread before enrichment so the blocking
+    file read never runs on the event loop (HA blocking-call detector).
+    """
+    fingerprint._SIGNATURES = None
+    preload()
+    assert fingerprint._SIGNATURES is not None
+
+    # With the cache warm, a match must not re-open the file.
+    import builtins
+
+    def _boom(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("match_port should not open files after preload()")
+
+    original_open = builtins.open
+    builtins.open = _boom
+    try:
+        assert match_port(22, "tcp") is not None
+    finally:
+        builtins.open = original_open

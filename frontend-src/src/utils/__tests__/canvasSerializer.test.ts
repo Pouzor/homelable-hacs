@@ -325,6 +325,51 @@ describe('deserializeApiNode — regular node', () => {
   })
 })
 
+// ── deserializeApiNode — nested fallback ──────────────────────────────────────
+
+describe('deserializeApiNode — nested {position, data} fallback', () => {
+  const emptyMap = new Map<string, boolean>()
+
+  // Defensive: a node appended server-side (e.g. an approved scan device on an
+  // older build) can arrive nested instead of flat. Without flattening, ip /
+  // services / position read as undefined and the node renders empty (#164).
+  const nested = {
+    id: 'scan-1',
+    type: 'server',
+    position: { x: 320, y: 140 },
+    data: {
+      label: 'NAS',
+      type: 'server',
+      ip: '192.168.1.20',
+      hostname: 'nas',
+      status: 'unknown',
+      services: [{ name: 'http', port: 80 }],
+    },
+  } as unknown as ApiNode
+
+  it('recovers ip, services and label from data', () => {
+    const result = deserializeApiNode(nested, emptyMap)
+    expect(result.data.ip).toBe('192.168.1.20')
+    expect(result.data.hostname).toBe('nas')
+    expect(result.data.services).toEqual([{ name: 'http', port: 80 }])
+    expect(result.data.label).toBe('NAS')
+  })
+
+  it('recovers position from nested position object', () => {
+    const result = deserializeApiNode(nested, emptyMap)
+    expect(result.position).toEqual({ x: 320, y: 140 })
+  })
+
+  it('still reads flat nodes unchanged', () => {
+    const result = deserializeApiNode(
+      makeApiNode({ ip: '10.0.0.1', services: [{ name: 'ssh', port: 22 }] }),
+      emptyMap,
+    )
+    expect(result.data.ip).toBe('10.0.0.1')
+    expect(result.position).toEqual({ x: 100, y: 200 })
+  })
+})
+
 // ── deserializeApiNode — groupRect ────────────────────────────────────────────
 
 describe('deserializeApiNode — groupRect', () => {

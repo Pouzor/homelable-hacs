@@ -26,6 +26,17 @@ def _load() -> list[dict[str, Any]]:
     return _SIGNATURES
 
 
+def preload() -> None:
+    """Warm the signature cache via a blocking file read.
+
+    Call this off the event loop (``asyncio.to_thread`` / executor) before the
+    first ``match_port`` so the cache is populated; otherwise ``_load`` runs its
+    blocking ``open()`` inside the loop and trips Home Assistant's blocking-call
+    detector.
+    """
+    _load()
+
+
 def match_port(port: int, protocol: str, banner: str | None = None) -> dict[str, Any] | None:
     """Return the first signature matching port+protocol, optionally banner."""
     for sig in _load():
