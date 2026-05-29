@@ -28,7 +28,7 @@ describe('STATUS_COLORS', () => {
 
 describe('EDGE_TYPE_LABELS', () => {
   it('has an entry for every edge type', () => {
-    const expectedTypes = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster']
+    const expectedTypes = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster', 'fibre']
     expectedTypes.forEach((t) => {
       expect(EDGE_TYPE_LABELS).toHaveProperty(t)
     })

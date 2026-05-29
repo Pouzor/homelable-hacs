@@ -183,6 +183,20 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
         const targetId = `${sourceId}-t`
         return (
           <span key={sourceId}>
+            {data.show_port_numbers && (
+              <span
+                className="absolute font-mono leading-none pointer-events-none select-none"
+                style={{
+                  left: `${leftPct}%`,
+                  bottom: 3,
+                  transform: 'translateX(-50%)',
+                  fontSize: 7,
+                  color: theme.colors.nodeSubtextColor,
+                }}
+              >
+                {idx + 1}
+              </span>
+            )}
             <Handle
               type="source"
               position={Position.Bottom}
