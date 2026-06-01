@@ -54,6 +54,18 @@ def _extract_host(value: str) -> str:
     return value
 
 
+def _extract_port(value: str, default: int) -> int:
+    """Pull a port out of a `host:port` or URL target; fall back to default."""
+    if "://" in value:
+        parsed = urlparse(value)
+        return parsed.port or default
+    if value.count(":") == 1 and ":" in value:
+        _, _, port_str = value.rpartition(":")
+        if port_str.isdigit():
+            return int(port_str)
+    return default
+
+
 def _resolve_to_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     """Return the resolved IP for a host string, or None on failure."""
     if not host:
@@ -128,32 +140,37 @@ async def check_node(
     try:
         match check_method:
             case "ping":
-                if not _host_is_allowed(host, nets):
+                # The target may be a bare host, host:port, or a URL (the node
+                # editor's placeholder suggests `http://...`). Strip everything
+                # but the host so resolution + ping don't choke on the scheme.
+                final_host = _extract_host(host) or host
+                if not _host_is_allowed(final_host, nets):
                     return {"status": "offline", "response_time_ms": None}
-                ok = await _ping(host)
+                ok = await _ping(final_host)
             case "http":
                 ok = await _http_check(host, "http", nets)
             case "https":
                 ok = await _http_check(host, "https", nets)
             case "tcp":
-                host_part, _, port_str = host.rpartition(":")
-                port = int(port_str) if port_str.isdigit() else 80
-                final_host = host_part or host
+                final_host = _extract_host(host) or host
+                port = _extract_port(host, 80)
                 if not _host_is_allowed(final_host, nets):
                     return {"status": "offline", "response_time_ms": None}
                 ok = await _tcp_connect(final_host, port)
             case "ssh":
-                if not _host_is_allowed(host, nets):
+                final_host = _extract_host(host) or host
+                if not _host_is_allowed(final_host, nets):
                     return {"status": "offline", "response_time_ms": None}
-                ok = await _tcp_connect(host, 22)
+                ok = await _tcp_connect(final_host, 22)
             case "prometheus":
                 ok = await _http_check(host, "http", nets, default_path="/metrics")
             case "health":
                 ok = await _http_check(host, "http", nets, default_path="/health")
             case _:
-                if not _host_is_allowed(host, nets):
+                final_host = _extract_host(host) or host
+                if not _host_is_allowed(final_host, nets):
                     return {"status": "offline", "response_time_ms": None}
-                ok = await _ping(host)
+                ok = await _ping(final_host)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         return {

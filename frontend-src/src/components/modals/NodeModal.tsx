@@ -34,6 +34,20 @@ const CHECK_METHOD_LABELS: Record<CheckMethod, string> = {
   health: 'Health',
 }
 
+// Ping/SSH probe a bare host; tcp wants host:port; http-family wants a URL.
+// A misleading `http://...` placeholder makes users enter a URL for ping,
+// which then fails to resolve and reports the device offline.
+const CHECK_TARGET_PLACEHOLDERS: Record<CheckMethod, string> = {
+  none: '',
+  ping: '192.168.1.10 (defaults to node IP)',
+  http: 'http://192.168.1.10:8080',
+  https: 'https://192.168.1.10:8443',
+  tcp: '192.168.1.10:5432',
+  ssh: '192.168.1.10 (defaults to node IP)',
+  prometheus: 'http://192.168.1.10:9090',
+  health: 'http://192.168.1.10:8080',
+}
+
 const DEFAULT_DATA: Partial<NodeData> = {
   type: 'server',
   label: '',
@@ -307,7 +321,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <Input
                     value={form.check_target ?? ''}
                     onChange={(e) => set('check_target', e.target.value)}
-                    placeholder="http://..."
+                    placeholder={CHECK_TARGET_PLACEHOLDERS[(form.check_method ?? 'ping') as CheckMethod]}
                     className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
                   />
                 </div>
