@@ -279,10 +279,25 @@ class HomelableCoordinator(DataUpdateCoordinator):
             device.get("source") == "zigbee" or node_type.startswith("zigbee_")
         )
         default_check = "none" if is_zigbee else "ping"
+        # Zigbee devices report from Z2M as reachable, so they land online; the
+        # status checker never polls them (check_method "none").
+        default_status = "online" if is_zigbee else "unknown"
         # Zigbee devices carry their own canonical fields (ieee_address, model,
         # vendor, lqi, parent_id) under data_extras; merge them so the node on
         # the canvas has everything the zigbee node component renders.
         data_extras = device.get("data_extras") or {}
+        # Surface IEEE/Vendor/Model/LQI as right-panel property rows (hidden by
+        # default — users opt in to showing them on the canvas card).
+        zigbee_props = (
+            zigbee.build_zigbee_properties(
+                data_extras.get("ieee_address"),
+                data_extras.get("vendor"),
+                data_extras.get("model"),
+                data_extras.get("lqi"),
+            )
+            if is_zigbee
+            else []
+        )
         # Canvas nodes are stored FLAT (top-level ip/services/pos_x/...), to
         # match what the frontend serializes on Save and reads back on load
         # (deserializeApiNode). Building a nested {position, data:{...}} node
@@ -304,8 +319,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "hostname": device.get("hostname"),
             "os": device.get("os"),
             "services": device.get("services", []),
-            "status": overrides.get("status", "unknown"),
+            "status": overrides.get("status", default_status),
             "check_method": overrides.get("check_method", default_check),
+            "properties": zigbee_props,
             "pos_x": position.get("x", 0),
             "pos_y": position.get("y", 0),
             **data_extras,
@@ -632,10 +648,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
         """Push selected Zigbee devices into the pending store.
 
         Each entry in `devices` is a parsed networkmap node dict from
-        ``zigbee.parse_networkmap``. Already-pending or already-on-canvas
-        IEEE addresses are skipped.
+        ``zigbee.parse_networkmap``. Already-pending IEEE addresses are skipped;
+        already-approved (on-canvas) devices have their IEEE/Vendor/Model/LQI
+        properties refreshed instead of being re-added.
 
-        Returns: ``{"added": N, "skipped": M}``.
+        Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
         """
         pending = await self._get_pending()
         canvas = await self.get_canvas()
@@ -643,11 +660,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # IEEE addresses already represented anywhere — avoid duplicates.
         # Canvas nodes may be flat (top-level ieee_address) or nested under
         # `data`; read both so an approved zigbee node isn't re-imported.
-        on_canvas = {
-            ieee
+        canvas_by_ieee = {
+            ieee: n
             for n in canvas.get("nodes", [])
             if (ieee := n.get("ieee_address") or n.get("data", {}).get("ieee_address"))
         }
+        on_canvas = set(canvas_by_ieee)
         already_pending = {
             d.get("data_extras", {}).get("ieee_address")
             for d in pending["devices"]
@@ -657,10 +675,27 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         added = 0
         skipped = 0
+        refreshed = 0
         now = _utc_now_iso()
         for dev in devices:
             ieee = dev.get("ieee_address") or dev.get("id")
-            if not ieee or ieee in existing:
+            if not ieee:
+                skipped += 1
+                continue
+            # Already approved onto the canvas: refresh its IEEE/Vendor/Model/LQI
+            # props (preserving the user's visibility choices) and skip creating
+            # a pending row, so approved devices stay out of pending/hidden.
+            node = canvas_by_ieee.get(ieee)
+            if node is not None:
+                props = zigbee.build_zigbee_properties(
+                    ieee, dev.get("vendor"), dev.get("model"), dev.get("lqi")
+                )
+                node["properties"] = zigbee.merge_zigbee_properties(
+                    node.get("properties"), props
+                )
+                refreshed += 1
+                continue
+            if ieee in existing:
                 skipped += 1
                 continue
             pending["devices"].append(
@@ -693,4 +728,6 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         if added:
             await self._save_pending()
-        return {"added": added, "skipped": skipped}
+        if refreshed:
+            await self.save_canvas(canvas)
+        return {"added": added, "skipped": skipped, "refreshed": refreshed}
