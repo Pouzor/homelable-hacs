@@ -353,6 +353,64 @@ async def test_approve_zigbee_child_links_to_flat_parent(coord) -> None:  # noqa
 
 
 @pytest.mark.asyncio
+async def test_approve_zigbee_attaches_hidden_properties_and_online(coord) -> None:  # noqa: ANN001
+    """Approving a zigbee device builds hidden IEEE/Vendor/Model/LQI props,
+    lands the node online, and sets check_method to none."""
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-zb",
+            "ip": None,
+            "mac": None,
+            "hostname": "Sensor",
+            "os": None,
+            "services": [],
+            "suggested_type": "zigbee_enddevice",
+            "source": "zigbee",
+            "status": "pending",
+            "data_extras": {
+                "ieee_address": "0xS1",
+                "vendor": "Aqara",
+                "model": "WSDCGQ11LM",
+                "lqi": 180,
+                "parent_id": None,
+            },
+        }
+    )
+    await coord._save_pending()
+    node = await coord.approve_pending("pd-zb")
+
+    assert node["status"] == "online"
+    assert node["check_method"] == "none"
+    by_key = {p["key"]: p for p in node["properties"]}
+    assert set(by_key) == {"IEEE", "Vendor", "Model", "LQI"}
+    assert all(p["visible"] is False for p in node["properties"])
+    assert by_key["LQI"]["value"] == "180"
+
+
+@pytest.mark.asyncio
+async def test_approve_non_zigbee_has_empty_properties(coord) -> None:  # noqa: ANN001
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-ip",
+            "ip": "192.168.1.5",
+            "mac": None,
+            "hostname": "nas",
+            "os": None,
+            "services": [],
+            "suggested_type": "generic",
+            "status": "pending",
+        }
+    )
+    await coord._save_pending()
+    node = await coord.approve_pending("pd-ip")
+    assert node["properties"] == []
+    assert node["status"] == "unknown"
+    assert node["check_method"] == "ping"
+
+
+@pytest.mark.asyncio
 async def test_approve_pending_unknown_returns_none(coord) -> None:  # noqa: ANN001
     assert await coord.approve_pending("nope") is None
 
