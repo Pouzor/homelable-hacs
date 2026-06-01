@@ -227,15 +227,29 @@ function EndpointDot({ edgeId, role, x, y, position, color, source, target, sour
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     e.currentTarget.releasePointerCapture(e.pointerId)
-    // Find the topmost handle under cursor, skipping the dragged dot itself.
-    const stack = document.elementsFromPoint(e.clientX, e.clientY)
+    // Snap to the nearest handle within SNAP_RADIUS rather than requiring the
+    // cursor to land dead-on the (tiny) handle box. We scan every handle in the
+    // root and pick the closest center, filtered to the matching endpoint type
+    // (source endpoints snap to source handles, targets to target handles) so a
+    // dot never lands on the invisible overlapping `-t` handle.
+    //
+    // The root is resolved via `getRootNode()`: in Home Assistant the panel is
+    // mounted in a Shadow DOM, so `document.querySelectorAll` never sees the
+    // handles. `getRootNode()` returns the enclosing ShadowRoot (or Document
+    // standalone), both of which expose querySelectorAll over their own tree.
+    const SNAP_RADIUS = 60  // screen px — zoom-independent (getBoundingClientRect is screen space)
+    const root = e.currentTarget.getRootNode() as Document | ShadowRoot
+    const wantClass = role === 'source' ? 'source' : 'target'
     let handleEl: HTMLElement | null = null
-    for (const node of stack) {
-      const h = (node as HTMLElement).closest?.('[data-handleid]') as HTMLElement | null
-      if (h) { handleEl = h; break }
-    }
+    let bestDist = SNAP_RADIUS
+    root.querySelectorAll<HTMLElement>('[data-handleid]').forEach((h) => {
+      if (!h.classList.contains(wantClass)) return
+      const r = h.getBoundingClientRect()
+      const d = Math.hypot(r.left + r.width / 2 - e.clientX, r.top + r.height / 2 - e.clientY)
+      if (d < bestDist) { bestDist = d; handleEl = h }
+    })
     onDrag(null)
-    if (!handleEl) return  // dropped on empty space → keep edge unchanged
+    if (!handleEl) return  // no handle within range → keep edge unchanged
     const newHandleId = handleEl.getAttribute('data-handleid')
     const newNodeId = handleEl.getAttribute('data-nodeid')
     if (!newHandleId || !newNodeId) return
@@ -254,11 +268,11 @@ function EndpointDot({ edgeId, role, x, y, position, color, source, target, sour
       style={{
         position: 'absolute',
         transform: `translate(-50%, -50%) translate(${x + dx}px, ${y + dy}px)`,
-        width: 15,
-        height: 15,
+        width: 11,
+        height: 11,
         borderRadius: '50%',
         background: color,
-        border: '2px solid #0d1117',
+        border: '1.5px solid #0d1117',
         cursor: 'grab',
         pointerEvents: 'all',
         zIndex: 1000,
