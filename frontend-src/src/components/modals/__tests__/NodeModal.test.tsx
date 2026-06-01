@@ -169,9 +169,19 @@ describe('NodeModal', () => {
 
   it('submits check_target', () => {
     const { onSubmit } = renderModal({ initial: BASE })
-    fireEvent.change(screen.getByPlaceholderText('http://...'), { target: { value: 'http://192.168.1.10:8080' } })
+    fireEvent.change(screen.getByPlaceholderText('192.168.1.10 (defaults to node IP)'), { target: { value: 'http://192.168.1.10:8080' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).check_target).toBe('http://192.168.1.10:8080')
+  })
+
+  it('uses a method-specific check target placeholder', () => {
+    renderModal({ initial: BASE })
+    expect(screen.getByPlaceholderText('192.168.1.10 (defaults to node IP)')).toBeInTheDocument()
+  })
+
+  it('uses a URL check target placeholder for http-family methods', () => {
+    renderModal({ initial: { ...BASE, check_method: 'https' } })
+    expect(screen.getByPlaceholderText('https://192.168.1.10:8443')).toBeInTheDocument()
   })
 
   // ── Type selector ─────────────────────────────────────────────────────

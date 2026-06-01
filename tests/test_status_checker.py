@@ -65,6 +65,43 @@ async def test_check_ip_first_value_when_comma_separated() -> None:
 
 
 @pytest.mark.asyncio
+async def test_check_ping_strips_url_target() -> None:
+    """A URL typed into a ping target is reduced to its host before pinging.
+
+    Regression for #24: the `http://...` placeholder leads users to enter a
+    URL even for ping checks; the scheme used to break resolution and the
+    device was wrongly reported offline.
+    """
+    with patch.object(status_checker, "_ping", AsyncMock(return_value=True)) as mock:
+        await status_checker.check_node("ping", "http://192.168.1.10:8080", None)
+    mock.assert_awaited_once_with("192.168.1.10")
+
+
+@pytest.mark.asyncio
+async def test_check_ping_strips_host_port_target() -> None:
+    """A `host:port` ping target is reduced to the bare host."""
+    with patch.object(status_checker, "_ping", AsyncMock(return_value=True)) as mock:
+        await status_checker.check_node("ping", "host.local:8080", None)
+    mock.assert_awaited_once_with("host.local")
+
+
+@pytest.mark.asyncio
+async def test_check_ssh_strips_url_target() -> None:
+    """SSH target with a scheme is reduced to the host before connecting."""
+    with patch.object(status_checker, "_tcp_connect", AsyncMock(return_value=True)) as mock:
+        await status_checker.check_node("ssh", "ssh://10.0.0.1", None)
+    mock.assert_awaited_once_with("10.0.0.1", 22)
+
+
+@pytest.mark.asyncio
+async def test_check_tcp_parses_url_port() -> None:
+    """tcp check pulls the port from a full URL target."""
+    with patch.object(status_checker, "_tcp_connect", AsyncMock(return_value=True)) as mock:
+        await status_checker.check_node("tcp", "http://host:8080/path", None)
+    mock.assert_awaited_once_with("host", 8080)
+
+
+@pytest.mark.asyncio
 async def test_check_http_prepends_scheme() -> None:
     """http check adds http:// when target lacks scheme."""
     with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)) as mock:
