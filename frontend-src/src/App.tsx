@@ -6,6 +6,7 @@ const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
+import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { ExportModal } from '@/components/modals/ExportModal'
 import { exportCanvasToYaml, downloadYaml } from '@/utils/exportYaml'
@@ -391,16 +392,14 @@ export default function App() {
     if (edgeData.type === 'virtual') {
       const src = nodes.find((n) => n.id === pendingConnection.source)
       const tgt = nodes.find((n) => n.id === pendingConnection.target)
-      const srcType = src?.data.type as NodeData['type']
-      const tgtType = tgt?.data.type as NodeData['type']
-      if ((srcType === 'lxc' || srcType === 'vm') && CONTAINER_MODE_TYPES.has(tgtType)) {
-        updateNode(pendingConnection.source, { parent_id: pendingConnection.target })
-      } else if (CONTAINER_MODE_TYPES.has(srcType) && (tgtType === 'lxc' || tgtType === 'vm')) {
-        updateNode(pendingConnection.target, { parent_id: pendingConnection.source })
-      } else if (srcType === 'docker_container' && tgtType === 'docker_host') {
-        updateNode(pendingConnection.source, { parent_id: pendingConnection.target })
-      } else if (tgtType === 'docker_container' && srcType === 'docker_host') {
-        updateNode(pendingConnection.target, { parent_id: pendingConnection.source })
+      if (src && tgt) {
+        const assignment = resolveVirtualEdgeParent(
+          { id: src.id, type: src.data.type as NodeData['type'] },
+          { id: tgt.id, type: tgt.data.type as NodeData['type'] },
+        )
+        if (assignment) {
+          updateNode(assignment.childId, { parent_id: assignment.parentId })
+        }
       }
     }
     setPendingConnection(null)
