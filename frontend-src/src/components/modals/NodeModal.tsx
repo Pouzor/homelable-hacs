@@ -11,6 +11,7 @@ import { resolveNodeColors } from '@/utils/nodeColors'
 import { ICON_REGISTRY, ICON_CATEGORIES, NODE_TYPE_DEFAULT_ICONS, isBrandIconKey, brandIconSlug, brandIconUrl } from '@/utils/nodeIcons'
 import { BrandIconPicker } from './BrandIconPicker'
 import { MIN_BOTTOM_HANDLES, MAX_BOTTOM_HANDLES, clampBottomHandles } from '@/utils/handleUtils'
+import { getValidParentTypes } from '@/utils/virtualEdgeParent'
 
 const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
   { label: 'Hardware',       types: ['isp', 'router', 'firewall', 'switch', 'server', 'nas', 'ap', 'printer'] },
@@ -61,18 +62,25 @@ const DEFAULT_DATA: Partial<NodeData> = {
   custom_icon: undefined,
 }
 
+interface ParentCandidate {
+  id: string
+  label: string
+  type: NodeType
+}
+
 interface NodeModalProps {
   open: boolean
   onClose: () => void
   onSubmit: (data: Partial<NodeData>) => void
   initial?: Partial<NodeData>
   title?: string
-  parentContainerNodes?: { id: string; label: string; nodeType?: NodeType }[]
+  parentCandidates?: ParentCandidate[]
+  currentNodeId?: string
 }
 
 // NodeModal is always mounted with a key that changes on open/edit, so useState
 // initial value is enough - no need for a reset effect.
-export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentContainerNodes = [] }: NodeModalProps) {
+export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId }: NodeModalProps) {
   const [form, setForm] = useState<Partial<NodeData>>({ ...DEFAULT_DATA, ...initial })
   const [iconSearch, setIconSearch] = useState('')
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -92,18 +100,23 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
     const selectedType = (form.type ?? 'generic') as NodeType
     const canUseContainerMode = CONTAINER_MODE_TYPES.includes(selectedType)
     const isZigbee = selectedType.startsWith('zigbee_')
+    const validParentTypes = getValidParentTypes(selectedType)
+    let safeParentId = form.parent_id
+    if (validParentTypes.length === 0) {
+      safeParentId = undefined
+    } else if (safeParentId) {
+      const parent = parentCandidates.find((n) => n.id === safeParentId)
+      if (!parent || !validParentTypes.includes(parent.type)) safeParentId = undefined
+    }
     onSubmit({
       ...form,
       check_method: isZigbee ? 'none' : form.check_method,
       check_target: isZigbee ? undefined : form.check_target,
+      parent_id: safeParentId,
       container_mode: canUseContainerMode ? !!form.container_mode : false,
     })
     onClose()
   }
-
-  const filteredParentNodes = form.type === 'docker_container'
-    ? parentContainerNodes.filter((n) => n.nodeType === 'docker_host')
-    : parentContainerNodes
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -117,7 +130,14 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
             {/* Type + Icon on the same row */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs text-muted-foreground">Type</Label>
-              <Select value={form.type} onValueChange={(v) => set('type', v as NodeType)}>
+              <Select value={form.type} onValueChange={(v) => {
+                const t = v as NodeType
+                setForm((f) => {
+                  const next: Partial<NodeData> = { ...f, type: t }
+                  if (getValidParentTypes(t).length === 0) next.parent_id = undefined
+                  return next
+                })
+              }}>
                 <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 w-full cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Node type selector">
                   <SelectValue>{NODE_TYPE_LABELS[(form.type ?? 'server') as NodeType]}</SelectValue>
                 </SelectTrigger>
@@ -328,30 +348,39 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               </>
             )}
 
-            {/* Parent container */}
-            {form.type !== 'groupRect' && form.type !== 'group' && filteredParentNodes.length > 0 && (
-              <div className="flex flex-col gap-1.5 col-span-2">
-                <Label className="text-xs text-muted-foreground">Parent Container</Label>
-                <Select
-                  value={form.parent_id ?? 'none'}
-                  onValueChange={(v) => set('parent_id', v === 'none' ? undefined : v)}
-                >
-                  <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Parent container selector">
-                    <SelectValue placeholder="None (standalone)">
-                      {form.parent_id
-                        ? (filteredParentNodes.find((n) => n.id === form.parent_id)?.label ?? 'None (standalone)')
-                        : 'None (standalone)'}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="bg-[#21262d] border-[#30363d]">
-                    <SelectItem value="none" className="text-sm">None (standalone)</SelectItem>
-                    {filteredParentNodes.map((n) => (
-                      <SelectItem key={n.id} value={n.id} className="text-sm">{n.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            {/* Parent Container */}
+            {(() => {
+              const childType = (form.type ?? 'generic') as NodeType
+              const validParentTypes = getValidParentTypes(childType)
+              if (validParentTypes.length === 0) return null
+              const validParents = parentCandidates.filter(
+                (n) => n.id !== currentNodeId && validParentTypes.includes(n.type),
+              )
+              if (validParents.length === 0) return null
+              return (
+                <div className="flex flex-col gap-1.5 col-span-2">
+                  <Label className="text-xs text-muted-foreground">Parent Container</Label>
+                  <Select
+                    value={form.parent_id ?? 'none'}
+                    onValueChange={(v) => set('parent_id', v === 'none' ? undefined : v)}
+                  >
+                    <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Parent container selector">
+                      <SelectValue>
+                        {form.parent_id
+                          ? (validParents.find((n) => n.id === form.parent_id)?.label ?? 'None')
+                          : 'None'}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#21262d] border-[#30363d]">
+                      <SelectItem value="none" className="text-sm">None</SelectItem>
+                      {validParents.map((n) => (
+                        <SelectItem key={n.id} value={n.id} className="text-sm">{n.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )
+            })()}
 
             {/* Container mode */}
             {CONTAINER_MODE_TYPES.includes((form.type ?? 'generic') as NodeType) && (
