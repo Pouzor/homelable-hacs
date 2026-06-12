@@ -6,6 +6,8 @@ const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
+import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
+import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { ExportModal } from '@/components/modals/ExportModal'
 import { exportCanvasToYaml, downloadYaml } from '@/utils/exportYaml'
@@ -35,7 +37,6 @@ import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
-const CONTAINER_MODE_TYPES = new Set<NodeData['type']>(['proxmox', 'vm', 'lxc', 'docker_host'])
 
 export default function App() {
   const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes } = useCanvasStore()
@@ -312,6 +313,19 @@ export default function App() {
     // If container_mode changed, apply structural changes (children parentId, node dimensions)
     if (typeof data.container_mode === 'boolean') {
       setProxmoxContainerMode(editNodeId, data.container_mode)
+      // Re-express the relationship with domain children: visual nesting when ON,
+      // a virtual edge when OFF. (data.parent_id is untouched by the toggle.)
+      const childIds = nodes.filter((n) => n.data.parent_id === editNodeId).map((n) => n.id)
+      const virtualEdges = edges
+        .filter((e) => e.data?.type === 'virtual')
+        .map((e) => ({ id: e.id, source: e.source, target: e.target }))
+      const { addChildIds, removeEdgeIds } = planContainerModeEdgeSync(
+        editNodeId, data.container_mode, childIds, virtualEdges,
+      )
+      removeEdgeIds.forEach((id) => deleteEdge(id))
+      addChildIds.forEach((childId) =>
+        onConnect({ source: childId, sourceHandle: 'top', target: editNodeId, targetHandle: 'bottom', type: 'virtual' } as unknown as Connection),
+      )
     }
     // Sync virtual edge when parent_id changes on an LXC/VM node
     const nodeType = data.type ?? existingNode?.data.type
@@ -391,16 +405,14 @@ export default function App() {
     if (edgeData.type === 'virtual') {
       const src = nodes.find((n) => n.id === pendingConnection.source)
       const tgt = nodes.find((n) => n.id === pendingConnection.target)
-      const srcType = src?.data.type as NodeData['type']
-      const tgtType = tgt?.data.type as NodeData['type']
-      if ((srcType === 'lxc' || srcType === 'vm') && CONTAINER_MODE_TYPES.has(tgtType)) {
-        updateNode(pendingConnection.source, { parent_id: pendingConnection.target })
-      } else if (CONTAINER_MODE_TYPES.has(srcType) && (tgtType === 'lxc' || tgtType === 'vm')) {
-        updateNode(pendingConnection.target, { parent_id: pendingConnection.source })
-      } else if (srcType === 'docker_container' && tgtType === 'docker_host') {
-        updateNode(pendingConnection.source, { parent_id: pendingConnection.target })
-      } else if (tgtType === 'docker_container' && srcType === 'docker_host') {
-        updateNode(pendingConnection.target, { parent_id: pendingConnection.source })
+      if (src && tgt) {
+        const assignment = resolveVirtualEdgeParent(
+          { id: src.id, type: src.data.type as NodeData['type'] },
+          { id: tgt.id, type: tgt.data.type as NodeData['type'] },
+        )
+        if (assignment) {
+          updateNode(assignment.childId, { parent_id: assignment.parentId })
+        }
       }
     }
     setPendingConnection(null)
@@ -498,9 +510,7 @@ export default function App() {
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}
           title="Add Node"
-          parentContainerNodes={nodes
-            .filter((n) => CONTAINER_MODE_TYPES.has(n.data.type) && n.data.container_mode)
-            .map((n) => ({ id: n.id, label: n.data.label, nodeType: n.data.type }))}
+          parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -511,9 +521,25 @@ export default function App() {
           onSubmit={handleUpdateNode}
           initial={editNode?.data}
           title="Edit Node"
-          parentContainerNodes={nodes
-            .filter((n) => n.id !== editNodeId && CONTAINER_MODE_TYPES.has(n.data.type) && n.data.container_mode)
-            .map((n) => ({ id: n.id, label: n.data.label, nodeType: n.data.type }))}
+          parentCandidates={(() => {
+            const descendants = new Set<string>()
+            if (editNodeId) {
+              const queue = [editNodeId]
+              while (queue.length) {
+                const id = queue.shift()!
+                for (const n of nodes) {
+                  if (n.data.parent_id === id && !descendants.has(n.id)) {
+                    descendants.add(n.id)
+                    queue.push(n.id)
+                  }
+                }
+              }
+            }
+            return nodes
+              .filter((n) => !descendants.has(n.id))
+              .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))
+          })()}
+          currentNodeId={editNodeId ?? undefined}
         />
 
         <EdgeModal

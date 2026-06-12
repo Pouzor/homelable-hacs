@@ -288,46 +288,52 @@ describe('NodeModal', () => {
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).container_mode).toBe(false)
   })
 
-  // ── Parent container ──────────────────────────────────────────────────
+  // ── Parent Container selector ─────────────────────────────────────────
 
-  const parentContainerVisibleTypes = ['proxmox', 'vm', 'lxc', 'docker_host', 'isp', 'router', 'switch', 'server', 'nas', 'ap', 'printer', 'iot', 'camera', 'cpl', 'computer', 'generic'] as const
-  const parentContainerHiddenTypes = ['groupRect', 'group'] as const
-
-  it.each(parentContainerVisibleTypes)('shows Parent Container for %s type when options are provided', (type) => {
+  it('does not render Parent Container for non-child types', () => {
     renderModal({
-      initial: { ...BASE, type },
-      parentContainerNodes: [{ id: 'c1', label: 'Container 01' }],
+      initial: BASE,
+      parentCandidates: [{ id: 'p1', label: 'Proxmox', type: 'proxmox' }],
+    })
+    expect(screen.queryByText('Parent Container')).toBeNull()
+  })
+
+  it('does not render Parent Container when no valid candidates exist', () => {
+    renderModal({
+      initial: { ...BASE, type: 'docker_container' },
+      parentCandidates: [],
+    })
+    expect(screen.queryByText('Parent Container')).toBeNull()
+  })
+
+  it('renders Parent Container for docker_container when docker_host candidate exists', () => {
+    renderModal({
+      initial: { ...BASE, type: 'docker_container' },
+      parentCandidates: [{ id: 'dh1', label: 'Docker Host', type: 'docker_host' }],
     })
     expect(screen.getByText('Parent Container')).toBeDefined()
-    expect(screen.getByText('Container 01')).toBeDefined()
   })
 
-  it.each(parentContainerHiddenTypes)('hides Parent Container for %s type even when options are provided', (type) => {
-    renderModal({ initial: { ...BASE, type }, parentContainerNodes: [{ id: 'c1', label: 'Container 01' }] })
-    expect(screen.queryByText('Parent Container')).toBeNull()
-  })
-
-  it.each(parentContainerVisibleTypes)('hides Parent Container for %s type when no container options are available', (type) => {
-    renderModal({ initial: { ...BASE, type } })
-    expect(screen.queryByText('Parent Container')).toBeNull()
-  })
-
-  it('docker_container shows only docker_host parents', () => {
+  it('renders Parent Container for docker_container when only an LXC candidate exists', () => {
     renderModal({
       initial: { ...BASE, type: 'docker_container' },
-      parentContainerNodes: [
-        { id: 'h1', label: 'My Docker Host', nodeType: 'docker_host' },
-        { id: 'p1', label: 'My Proxmox', nodeType: 'proxmox' },
-      ],
+      parentCandidates: [{ id: 'lxc1', label: 'My LXC', type: 'lxc' }],
     })
-    expect(screen.getByText('My Docker Host')).toBeDefined()
-    expect(screen.queryByText('My Proxmox')).toBeNull()
+    expect(screen.getByText('Parent Container')).toBeDefined()
   })
 
-  it('docker_container hides Parent Container when no docker_host is available', () => {
+  it('renders Parent Container for lxc when proxmox candidate exists', () => {
+    renderModal({
+      initial: { ...BASE, type: 'lxc' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox' }],
+    })
+    expect(screen.getByText('Parent Container')).toBeDefined()
+  })
+
+  it('excludes unsupported candidate types for docker_container', () => {
     renderModal({
       initial: { ...BASE, type: 'docker_container' },
-      parentContainerNodes: [{ id: 'p1', label: 'My Proxmox', nodeType: 'proxmox' }],
+      parentCandidates: [{ id: 'srv1', label: 'Plain Server', type: 'server' }],
     })
     expect(screen.queryByText('Parent Container')).toBeNull()
   })
