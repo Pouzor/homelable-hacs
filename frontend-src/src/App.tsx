@@ -7,6 +7,7 @@ import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
+import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { ExportModal } from '@/components/modals/ExportModal'
 import { exportCanvasToYaml, downloadYaml } from '@/utils/exportYaml'
@@ -312,6 +313,19 @@ export default function App() {
     // If container_mode changed, apply structural changes (children parentId, node dimensions)
     if (typeof data.container_mode === 'boolean') {
       setProxmoxContainerMode(editNodeId, data.container_mode)
+      // Re-express the relationship with domain children: visual nesting when ON,
+      // a virtual edge when OFF. (data.parent_id is untouched by the toggle.)
+      const childIds = nodes.filter((n) => n.data.parent_id === editNodeId).map((n) => n.id)
+      const virtualEdges = edges
+        .filter((e) => e.data?.type === 'virtual')
+        .map((e) => ({ id: e.id, source: e.source, target: e.target }))
+      const { addChildIds, removeEdgeIds } = planContainerModeEdgeSync(
+        editNodeId, data.container_mode, childIds, virtualEdges,
+      )
+      removeEdgeIds.forEach((id) => deleteEdge(id))
+      addChildIds.forEach((childId) =>
+        onConnect({ source: childId, sourceHandle: 'top', target: editNodeId, targetHandle: 'bottom', type: 'virtual' } as unknown as Connection),
+      )
     }
     // Sync virtual edge when parent_id changes on an LXC/VM node
     const nodeType = data.type ?? existingNode?.data.type
