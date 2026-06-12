@@ -13,6 +13,8 @@ export type NodeType =
   | 'camera'
   | 'printer'
   | 'computer'
+  | 'laptop'
+  | 'mobile'
   | 'cpl'
   | 'docker_host'
   | 'docker_container'
@@ -139,6 +141,8 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   camera: 'Camera',
   printer: 'Printer',
   computer: 'Computer',
+  laptop: 'Laptop',
+  mobile: 'Phone / Mobile',
   cpl: 'CPL / Powerline',
   docker_host: 'Docker Host',
   docker_container: 'Docker Container',

@@ -4,7 +4,7 @@ import type { CheckMethod } from '@/types'
 
 describe('NODE_TYPE_LABELS', () => {
   it('has an entry for every node type', () => {
-    const expectedTypes = ['isp', 'router', 'firewall', 'switch', 'server', 'proxmox', 'vm', 'lxc', 'nas', 'iot', 'ap', 'camera', 'generic']
+    const expectedTypes = ['isp', 'router', 'firewall', 'switch', 'server', 'proxmox', 'vm', 'lxc', 'nas', 'iot', 'ap', 'camera', 'laptop', 'mobile', 'generic']
     expectedTypes.forEach((t) => {
       expect(NODE_TYPE_LABELS).toHaveProperty(t)
       expect(typeof NODE_TYPE_LABELS[t as keyof typeof NODE_TYPE_LABELS]).toBe('string')

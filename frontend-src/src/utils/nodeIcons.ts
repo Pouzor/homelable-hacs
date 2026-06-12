@@ -24,7 +24,7 @@ import {
   // Communications
   Mail, MessageSquare, Phone,
   // Misc devices
-  Printer, Smartphone, Search, Filter, BookOpen, PlugZap, Type,
+  Printer, Smartphone, Laptop, Search, Filter, BookOpen, PlugZap, Type,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -50,6 +50,7 @@ export const ICON_REGISTRY: IconEntry[] = [
   { key: 'wifi',       label: 'Access Point',         category: 'Infrastructure', icon: Wifi },
   { key: 'circle',     label: 'Generic',              category: 'Infrastructure', icon: Circle },
   { key: 'monitor',    label: 'Workstation',          category: 'Infrastructure', icon: Monitor },
+  { key: 'laptop',     label: 'Laptop',               category: 'Infrastructure', icon: Laptop },
   { key: 'smartphone', label: 'Phone / Mobile',       category: 'Infrastructure', icon: Smartphone },
   { key: 'printer',    label: 'Printer',              category: 'Infrastructure', icon: Printer },
   { key: 'plugzap',    label: 'CPL / Powerline',      category: 'Infrastructure', icon: PlugZap },
@@ -167,6 +168,8 @@ export const NODE_TYPE_DEFAULT_ICONS: Record<NodeType, LucideIcon> = {
   camera:       Cctv,
   printer:      Printer,
   computer:     Monitor,
+  laptop:       Laptop,
+  mobile:       Smartphone,
   cpl:          PlugZap,
   docker_host:       Anchor,
   docker_container:  Package,

@@ -18,7 +18,8 @@ const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
   { label: 'Virtualization', types: ['proxmox', 'vm', 'lxc', 'docker_host', 'docker_container'] },
   { label: 'IoT',            types: ['iot', 'camera', 'cpl'] },
   { label: 'Zigbee',         types: ['zigbee_coordinator', 'zigbee_router', 'zigbee_enddevice'] },
-  { label: 'Generic',        types: ['computer', 'generic', 'groupRect'] },
+  { label: 'Personal',       types: ['computer', 'laptop', 'mobile'] },
+  { label: 'Generic',        types: ['generic', 'groupRect'] },
 ]
 
 const CHECK_METHODS: CheckMethod[] = ['none', 'ping', 'http', 'https', 'tcp', 'ssh', 'prometheus', 'health']
