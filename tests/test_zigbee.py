@@ -291,6 +291,69 @@ async def test_import_zigbee_devices_refreshes_approved_canvas_node(
     assert lqi["visible"] is True
 
 
+async def test_import_zigbee_devices_relists_after_node_deleted(
+    coordinator: HomelableCoordinator,
+) -> None:
+    """Regression for homelable#167: approve → delete canvas node → re-import
+    must re-list the device in Pending.
+
+    The standalone repo keeps an ``"approved"`` PendingDevice row and has to
+    revive it on re-import. This integration instead *removes* the pending row
+    on approval (see ``approve_pending``), so a deleted canvas node leaves no
+    orphan and re-import simply re-adds the device. This test guards that the
+    "found N but Pending stays empty" symptom can't reappear here.
+    """
+    dev = {
+        "id": "0xR1",
+        "ieee_address": "0xR1",
+        "friendly_name": "Router",
+        "type": "zigbee_router",
+        "device_type": "Router",
+        "model": "CC2530",
+        "vendor": "TI",
+        "lqi": 220,
+    }
+    # Import → pending.
+    await coordinator.import_zigbee_devices([dev])
+    pending = await coordinator.list_pending(source="zigbee")
+    # Approve → node on canvas, pending row removed.
+    node = await coordinator.approve_pending(pending[0]["id"])
+    assert node is not None
+    assert await coordinator.list_pending(source="zigbee") == []
+    # User deletes the canvas node (frontend saves the canvas without it).
+    canvas = await coordinator.get_canvas()
+    canvas["nodes"] = [n for n in canvas["nodes"] if n.get("ieee_address") != "0xR1"]
+    await coordinator.save_canvas(canvas)
+    # Re-import → device reappears in Pending instead of being swallowed.
+    result = await coordinator.import_zigbee_devices([dev])
+    assert result == {"added": 1, "skipped": 0, "refreshed": 0}
+    relisted = await coordinator.list_pending(source="zigbee")
+    assert {p["ieee_address"] for p in relisted} == {"0xR1"}
+    assert relisted[0]["status"] == "pending"
+
+
+async def test_import_zigbee_devices_keeps_hidden_hidden_on_reimport(
+    coordinator: HomelableCoordinator,
+) -> None:
+    """A user-hidden zigbee device stays hidden on re-import (not revived like #167)."""
+    dev = {
+        "id": "0xR1",
+        "ieee_address": "0xR1",
+        "friendly_name": "Router",
+        "type": "zigbee_router",
+        "device_type": "Router",
+    }
+    await coordinator.import_zigbee_devices([dev])
+    pending = await coordinator.list_pending(source="zigbee")
+    assert await coordinator.hide_pending(pending[0]["id"]) is True
+    # Re-import must not flip the hidden device back to pending.
+    result = await coordinator.import_zigbee_devices([dev])
+    assert result == {"added": 0, "skipped": 1, "refreshed": 0}
+    assert await coordinator.list_pending(source="zigbee") == []
+    hidden = await coordinator.list_pending(status="hidden", source="zigbee")
+    assert {p["ieee_address"] for p in hidden} == {"0xR1"}
+
+
 # ─── WS commands ─────────────────────────────────────────────────────────────
 
 
