@@ -19,15 +19,17 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 ## Features
 
 - **Interactive topology** as a full Lovelace panel — pan, zoom, drag, group.
-- **Network discovery** with nmap, with optional ARP / OS fingerprinting.
-- **Live status checks** via ping, HTTP, TCP, or SSH.
-- **Rich modeling**: 11 node types (router, switch, server, Proxmox, VM, LXC,
-  NAS, IoT, access point, …) and 5 edge types (ethernet, Wi-Fi, IoT, VLAN,
-  virtual).
+- **Network discovery** — pure-Python ping sweep + ARP cache + TCP service
+  detection + mDNS / zeroconf. No nmap, no external binaries, works without root.
+- **Live status checks** via ping, HTTP(S), TCP, SSH, Prometheus, or health endpoint.
+- **Rich modeling**: 20 device node types (ISP, router, firewall, switch, server,
+  Proxmox, VM, LXC, NAS, IoT, access point, camera, printer, computer, laptop,
+  mobile, CPL/powerline, Docker host, Docker container, generic) plus 3 Zigbee
+  types, and 7 edge types (ethernet, Wi-Fi, IoT, VLAN, virtual, cluster, fibre).
 - **Zigbee2MQTT import**: fetch your Zigbee mesh through HA's MQTT integration
   and add coordinator / routers / end devices to the canvas. No extra broker
   config — uses the broker HA already talks to.
-- Mutiple canvas* (soon)
+- **Multiple canvases** (soon).
 
 ---
 
@@ -57,8 +59,9 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 ### Requirements
 
 - Home Assistant **2024.1** or newer.
-- `nmap` available on the host. (HAOS bundles it; Container / Core users may
-  need to install it — see [Scanner privileges](#scanner-privileges).)
+- No external binaries. Scanning is pure Python (ping, ARP cache, TCP connect,
+  mDNS) and works on every install. Raw socket access unlocks extra detail —
+  see [Scanner privileges](#scanner-privileges).
 
 ---
 
@@ -91,15 +94,17 @@ Scan history, hidden devices, and scan configuration live in the side panel.
 
 ## Scanner privileges
 
-Full discovery features (ARP, OS detection, SYN scans) need raw socket access.
-If raw access is unavailable, the scanner falls back to TCP connect scans —
-still useful, but slower and without MAC addresses or OS fingerprints.
+The scanner always works without privileges: ping sweep, ARP cache reads, a
+pure-Python TCP connect scan for service detection, and mDNS / zeroconf.
+Raw socket access (ICMP ping, richer ARP) yields more reliable host discovery
+and MAC addresses. Without it, the scanner still finds hosts via the TCP sweep
+fallback — slower, and MAC addresses may be missing.
 
 | Install type | Notes |
 |---|---|
-| **HAOS / Supervised** | Companion add-on with full privileges is planned. |
-| **Container** | Run the HA container with `CAP_NET_RAW`, or `setcap cap_net_raw+ep $(which nmap)` inside the container. |
-| **Core** | `setcap cap_net_raw+ep $(which nmap)` on the host. |
+| **HAOS / Supervised** | Works out of the box; ping/ARP run with the privileges HA already has. |
+| **Container** | Run the HA container with `CAP_NET_RAW` for ICMP ping + ARP; otherwise the TCP connect fallback is used automatically. |
+| **Core** | Grant the Python interpreter ICMP access (`setcap cap_net_raw+ep $(readlink -f $(which python3))`) for ping, or rely on the TCP fallback. |
 
 ---
 
