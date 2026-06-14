@@ -1,11 +1,5 @@
 # Homelable for Home Assistant
 
-## WIP ##
-/!\ Attention /!\ 
-This is a WIP project. If you are interested to test it and give feedback, you are very welcome.
-Need feedbacks !
-
----
 
 Visualize and monitor your homelab network as an interactive topology — inside
 Home Assistant.
@@ -33,6 +27,7 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 - **Zigbee2MQTT import**: fetch your Zigbee mesh through HA's MQTT integration
   and add coordinator / routers / end devices to the canvas. No extra broker
   config — uses the broker HA already talks to.
+- Mutiple canvas* (soon)
 
 ---
 
