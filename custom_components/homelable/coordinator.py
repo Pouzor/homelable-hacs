@@ -18,6 +18,9 @@ from .const import (
     CONF_SCAN_RANGES,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    DEFAULT_DESIGN_ICON,
+    DEFAULT_DESIGN_NAME,
+    DEFAULT_DESIGN_TYPE,
     DEFAULT_SCAN_RANGES,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
@@ -25,9 +28,11 @@ from .const import (
     MAX_SCAN_RUNS,
     SCAN_SIGNAL,
     STORAGE_KEY_CANVAS,
+    STORAGE_KEY_DESIGNS,
     STORAGE_KEY_PENDING,
     STORAGE_KEY_RUNS,
     STORAGE_VERSION_CANVAS,
+    STORAGE_VERSION_DESIGNS,
     STORAGE_VERSION_PENDING,
     STORAGE_VERSION_RUNS,
 )
@@ -61,13 +66,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self.canvas_store: Store = Store(
             hass, STORAGE_VERSION_CANVAS, STORAGE_KEY_CANVAS
         )
+        self.designs_store: Store = Store(
+            hass, STORAGE_VERSION_DESIGNS, STORAGE_KEY_DESIGNS
+        )
         self.pending_store: Store = Store(
             hass, STORAGE_VERSION_PENDING, STORAGE_KEY_PENDING
         )
         self.runs_store: Store = Store(
             hass, STORAGE_VERSION_RUNS, STORAGE_KEY_RUNS
         )
-        self._canvas: dict[str, Any] | None = None
+        # Multi-design canvas: `_canvases` maps design_id -> canvas dict;
+        # `_designs` is the ordered list of design metadata. Both are loaded
+        # (and legacy single-canvas data migrated) lazily via _ensure_loaded.
+        self._designs: list[dict[str, Any]] | None = None
+        self._canvases: dict[str, dict[str, Any]] | None = None
         self._pending: dict[str, Any] | None = None
         self._runs: list[dict[str, Any]] | None = None
         self._scan_run_id: str | None = None
@@ -75,17 +87,21 @@ class HomelableCoordinator(DataUpdateCoordinator):
     # ─── Status checks (periodic) ────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
-        """Run a status check on every canvas node. Return {node_id: status_dict}."""
-        canvas = await self.get_canvas()
+        """Run a status check on every canvas node across all designs.
+
+        Returns {node_id: status_dict}. Node ids are unique across designs, but
+        we de-dup defensively so a node copied into two canvases is checked once.
+        """
+        await self._ensure_loaded()
         # Hosts that resolve to loopback / link-local / multicast / reserved
         # IPs are only allowed if the admin explicitly opted into that subnet.
         allowed_networks = status_checker._parse_allowed_networks(
             self.get_scan_ranges()
         )
         results: dict[str, dict[str, Any]] = {}
-        for node in canvas.get("nodes", []):
+        for node in self._all_canvas_nodes():
             node_id = node.get("id")
-            if not node_id:
+            if not node_id or node_id in results:
                 continue
             # The frontend serializes nodes flat (top-level ip/hostname/...);
             # legacy/test data may put them under `data`. Read both.
@@ -115,18 +131,180 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 }
         return results
 
+    # ─── Designs (multiple canvases) ─────────────────────────────────────────
+
+    def _new_design(
+        self, name: str, icon: str, design_type: str = DEFAULT_DESIGN_TYPE
+    ) -> dict[str, Any]:
+        now = _utc_now_iso()
+        return {
+            "id": uuid.uuid4().hex,
+            "name": name,
+            "design_type": design_type,
+            "icon": icon,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    async def _ensure_loaded(self) -> None:
+        """Load designs + per-design canvases, migrating legacy data once.
+
+        Pre-multi-design installs stored a single canvas dict
+        (``{nodes, edges, viewport}``) under STORAGE_KEY_CANVAS. On first load
+        we seed a default design and move that canvas into it so existing HA
+        users keep their topology. New installs get an empty default design.
+        """
+        if self._designs is not None and self._canvases is not None:
+            return
+
+        designs_raw = await self.designs_store.async_load()
+        canvas_raw = await self.canvas_store.async_load()
+
+        designs: list[dict[str, Any]] = []
+        if isinstance(designs_raw, dict):
+            designs = list(designs_raw.get("designs") or [])
+
+        canvases: dict[str, dict[str, Any]] = {}
+        legacy_canvas: dict[str, Any] | None = None
+        if isinstance(canvas_raw, dict):
+            if "canvases" in canvas_raw:
+                canvases = dict(canvas_raw["canvases"])
+            elif "nodes" in canvas_raw or "edges" in canvas_raw:
+                # Legacy single-canvas blob.
+                legacy_canvas = canvas_raw
+
+        dirty = False
+        if not designs:
+            default = self._new_design(
+                DEFAULT_DESIGN_NAME, DEFAULT_DESIGN_ICON, DEFAULT_DESIGN_TYPE
+            )
+            designs = [default]
+            canvases = {
+                default["id"]: legacy_canvas or copy.deepcopy(_EMPTY_CANVAS)
+            }
+            dirty = True
+        else:
+            # Guarantee every design has a canvas entry (defensive).
+            for d in designs:
+                if d["id"] not in canvases:
+                    canvases[d["id"]] = copy.deepcopy(_EMPTY_CANVAS)
+                    dirty = True
+
+        self._designs = designs
+        self._canvases = canvases
+        if dirty:
+            await self._save_designs()
+            await self._save_canvases()
+
+    async def _save_designs(self) -> None:
+        await self.designs_store.async_save({"designs": self._designs})
+
+    async def _save_canvases(self) -> None:
+        await self.canvas_store.async_save({"canvases": self._canvases})
+
+    async def _resolve_design_id(self, design_id: str | None) -> str | None:
+        """Return a valid design id: the requested one if it exists, else the
+        first (default) design. None only if no designs exist at all."""
+        await self._ensure_loaded()
+        assert self._designs is not None
+        if design_id and any(d["id"] == design_id for d in self._designs):
+            return design_id
+        return self._designs[0]["id"] if self._designs else None
+
+    async def list_designs(self) -> list[dict[str, Any]]:
+        await self._ensure_loaded()
+        assert self._designs is not None
+        return self._designs
+
+    async def create_design(
+        self,
+        name: str,
+        icon: str = DEFAULT_DESIGN_ICON,
+        design_type: str = DEFAULT_DESIGN_TYPE,
+    ) -> dict[str, Any]:
+        await self._ensure_loaded()
+        assert self._designs is not None and self._canvases is not None
+        design = self._new_design(name, icon, design_type)
+        self._designs.append(design)
+        self._canvases[design["id"]] = copy.deepcopy(_EMPTY_CANVAS)
+        await self._save_designs()
+        await self._save_canvases()
+        return design
+
+    async def update_design(
+        self,
+        design_id: str,
+        *,
+        name: str | None = None,
+        icon: str | None = None,
+    ) -> dict[str, Any] | None:
+        await self._ensure_loaded()
+        assert self._designs is not None
+        for d in self._designs:
+            if d["id"] == design_id:
+                if name is not None:
+                    d["name"] = name
+                if icon is not None:
+                    d["icon"] = icon
+                d["updated_at"] = _utc_now_iso()
+                await self._save_designs()
+                return d
+        return None
+
+    async def delete_design(self, design_id: str) -> str:
+        """Delete a design and its canvas.
+
+        Returns ``"ok"`` on success, ``"last"`` if it's the only design (refused),
+        or ``"not_found"`` if no such design exists.
+        """
+        await self._ensure_loaded()
+        assert self._designs is not None and self._canvases is not None
+        if not any(d["id"] == design_id for d in self._designs):
+            return "not_found"
+        if len(self._designs) <= 1:
+            return "last"
+        self._designs = [d for d in self._designs if d["id"] != design_id]
+        self._canvases.pop(design_id, None)
+        await self._save_designs()
+        await self._save_canvases()
+        return "ok"
+
     # ─── Canvas ──────────────────────────────────────────────────────────────
 
-    async def get_canvas(self) -> dict[str, Any]:
-        if self._canvas is None:
-            self._canvas = (await self.canvas_store.async_load()) or copy.deepcopy(
-                _EMPTY_CANVAS
-            )
-        return self._canvas
+    async def get_canvas(self, design_id: str | None = None) -> dict[str, Any]:
+        """Return the canvas for a design (default design if omitted)."""
+        await self._ensure_loaded()
+        assert self._canvases is not None
+        did = await self._resolve_design_id(design_id)
+        if did is None:
+            return copy.deepcopy(_EMPTY_CANVAS)
+        return self._canvases.setdefault(did, copy.deepcopy(_EMPTY_CANVAS))
 
-    async def save_canvas(self, canvas: dict[str, Any]) -> None:
-        self._canvas = canvas
-        await self.canvas_store.async_save(canvas)
+    async def save_canvas(
+        self, canvas: dict[str, Any], design_id: str | None = None
+    ) -> None:
+        """Persist the canvas under a design (default design if omitted)."""
+        await self._ensure_loaded()
+        assert self._canvases is not None
+        did = await self._resolve_design_id(design_id)
+        if did is None:
+            # No designs at all (shouldn't happen after _ensure_loaded seeds a
+            # default); create one and assign so data is never dropped.
+            design = await self.create_design(
+                DEFAULT_DESIGN_NAME, DEFAULT_DESIGN_ICON, DEFAULT_DESIGN_TYPE
+            )
+            did = design["id"]
+        self._canvases[did] = canvas
+        await self._save_canvases()
+
+    def _all_canvas_nodes(self) -> list[dict[str, Any]]:
+        """Flatten nodes across every design's canvas (status + scan exclusion)."""
+        if not self._canvases:
+            return []
+        nodes: list[dict[str, Any]] = []
+        for canvas in self._canvases.values():
+            nodes.extend(canvas.get("nodes", []))
+        return nodes
 
     # ─── Pending devices ─────────────────────────────────────────────────────
 
@@ -210,10 +388,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         return False
 
     async def _create_zigbee_parent_edge(
-        self, child_node: dict[str, Any]
+        self, child_node: dict[str, Any], design_id: str | None = None
     ) -> dict[str, Any] | None:
-        """If child is a zigbee node with a known parent on the canvas,
-        append a parent → child edge to the canvas and return it.
+        """If child is a zigbee node with a known parent on the same design's
+        canvas, append a parent → child edge to that canvas and return it.
 
         Idempotent: skips if an edge with the same source+target already exists.
         """
@@ -224,7 +402,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
         parent_ieee = child_node.get("parent_id") or data.get("parent_id")
         if not parent_ieee:
             return None
-        canvas = await self.get_canvas()
+        design_id = await self._resolve_design_id(design_id)
+        canvas = await self.get_canvas(design_id)
         parent = next(
             (
                 n
@@ -253,7 +432,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "data": {"type": "iot"},
         }
         existing.append(edge)
-        await self.save_canvas(canvas)
+        await self.save_canvas(canvas, design_id)
         return edge
 
     async def approve_pending(
@@ -271,6 +450,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return None
 
         overrides = node_overrides or {}
+        # Approve onto the active design (falls back to the default design).
+        # `design_id` is carried on overrides but never leaks into node fields —
+        # the node dict below only copies explicit keys + data_extras + data.
+        design_id = await self._resolve_design_id(overrides.get("design_id"))
         node_type = overrides.get("type") or device.get("suggested_type") or "generic"
         # Zigbee devices are imported one-shot from Z2M; no live status check
         # is possible, so default check_method to "none" (status_checker treats
@@ -328,9 +511,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
             **overrides.get("data", {}),
         }
 
-        canvas = await self.get_canvas()
+        canvas = await self.get_canvas(design_id)
         canvas.setdefault("nodes", []).append(node)
-        await self.save_canvas(canvas)
+        await self.save_canvas(canvas, design_id)
 
         await self.remove_pending(device_id)
         return node
@@ -385,11 +568,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
             }
 
         ranges = self.get_scan_ranges()
-        canvas = await self.get_canvas()
+        await self._ensure_loaded()
         pending = await self._get_pending()
         canvas_ips = {
             n.get("ip") or n.get("data", {}).get("ip")
-            for n in canvas.get("nodes", [])
+            for n in self._all_canvas_nodes()
             if n.get("ip") or n.get("data", {}).get("ip")
         }
         hidden_ips = {d["ip"] for d in pending["devices"] if d.get("status") == "hidden"}
@@ -655,16 +838,19 @@ class HomelableCoordinator(DataUpdateCoordinator):
         Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
         """
         pending = await self._get_pending()
-        canvas = await self.get_canvas()
+        await self._ensure_loaded()
+        assert self._canvases is not None
 
         # IEEE addresses already represented anywhere — avoid duplicates.
-        # Canvas nodes may be flat (top-level ieee_address) or nested under
-        # `data`; read both so an approved zigbee node isn't re-imported.
-        canvas_by_ieee = {
-            ieee: n
-            for n in canvas.get("nodes", [])
-            if (ieee := n.get("ieee_address") or n.get("data", {}).get("ieee_address"))
-        }
+        # Scan every design's canvas; nodes may be flat (top-level ieee_address)
+        # or nested under `data`. Map ieee -> (design_id, node) so a refresh
+        # saves the right canvas.
+        canvas_by_ieee: dict[str, tuple[str, dict[str, Any]]] = {}
+        for did, canvas in self._canvases.items():
+            for n in canvas.get("nodes", []):
+                ieee = n.get("ieee_address") or n.get("data", {}).get("ieee_address")
+                if ieee:
+                    canvas_by_ieee[ieee] = (did, n)
         on_canvas = set(canvas_by_ieee)
         already_pending = {
             d.get("data_extras", {}).get("ieee_address")
@@ -676,23 +862,26 @@ class HomelableCoordinator(DataUpdateCoordinator):
         added = 0
         skipped = 0
         refreshed = 0
+        dirty_designs: set[str] = set()
         now = _utc_now_iso()
         for dev in devices:
             ieee = dev.get("ieee_address") or dev.get("id")
             if not ieee:
                 skipped += 1
                 continue
-            # Already approved onto the canvas: refresh its IEEE/Vendor/Model/LQI
+            # Already approved onto a canvas: refresh its IEEE/Vendor/Model/LQI
             # props (preserving the user's visibility choices) and skip creating
             # a pending row, so approved devices stay out of pending/hidden.
-            node = canvas_by_ieee.get(ieee)
-            if node is not None:
+            entry = canvas_by_ieee.get(ieee)
+            if entry is not None:
+                did, node = entry
                 props = zigbee.build_zigbee_properties(
                     ieee, dev.get("vendor"), dev.get("model"), dev.get("lqi")
                 )
                 node["properties"] = zigbee.merge_zigbee_properties(
                     node.get("properties"), props
                 )
+                dirty_designs.add(did)
                 refreshed += 1
                 continue
             if ieee in existing:
@@ -728,6 +917,6 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         if added:
             await self._save_pending()
-        if refreshed:
-            await self.save_canvas(canvas)
+        if dirty_designs:
+            await self._save_canvases()
         return {"added": added, "skipped": skipped, "refreshed": refreshed}
