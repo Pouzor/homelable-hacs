@@ -3,7 +3,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.homelable.coordinator import HomelableCoordinator
+from custom_components.homelable.coordinator import (
+    HomelableCoordinator,
+    build_mac_property,
+    merge_mac_property,
+)
 
 
 def _mock_entry(scan_ranges: str = "192.168.1.0/24") -> MagicMock:
@@ -408,6 +412,59 @@ async def test_approve_non_zigbee_has_empty_properties(coord) -> None:  # noqa: 
     assert node["properties"] == []
     assert node["status"] == "unknown"
     assert node["check_method"] == "ping"
+
+
+# --- MAC address propagation on approve (issue #168) ---
+
+def test_build_mac_property_returns_hidden_row() -> None:
+    assert build_mac_property("aa:bb:cc:dd:ee:ff") == [
+        {"key": "MAC", "value": "aa:bb:cc:dd:ee:ff", "icon": None, "visible": False}
+    ]
+
+
+def test_build_mac_property_empty_when_no_mac() -> None:
+    assert build_mac_property(None) == []
+    assert build_mac_property("") == []
+
+
+def test_merge_mac_property_appends_when_absent() -> None:
+    existing = [{"key": "Note", "value": "x", "icon": None, "visible": True}]
+    merged = merge_mac_property(existing, "aa:bb:cc:dd:ee:ff")
+    assert merged == [
+        {"key": "Note", "value": "x", "icon": None, "visible": True},
+        {"key": "MAC", "value": "aa:bb:cc:dd:ee:ff", "icon": None, "visible": False},
+    ]
+    # Source list left untouched.
+    assert existing == [{"key": "Note", "value": "x", "icon": None, "visible": True}]
+
+
+def test_merge_mac_property_keeps_existing_mac_row() -> None:
+    existing = [{"key": "MAC", "value": "old", "icon": None, "visible": True}]
+    assert merge_mac_property(existing, "aa:bb:cc:dd:ee:ff") == existing
+
+
+@pytest.mark.asyncio
+async def test_approve_non_zigbee_carries_scanned_mac(coord) -> None:  # noqa: ANN001
+    """A non-zigbee device with a scanned MAC lands a hidden MAC property row."""
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-mac",
+            "ip": "192.168.1.6",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "hostname": "printer",
+            "os": None,
+            "services": [],
+            "suggested_type": "generic",
+            "status": "pending",
+        }
+    )
+    await coord._save_pending()
+    node = await coord.approve_pending("pd-mac")
+    assert node["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert node["properties"] == [
+        {"key": "MAC", "value": "aa:bb:cc:dd:ee:ff", "icon": None, "visible": False}
+    ]
 
 
 @pytest.mark.asyncio
