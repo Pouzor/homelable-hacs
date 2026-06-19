@@ -16,6 +16,7 @@ interface CanvasPayload {
   edges: object[]
   viewport: object
   custom_style?: object | null
+  design_id?: string | null
 }
 
 // Mimic an axios response so callers using `.data` keep working.
@@ -33,13 +34,47 @@ function notImplemented(name: string): never {
 // ─── Canvas ──────────────────────────────────────────────────────────────────
 
 export const canvasApi = {
-  load: async () => {
-    const canvas = await wsCall<CanvasPayload>('homelable/get_canvas')
+  load: async (design_id?: string) => {
+    const canvas = await wsCall<CanvasPayload>('homelable/get_canvas', {
+      design_id: design_id ?? null,
+    })
     return toAxiosLike(canvas)
   },
   save: async (payload: CanvasPayload) => {
+    // design_id travels as a top-level WS param; the canvas blob itself stays
+    // free of it so stored shapes match the standalone serializer.
+    const { design_id = null, ...canvas } = payload
     const result = await wsCall<{ ok: boolean }>('homelable/save_canvas', {
-      canvas: payload,
+      canvas,
+      design_id,
+    })
+    return toAxiosLike(result)
+  },
+}
+
+// ─── Designs (multiple canvases) ─────────────────────────────────────────────
+
+import type { Design } from '@/types'
+
+export const designsApi = {
+  list: async () => {
+    const result = await wsCall<{ designs: Design[] }>('homelable/designs/list')
+    return toAxiosLike(result.designs)
+  },
+  create: async (data: { name: string; icon?: string; design_type?: string }) => {
+    const result = await wsCall<Design>('homelable/designs/create', data)
+    return toAxiosLike(result)
+  },
+  update: async (id: string, data: { name?: string; icon?: string }) => {
+    const result = await wsCall<Design>('homelable/designs/update', {
+      design_id: id,
+      ...data,
+    })
+    return toAxiosLike(result)
+  },
+  delete: async (id: string) => {
+    const result = await wsCall<{ ok: boolean }>('homelable/designs/delete', {
+      design_id: id,
     })
     return toAxiosLike(result)
   },
@@ -71,13 +106,13 @@ export const scanApi = {
     )
     return toAxiosLike(result.devices)
   },
-  approve: async (id: string, nodeData: object) => {
+  approve: async (id: string, nodeData: object, designId?: string | null) => {
     const result = await wsCall<{
       node: { id: string; type: string; data: object }
       node_id: string
       edges: Array<{ id: string; source: string; target: string }>
       edges_created: number
-    }>('homelable/scan/approve', { device_id: id, overrides: nodeData })
+    }>('homelable/scan/approve', { device_id: id, overrides: nodeData, design_id: designId ?? null })
     return toAxiosLike(result)
   },
   hide: async (id: string) => {
@@ -104,7 +139,7 @@ export const scanApi = {
     })
     return toAxiosLike(result)
   },
-  bulkApprove: async (ids: string[], overrides: object = {}) => {
+  bulkApprove: async (ids: string[], overrides: object = {}, designId?: string | null) => {
     const result = await wsCall<{
       approved: number
       nodes: object[]
@@ -113,7 +148,7 @@ export const scanApi = {
       edges: Array<{ id: string; source: string; target: string }>
       edges_created: number
       not_found: string[]
-    }>('homelable/scan/approve_batch', { device_ids: ids, overrides })
+    }>('homelable/scan/approve_batch', { device_ids: ids, overrides, design_id: designId ?? null })
     return toAxiosLike(result)
   },
   bulkHide: async (ids: string[]) => {

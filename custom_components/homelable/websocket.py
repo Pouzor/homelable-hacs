@@ -17,6 +17,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register all Homelable WS commands."""
     websocket_api.async_register_command(hass, ws_get_canvas)
     websocket_api.async_register_command(hass, ws_save_canvas)
+    websocket_api.async_register_command(hass, ws_designs_list)
+    websocket_api.async_register_command(hass, ws_designs_create)
+    websocket_api.async_register_command(hass, ws_designs_update)
+    websocket_api.async_register_command(hass, ws_designs_delete)
     websocket_api.async_register_command(hass, ws_scan_start)
     websocket_api.async_register_command(hass, ws_scan_cancel)
     websocket_api.async_register_command(hass, ws_scan_pending)
@@ -49,9 +53,23 @@ def _send_not_setup(connection, msg_id: int) -> None:
     connection.send_error(msg_id, "not_setup", "Homelable not configured")
 
 
+def _overrides_with_design(msg: dict[str, Any]) -> dict[str, Any]:
+    """Merge a top-level `design_id` into the approve `overrides` dict so the
+    coordinator approves the node onto the active design. Returns a copy."""
+    overrides = dict(msg.get("overrides") or {})
+    if msg.get("design_id") and "design_id" not in overrides:
+        overrides["design_id"] = msg["design_id"]
+    return overrides
+
+
 # ─── Canvas ──────────────────────────────────────────────────────────────────
 
-@websocket_api.websocket_command({vol.Required("type"): "homelable/get_canvas"})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/get_canvas",
+        vol.Optional("design_id"): vol.Any(str, None),
+    }
+)
 @websocket_api.async_response
 async def ws_get_canvas(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
@@ -60,7 +78,7 @@ async def ws_get_canvas(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    canvas = await coord.get_canvas()
+    canvas = await coord.get_canvas(msg.get("design_id"))
     connection.send_result(msg["id"], canvas)
 
 
@@ -68,6 +86,7 @@ async def ws_get_canvas(
     {
         vol.Required("type"): "homelable/save_canvas",
         vol.Required("canvas"): dict,
+        vol.Optional("design_id"): vol.Any(str, None),
     }
 )
 @websocket_api.require_admin
@@ -79,7 +98,97 @@ async def ws_save_canvas(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    await coord.save_canvas(msg["canvas"])
+    await coord.save_canvas(msg["canvas"], msg.get("design_id"))
+    connection.send_result(msg["id"], {"ok": True})
+
+
+# ─── Designs (multiple canvases) ──────────────────────────────────────────────
+
+@websocket_api.websocket_command({vol.Required("type"): "homelable/designs/list"})
+@websocket_api.async_response
+async def ws_designs_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    connection.send_result(msg["id"], {"designs": await coord.list_designs()})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/designs/create",
+        vol.Required("name"): str,
+        vol.Optional("icon", default="dashboard"): str,
+        vol.Optional("design_type", default="network"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_designs_create(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    design = await coord.create_design(
+        msg["name"], msg["icon"], msg["design_type"]
+    )
+    connection.send_result(msg["id"], design)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/designs/update",
+        vol.Required("design_id"): str,
+        vol.Optional("name"): str,
+        vol.Optional("icon"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_designs_update(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    design = await coord.update_design(
+        msg["design_id"], name=msg.get("name"), icon=msg.get("icon")
+    )
+    if design is None:
+        connection.send_error(msg["id"], "not_found", "Design not found")
+        return
+    connection.send_result(msg["id"], design)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/designs/delete",
+        vol.Required("design_id"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_designs_delete(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    result = await coord.delete_design(msg["design_id"])
+    if result == "not_found":
+        connection.send_error(msg["id"], "not_found", "Design not found")
+        return
+    if result == "last":
+        connection.send_error(
+            msg["id"], "last_design", "Cannot delete the only canvas"
+        )
+        return
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -137,6 +246,7 @@ async def ws_scan_pending(
         vol.Required("type"): "homelable/scan/approve",
         vol.Required("device_id"): str,
         vol.Optional("overrides", default={}): dict,
+        vol.Optional("design_id"): vol.Any(str, None),
     }
 )
 @websocket_api.require_admin
@@ -148,11 +258,14 @@ async def ws_scan_approve(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    node = await coord.approve_pending(msg["device_id"], msg["overrides"])
+    overrides = _overrides_with_design(msg)
+    node = await coord.approve_pending(msg["device_id"], overrides)
     if node is None:
         connection.send_error(msg["id"], "not_found", "Device not found")
         return
-    auto_edge = await coord._create_zigbee_parent_edge(node)
+    auto_edge = await coord._create_zigbee_parent_edge(
+        node, overrides.get("design_id")
+    )
     edges = [auto_edge] if auto_edge else []
     connection.send_result(
         msg["id"],
@@ -297,6 +410,7 @@ def ws_scan_subscribe(
         vol.Required("type"): "homelable/scan/approve_batch",
         vol.Required("device_ids"): [str],
         vol.Optional("overrides", default={}): dict,
+        vol.Optional("design_id"): vol.Any(str, None),
     }
 )
 @websocket_api.require_admin
@@ -308,20 +422,22 @@ async def ws_scan_approve_batch(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
+    overrides = _overrides_with_design(msg)
+    design_id = overrides.get("design_id")
     nodes: list[dict[str, Any]] = []
     device_ids: list[str] = []
     node_ids: list[str] = []
     edges: list[dict[str, Any]] = []
     not_found: list[str] = []
     for device_id in msg["device_ids"]:
-        node = await coord.approve_pending(device_id, msg["overrides"])
+        node = await coord.approve_pending(device_id, overrides)
         if node is None:
             not_found.append(device_id)
             continue
         nodes.append(node)
         device_ids.append(device_id)
         node_ids.append(node["id"])
-        auto_edge = await coord._create_zigbee_parent_edge(node)
+        auto_edge = await coord._create_zigbee_parent_edge(node, design_id)
         if auto_edge:
             edges.append(auto_edge)
     connection.send_result(

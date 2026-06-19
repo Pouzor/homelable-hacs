@@ -6,6 +6,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { scanApi } from '@/api/ha'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
 import { toast } from 'sonner'
 import { PendingDeviceModal, type PendingDevice } from '@/components/modals/PendingDeviceModal'
 import type { NodeType, ServiceInfo } from '@/types'
@@ -118,6 +119,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus)
   const { addNode, scanEventTs } = useCanvasStore()
+  const activeDesignId = useDesignStore((s) => s.activeDesignId)
   const highlightRef = useRef<HTMLButtonElement>(null)
 
   const load = useCallback(async () => {
@@ -253,7 +255,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
         services: (device.services ?? []) as ServiceInfo[],
         properties: zigbee ? buildZigbeeProperties(device) : [],
       }
-      const res = await scanApi.approve(device.id, nodeData)
+      const res = await scanApi.approve(device.id, nodeData, activeDesignId)
       const nodeId = res.data.node_id
       addNode({
         id: nodeId,
@@ -296,7 +298,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
     const ids = [...selectedIds]
     if (ids.length === 0) return
     try {
-      const res = await scanApi.bulkApprove(ids)
+      const res = await scanApi.bulkApprove(ids, {}, activeDesignId)
       const deviceToNode: Record<string, string> = {}
       res.data.device_ids.forEach((did, i) => { deviceToNode[did] = res.data.node_ids[i] })
       const approvedDevices = devices.filter((d) => ids.includes(d.id))

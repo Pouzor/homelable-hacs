@@ -28,9 +28,10 @@ import { ThemeModal } from '@/components/modals/ThemeModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
-import { canvasApi } from '@/api/client'
+import { canvasApi, designsApi } from '@/api/client'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
@@ -43,6 +44,7 @@ export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
+  const { activeDesignId, setDesigns, setActiveDesign } = useDesignStore()
 
   useStatusPolling()
 
@@ -60,28 +62,75 @@ export default function App() {
   const [scanConfigOpen, setScanConfigOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
 
-  // Declare handleSave before the Ctrl+S effect so it is in scope
-  const handleSave = useCallback(async () => {
+  // Declare handleSave before the Ctrl+S effect so it is in scope.
+  // Returns true on success, false on failure — the design-switch effect relies
+  // on this to avoid loading (and clobbering) the canvas when a save fails.
+  const handleSave = useCallback(async (designIdOverride?: string): Promise<boolean> => {
     try {
+      const saveDesignId = designIdOverride ?? activeDesignId
       if (STANDALONE) {
         localStorage.setItem(STANDALONE_STORAGE_KEY, JSON.stringify({ nodes, edges, theme_id: activeTheme, custom_style: customStyle }))
         markSaved()
         toast.success('Canvas saved')
-        return
+        return true
       }
       const nodesToSave = nodes.map(serializeNode)
       const edgesToSave = edges.map(serializeEdge)
-      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: { theme_id: activeTheme }, custom_style: customStyle })
+      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: { theme_id: activeTheme }, custom_style: customStyle, design_id: saveDesignId })
       markSaved()
       toast.success('Canvas saved')
+      return true
     } catch {
       toast.error('Save failed')
+      return false
     }
-  }, [nodes, edges, markSaved, activeTheme, customStyle])
+  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId])
 
   // Keep a ref so the keydown handler always calls the latest version
   const handleSaveRef = useRef(handleSave)
   useEffect(() => { handleSaveRef.current = handleSave }, [handleSave])
+
+  const loadCanvasFromApi = useCallback(async (designId?: string) => {
+    try {
+      const res = await canvasApi.load(designId)
+      const { nodes: apiNodes, edges: apiEdges } = res.data
+      if (apiNodes.length > 0) {
+        const proxmoxContainerMap = new Map<string, boolean>(
+          (apiNodes as ApiNode[])
+            .filter((n) => n.type === 'group' || n.container_mode === true)
+            .map((n) => [n.id, true])
+        )
+        const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
+        const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
+        const savedTheme = res.data.viewport?.theme_id
+        if (savedTheme) setTheme(savedTheme)
+        if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+        loadCanvas(rfNodes, rfEdges)
+      } else {
+        loadCanvas(demoNodes, demoEdges)
+      }
+    } catch {
+      loadCanvas(demoNodes, demoEdges)
+    }
+  }, [loadCanvas, setTheme, setCustomStyle])
+
+  const loadDesignsAndCanvas = useCallback(async () => {
+    if (STANDALONE) return
+    try {
+      const designs = (await designsApi.list()).data
+      setDesigns(designs)
+      const targetId = activeDesignId ?? designs[0]?.id
+      if (targetId) {
+        setActiveDesign(targetId)
+        await loadCanvasFromApi(targetId)
+      } else {
+        loadCanvas(demoNodes, demoEdges)
+      }
+    } catch {
+      // If the WS call fails, fall back to demo data so the canvas isn't blank.
+      loadCanvas(demoNodes, demoEdges)
+    }
+  }, [setDesigns, setActiveDesign, loadCanvasFromApi, activeDesignId, loadCanvas])
 
   // Load canvas on auth (or immediately in standalone mode)
   useEffect(() => {
@@ -102,28 +151,54 @@ export default function App() {
       return
     }
     if (!isAuthenticated) return
-    canvasApi.load()
-      .then((res) => {
-        const { nodes: apiNodes, edges: apiEdges } = res.data
-        if (apiNodes.length > 0) {
-          // Build a map of container mode nodes to know if children should be nested
-          const proxmoxContainerMap = new Map<string, boolean>(
-            (apiNodes as ApiNode[])
-              .filter((n) => n.type === 'group' || n.container_mode === true)
-              .map((n) => [n.id, true])
-          )
-          const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
-          const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
-          const savedTheme = res.data.viewport?.theme_id
-          if (savedTheme) setTheme(savedTheme)
-          if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
-          loadCanvas(rfNodes, rfEdges)
-        } else {
-          loadCanvas(demoNodes, demoEdges)
-        }
-      })
-      .catch(() => loadCanvas(demoNodes, demoEdges))
+    loadDesignsAndCanvas()
+    // Only on auth change, not design change — the switch effect below handles
+    // reloading when the active design changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, loadCanvas, setTheme, setCustomStyle])
+
+  // Reload canvas when the active design changes (after the initial load).
+  const initialLoadDone = useRef(false)
+  const prevDesignRef = useRef<string | null>(null)
+  // Set while we programmatically revert activeDesignId after a failed save, so
+  // the re-entrant effect run skips save/load and just re-syncs the refs.
+  const revertingRef = useRef(false)
+  useEffect(() => {
+    if (revertingRef.current) {
+      revertingRef.current = false
+      prevDesignRef.current = activeDesignId
+      return
+    }
+    if (!STANDALONE && isAuthenticated && activeDesignId && initialLoadDone.current) {
+      const oldId = prevDesignRef.current
+      // If the previous design was deleted (no longer in the list), don't try to
+      // save into it — just load the newly-selected design.
+      const oldStillExists = oldId ? useDesignStore.getState().designs.some((d) => d.id === oldId) : false
+      if (oldId && oldId !== activeDesignId && oldStillExists) {
+        // Save current (old) canvas before switching. handleSave is called with
+        // the old id so data lands under the correct design_id.
+        const targetId = activeDesignId
+        handleSave(oldId).then((ok) => {
+          if (ok) {
+            loadCanvasFromApi(targetId)
+          } else {
+            // Save failed: keep the unsaved canvas on screen by reverting the
+            // selection back to the old design.
+            toast.error('Switch cancelled — unsaved changes kept')
+            revertingRef.current = true
+            setActiveDesign(oldId)
+          }
+        })
+      } else {
+        loadCanvasFromApi(activeDesignId)
+      }
+    }
+    if (activeDesignId) {
+      prevDesignRef.current = activeDesignId
+      initialLoadDone.current = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDesignId])
 
   // Keep refs for store actions so keydown handler is always up-to-date without re-registering
   const undoRef = useRef(undo)

@@ -25,6 +25,8 @@ import {
   Mail, MessageSquare, Phone,
   // Misc devices
   Printer, Smartphone, Laptop, Search, Filter, BookOpen, PlugZap, Type,
+  // Electrical
+  ToggleLeft,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -180,6 +182,20 @@ export const NODE_TYPE_DEFAULT_ICONS: Record<NodeType, LucideIcon> = {
   zigbee_coordinator: Radio,
   zigbee_router:      Zap,
   zigbee_enddevice:   Lightbulb,
+  grid:              Zap,
+  ups:               Power,
+  battery:           BatteryCharging,
+  generator:         Fan,
+  solar_panel:       Sun,
+  inverter:          Workflow,
+  circuit_breaker:   PlugZap,
+  contactor:         ToggleLeft,
+  electrical_switch: ToggleLeft,
+  socket:            Plug,
+  light:             Lightbulb,
+  meter:             Gauge,
+  transformer:       CircleDot,
+  load:              Circle,
 }
 
 /** Resolve the display icon for a node — custom_icon takes priority over type default.

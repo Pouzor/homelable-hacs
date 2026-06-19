@@ -7,6 +7,15 @@ PLATFORMS: list[str] = []  # Phase 2: ["sensor", "binary_sensor"]
 STORAGE_KEY_CANVAS = f"{DOMAIN}_canvas"
 STORAGE_VERSION_CANVAS = 1
 
+STORAGE_KEY_DESIGNS = f"{DOMAIN}_designs"
+STORAGE_VERSION_DESIGNS = 1
+
+# Default design seeded on first run / legacy migration. Existing single-canvas
+# data is migrated into a design with this name so HA users lose nothing.
+DEFAULT_DESIGN_NAME = "Network Topology"
+DEFAULT_DESIGN_ICON = "network"
+DEFAULT_DESIGN_TYPE = "network"
+
 STORAGE_KEY_PENDING = f"{DOMAIN}_pending_devices"
 STORAGE_VERSION_PENDING = 1
 
