@@ -43,6 +43,34 @@ _EMPTY_CANVAS = {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 
 _EMPTY_PENDING: dict[str, Any] = {"devices": []}
 
 
+def build_mac_property(mac: str | None) -> list[dict[str, Any]]:
+    """Build a NodeProperty list carrying a device MAC address.
+
+    Shape matches the frontend ``NodeProperty`` type
+    (``{key, value, icon, visible}``). Hidden by default — the user opts in to
+    showing it on the canvas card from the right panel. Returns an empty list
+    when no MAC is known.
+    """
+    if not mac:
+        return []
+    return [{"key": "MAC", "value": mac, "icon": None, "visible": False}]
+
+
+def merge_mac_property(
+    props: list[dict[str, Any]] | None, mac: str | None
+) -> list[dict[str, Any]]:
+    """Append a MAC NodeProperty to ``props`` unless one is already present.
+
+    Preserves any user-supplied properties (and an existing MAC row's
+    visibility) untouched. Used on approve so the scanned MAC is not lost.
+    """
+    out = [dict(p) for p in (props or [])]
+    if not mac or any(p.get("key") == "MAC" for p in out):
+        return out
+    out.append({"key": "MAC", "value": mac, "icon": None, "visible": False})
+    return out
+
+
 def _utc_now_iso() -> str:
     """ISO-8601 UTC with trailing 'Z' (frontend Date() expects this form)."""
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -510,6 +538,13 @@ class HomelableCoordinator(DataUpdateCoordinator):
             **data_extras,
             **overrides.get("data", {}),
         }
+        # Non-zigbee nodes carry the scanned MAC as a hidden property row so the
+        # user can opt in to showing it on the canvas card. Merge (rather than
+        # overwrite) to preserve any properties carried on the approve payload.
+        if not is_zigbee:
+            node["properties"] = merge_mac_property(
+                node.get("properties"), device.get("mac")
+            )
 
         canvas = await self.get_canvas(design_id)
         canvas.setdefault("nodes", []).append(node)
