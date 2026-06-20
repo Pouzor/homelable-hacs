@@ -102,6 +102,32 @@ describe('applyDagreLayout', () => {
     expect(frigate.position.y).toBeGreaterThan(proxmox.position.y)
   })
 
+  it('does not overlap sized container nodes (groups) that carry no edges', () => {
+    // Regression: issue #10. Two grouped containers have explicit width/height
+    // but no edges, so Dagre stacks them on the same rank. With the wrong size
+    // (180x52) reserved, their real 400-wide boxes overlapped ("same stack").
+    function makeGroup(id: string): Node<NodeData> {
+      return {
+        id,
+        type: 'group',
+        position: { x: 0, y: 0 },
+        width: 400,
+        height: 300,
+        data: { type: 'group', label: id } as unknown as NodeData,
+      }
+    }
+    const nodes = [makeGroup('g1'), makeGroup('g2')]
+    const edges: Edge<EdgeData>[] = []
+
+    const result = applyDagreLayout(nodes, edges)
+    const g1 = result.find((n) => n.id === 'g1')!
+    const g2 = result.find((n) => n.id === 'g2')!
+
+    // Their 400-wide boxes must not overlap on the X axis.
+    const [leftBox, rightBox] = g1.position.x <= g2.position.x ? [g1, g2] : [g2, g1]
+    expect(rightBox.position.x).toBeGreaterThanOrEqual(leftBox.position.x + 400)
+  })
+
   it('places two switch nodes connected to each other at the same Y', () => {
     const nodes = [
       makeNode('router', 'router'),

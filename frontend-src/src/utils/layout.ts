@@ -8,6 +8,18 @@ const NODE_HEIGHT = 52
 const PEER_TYPES = new Set(['proxmox', 'switch'])
 
 /**
+ * Real footprint Dagre should reserve for a top-level node.
+ * Container nodes (group, groupRect, resized proxmox) carry an explicit
+ * width/height — use it so Dagre doesn't overlap them. Plain device nodes
+ * have none, so fall back to the default node box.
+ */
+function nodeSize(node: Node<NodeData>): { w: number; h: number } {
+  const w = node.width ?? (node.type === 'proxmox' ? 300 : NODE_WIDTH)
+  const h = node.height ?? (node.type === 'proxmox' ? 200 : NODE_HEIGHT)
+  return { w, h }
+}
+
+/**
  * Find groups of peer nodes (same type, directly connected to each other)
  * using union-find. Returns a map: nodeId → groupId (the minimum nodeId in the group).
  */
@@ -77,8 +89,7 @@ export function applyDagreLayout(
   g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80 })
 
   for (const node of topLevel) {
-    const w = node.type === 'proxmox' ? (node.width ?? 300) : NODE_WIDTH
-    const h = node.type === 'proxmox' ? (node.height ?? 200) : NODE_HEIGHT
+    const { w, h } = nodeSize(node)
     g.setNode(node.id, { width: w, height: h })
   }
   for (const edge of edges) {
@@ -103,8 +114,7 @@ export function applyDagreLayout(
   const positions = new Map<string, { x: number; y: number; w: number; h: number }>()
   for (const node of topLevel) {
     const pos = g.node(node.id)
-    const w = node.type === 'proxmox' ? (node.width ?? 300) : NODE_WIDTH
-    const h = node.type === 'proxmox' ? (node.height ?? 200) : NODE_HEIGHT
+    const { w, h } = nodeSize(node)
     positions.set(node.id, { x: pos.x - w / 2, y: pos.y - h / 2, w, h })
   }
 
