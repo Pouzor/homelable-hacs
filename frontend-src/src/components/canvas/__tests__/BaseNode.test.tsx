@@ -20,7 +20,10 @@ vi.mock('@/stores/themeStore', () => ({
 }))
 
 vi.mock('@/stores/canvasStore', () => ({
-  useCanvasStore: (sel: (s: { hideIp: boolean }) => unknown) => sel({ hideIp: false }),
+  useCanvasStore: (sel: (s: { hideIp: boolean; serviceStatuses: Record<string, string> }) => unknown) =>
+    sel({ hideIp: false, serviceStatuses: {} }),
+  serviceStatusKey: (nodeId: string, port?: number, protocol?: string) =>
+    `${nodeId}:${port ?? ''}/${protocol ?? ''}`,
 }))
 
 vi.mock('@/utils/themes', () => ({

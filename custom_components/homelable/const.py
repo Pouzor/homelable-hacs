@@ -28,11 +28,17 @@ CONF_SCAN_RANGES = "scan_ranges"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_STATUS_INTERVAL = "status_interval"
 CONF_ZIGBEE_BASE_TOPIC = "zigbee_base_topic"
+CONF_SERVICE_CHECK_ENABLED = "service_check_enabled"
+CONF_SERVICE_CHECK_INTERVAL = "service_check_interval"
 
 DEFAULT_SCAN_RANGES = ["192.168.1.0/24"]
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
 DEFAULT_STATUS_INTERVAL = 60   # seconds
 DEFAULT_ZIGBEE_BASE_TOPIC = "zigbee2mqtt"
+# Per-service status checks are independent of node checks and off by default.
+DEFAULT_SERVICE_CHECK_ENABLED = False
+DEFAULT_SERVICE_CHECK_INTERVAL = 300  # seconds (5 min)
+MIN_SERVICE_CHECK_INTERVAL = 30   # seconds
 
 # Zigbee networkmap timeouts (seconds). Large meshes (>50 devices) routinely
 # take 2-4 minutes; coordinator polls every router for routing tables.
@@ -42,6 +48,11 @@ ZIGBEE_NETWORKMAP_TIMEOUT = 300.0
 # / scan_phase / scan_finished / scan_cancelled). Subscribers receive a single
 # dict payload; see websocket.ws_scan_subscribe.
 SCAN_SIGNAL = f"{DOMAIN}_scan_event"
+
+# Dispatcher signal for live per-service status results. Subscribers receive a
+# dict payload {node_id, services: [{port, protocol, status}], checked_at}; see
+# websocket.ws_service_status_subscribe.
+SERVICE_STATUS_SIGNAL = f"{DOMAIN}_service_status"
 
 # Frontend panel
 PANEL_URL = "/homelable_files"

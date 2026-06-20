@@ -78,6 +78,8 @@ export interface ServiceInfo {
   category?: string
 }
 
+export type ServiceStatus = 'online' | 'offline' | 'unknown'
+
 export interface NodeProperty {
   key: string
   value: string

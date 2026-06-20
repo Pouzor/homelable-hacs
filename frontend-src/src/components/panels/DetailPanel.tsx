@@ -2,8 +2,8 @@ import { createElement, useState } from 'react'
 import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useCanvasStore } from '@/stores/canvasStore'
-import { NODE_TYPE_LABELS, STATUS_COLORS, type ServiceInfo, type NodeData, type NodeProperty } from '@/types'
+import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
+import { NODE_TYPE_LABELS, STATUS_COLORS, type ServiceInfo, type ServiceStatus, type NodeData, type NodeProperty } from '@/types'
 import { getServiceUrl } from '@/utils/serviceUrl'
 import { primaryIp } from '@/utils/maskIp'
 import { PROPERTY_ICONS, PROPERTY_ICON_NAMES, resolvePropertyIcon } from '@/utils/propertyIcons'
@@ -21,6 +21,7 @@ const EMPTY_PROP: PropForm = { key: '', value: '', icon: null, visible: true }
 
 export function DetailPanel({ onEdit }: DetailPanelProps) {
   const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup } = useCanvasStore()
+  const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
 
   const [addingForNode, setAddingForNode] = useState<string | null>(null)
   const [newSvc, setNewSvc] = useState<SvcForm>(EMPTY_FORM)
@@ -299,7 +300,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
               editingIndex === i ? (
                 <ServiceForm key={`edit-${i}`} form={editSvc} onChange={setEditSvc} onConfirm={handleSaveEdit} onCancel={() => setEditingFor(null)} confirmLabel="Save" autoFocus />
               ) : (
-                <ServiceBadge key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`} svc={svc} host={host} onEdit={() => handleStartEdit(i)} onRemove={() => handleRemoveService(i)} />
+                <ServiceBadge key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`} svc={svc} host={host} status={serviceStatuses[serviceStatusKey(node.id, svc.port, svc.protocol)]} onEdit={() => handleStartEdit(i)} onRemove={() => handleRemoveService(i)} />
               )
             )}
           </div>
@@ -658,9 +659,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   web: '#00d4ff', database: '#a855f7', monitoring: '#39d353', storage: '#e3b341', security: '#f85149', remote: '#8b949e',
 }
 
-function ServiceBadge({ svc, host, onEdit, onRemove }: { svc: ServiceInfo; host?: string; onEdit: () => void; onRemove: () => void }) {
+function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInfo; host?: string; status?: ServiceStatus; onEdit: () => void; onRemove: () => void }) {
   const url = getServiceUrl(svc, host)
-  const color = CATEGORY_COLORS[svc.category ?? ''] ?? '#8b949e'
+  // Manually-added services carry no category, so they fell back to grey even
+  // when they're reachable HTTP/HTTPS. Treat any resolvable web URL as `web`.
+  const categoryColor = CATEGORY_COLORS[svc.category ?? ''] ?? (url ? CATEGORY_COLORS.web : '#8b949e')
+  // A live offline service overrides the category colour with red.
+  const color = status === 'offline' ? '#f85149' : categoryColor
   const pathLabel = svc.path?.trim() ? svc.path.trim() : ''
 
   return (

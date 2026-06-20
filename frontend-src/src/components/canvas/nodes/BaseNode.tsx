@@ -8,7 +8,7 @@ import { NodeIcon } from '@/components/ui/NodeIcon'
 import { resolvePropertyIcon } from '@/utils/propertyIcons'
 import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
-import { useCanvasStore } from '@/stores/canvasStore'
+import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
 import { maskIp, primaryIp, splitIps } from '@/utils/maskIp'
 import { bottomHandleId, bottomHandlePositions, clampBottomHandles } from '@/utils/handleUtils'
 import { getServiceUrl } from '@/utils/serviceUrl'
@@ -31,6 +31,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
 
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const hideIp = useCanvasStore((s) => s.hideIp)
+  const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
   const theme = THEMES[activeTheme]
 
   const resolvedIcon = resolveNodeIcon(typeIcon, data.custom_icon)
@@ -152,6 +153,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
           <div className="flex flex-col gap-1 px-2.5 py-1.5 overflow-hidden">
             {services.map((svc, idx) => {
               const url = getServiceUrl(svc, serviceHost)
+              const svcOffline = serviceStatuses[serviceStatusKey(id, svc.port, svc.protocol)] === 'offline'
               const row = (
                 <div
                   className="nodrag flex items-center justify-between gap-2 px-1.5 py-1 rounded text-[10px] min-w-0 overflow-hidden"
@@ -164,7 +166,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
                     {/* LEFT: service name */}
                     <span
                       className="font-medium truncate"
-                      style={{ minWidth: 0 }}
+                      style={{ minWidth: 0, color: svcOffline ? '#f85149' : undefined }}
                       title={svc.service_name}
                     >
                       {svc.service_name}

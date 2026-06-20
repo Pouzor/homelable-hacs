@@ -140,3 +140,93 @@ async def test_check_exception_returns_offline() -> None:
     ):
         result = await status_checker.check_node("ping", None, "10.0.0.1")
     assert result == {"status": "offline", "response_time_ms": None}
+
+
+# --- IPv6 detection (#196 B2) ---
+
+def test_is_ipv6_detects_literals() -> None:
+    assert status_checker._is_ipv6("fe80::1")
+    assert status_checker._is_ipv6("[2001:db8::1]")
+    assert not status_checker._is_ipv6("192.168.1.1")
+    assert not status_checker._is_ipv6("example.com")
+
+
+# --- Per-service status checks (#196 follow-up) ---
+
+@pytest.mark.asyncio
+async def test_check_service_web_online() -> None:
+    """A web port that answers HTTP → online."""
+    svc = {"port": 8080, "protocol": "tcp", "service_name": "http"}
+    with patch.object(
+        status_checker, "_http_get", AsyncMock(return_value=True)
+    ) as mock:
+        status = await status_checker.check_service(svc, "10.0.0.5")
+    assert status == "online"
+    assert mock.call_args.args[0] == "http://10.0.0.5:8080"
+
+
+@pytest.mark.asyncio
+async def test_check_service_web_offline() -> None:
+    svc = {"port": 8080, "protocol": "tcp", "service_name": "http"}
+    with patch.object(status_checker, "_http_get", AsyncMock(return_value=False)):
+        status = await status_checker.check_service(svc, "10.0.0.5")
+    assert status == "offline"
+
+
+@pytest.mark.asyncio
+async def test_check_service_https_port_uses_https_scheme() -> None:
+    svc = {"port": 443, "protocol": "tcp", "service_name": "web"}
+    with patch.object(
+        status_checker, "_http_get", AsyncMock(return_value=True)
+    ) as mock:
+        await status_checker.check_service(svc, "10.0.0.5")
+    assert mock.call_args.args[0] == "https://10.0.0.5:443"
+
+
+@pytest.mark.asyncio
+async def test_check_service_non_http_port_is_unknown() -> None:
+    """SSH and other non-web ports are never probed — stay grey."""
+    svc = {"port": 22, "protocol": "tcp", "service_name": "ssh"}
+    with patch.object(status_checker, "_http_get", AsyncMock()) as mock:
+        status = await status_checker.check_service(svc, "10.0.0.5")
+    assert status == "unknown"
+    mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_service_udp_is_unknown() -> None:
+    svc = {"port": 53, "protocol": "udp", "service_name": "dns"}
+    status = await status_checker.check_service(svc, "10.0.0.5")
+    assert status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_portless_non_web_is_unknown() -> None:
+    svc = {"protocol": "tcp", "service_name": "smtp"}
+    status = await status_checker.check_service(svc, "10.0.0.5")
+    assert status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_service_no_host_is_unknown() -> None:
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http"}
+    assert await status_checker.check_service(svc, None) == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_check_services_returns_one_row_per_service() -> None:
+    services = [
+        {"port": 80, "protocol": "tcp", "service_name": "http"},
+        {"port": 22, "protocol": "tcp", "service_name": "ssh"},
+    ]
+    with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)):
+        rows = await status_checker.check_services("10.0.0.5", services)
+    assert rows == [
+        {"port": 80, "protocol": "tcp", "status": "online"},
+        {"port": 22, "protocol": "tcp", "status": "unknown"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_services_empty() -> None:
+    assert await status_checker.check_services("10.0.0.5", []) == []

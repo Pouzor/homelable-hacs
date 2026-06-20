@@ -7,14 +7,20 @@
  * Real subscription will replace polling once the backend pushes updates.
  */
 import { useEffect } from 'react'
-import { subscribeStatus, type StatusUpdate } from '@/api/ha'
+import {
+  subscribeStatus,
+  subscribeServiceStatus,
+  type StatusUpdate,
+  type ServiceStatusUpdate,
+} from '@/api/ha'
 import { useCanvasStore } from '@/stores/canvasStore'
 
 export function useStatusPolling() {
-  const { updateNode } = useCanvasStore()
+  const { updateNode, setServiceStatuses } = useCanvasStore()
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null
+    let unsubscribeService: (() => void) | null = null
     let cancelled = false
 
     void subscribeStatus((update: StatusUpdate) => {
@@ -30,9 +36,19 @@ export function useStatusPolling() {
       else unsubscribe = un
     })
 
+    // Per-service overlay — only emits when service checks are enabled in options.
+    void subscribeServiceStatus((update: ServiceStatusUpdate) => {
+      if (cancelled || !update.node_id || !update.services) return
+      setServiceStatuses(update.node_id, update.services)
+    }).then((un) => {
+      if (cancelled) un()
+      else unsubscribeService = un
+    })
+
     return () => {
       cancelled = true
       if (unsubscribe) unsubscribe()
+      if (unsubscribeService) unsubscribeService()
     }
-  }, [updateNode])
+  }, [updateNode, setServiceStatuses])
 }

@@ -24,7 +24,9 @@
           "scan_ranges": "Plages réseau (CIDR, séparées par des virgules)",
           "scan_interval": "Intervalle de scan (secondes)",
           "status_interval": "Intervalle de vérification d'état (secondes)",
-          "zigbee_base_topic": "Topic de base Zigbee2MQTT"
+          "zigbee_base_topic": "Topic de base Zigbee2MQTT",
+          "service_check_enabled": "Activer la vérification d'état par service",
+          "service_check_interval": "Intervalle de vérification des services (secondes)"
         }
       }
     }

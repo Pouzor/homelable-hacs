@@ -127,3 +127,25 @@ async def test_check_node_tcp_rejects_link_local_by_default() -> None:
         )
     assert result["status"] == "offline"
     mock.assert_not_awaited()
+
+
+# ─── Per-service checks honor the host filter ────────────────────────────────
+
+
+async def test_check_service_blocks_loopback_without_allowlist() -> None:
+    """A web service on loopback is reported offline, never probed."""
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http"}
+    with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)) as mock:
+        status = await status_checker.check_service(svc, "127.0.0.1", [])
+    assert status == "offline"
+    mock.assert_not_awaited()
+
+
+async def test_check_service_allows_loopback_when_in_scan_range() -> None:
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http"}
+    with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)) as mock:
+        status = await status_checker.check_service(
+            svc, "127.0.0.1", [_net("127.0.0.0/8")]
+        )
+    assert status == "online"
+    mock.assert_awaited_once()

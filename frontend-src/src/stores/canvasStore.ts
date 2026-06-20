@@ -9,12 +9,16 @@ import {
   applyEdgeChanges,
   addEdge,
 } from '@xyflow/react'
-import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef } from '@/types'
+import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus } from '@/types'
 import { generateUUID } from '@/utils/uuid'
 import { normalizeHandle, removedBottomHandleIds } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
 
 type HistoryEntry = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
+
+/** Key for the live per-service status overlay. */
+export const serviceStatusKey = (nodeId: string, port?: number, protocol?: string): string =>
+  `${nodeId}:${port ?? ''}/${protocol ?? ''}`
 
 interface CanvasState {
   nodes: Node<NodeData>[]
@@ -23,6 +27,8 @@ interface CanvasState {
   selectedNodeId: string | null
   selectedNodeIds: string[]
   scanEventTs: number
+  // Live per-service status overlay (not persisted), keyed via serviceStatusKey.
+  serviceStatuses: Record<string, ServiceStatus>
 
   // History
   past: HistoryEntry[]
@@ -60,6 +66,7 @@ interface CanvasState {
   fitViewPending: boolean
   clearFitViewPending: () => void
   notifyScanDeviceFound: () => void
+  setServiceStatuses: (nodeId: string, statuses: { port?: number; protocol?: string; status: ServiceStatus }[]) => void
   hideIp: boolean
   toggleHideIp: () => void
   applyTypeNodeStyle: (nodeType: NodeType, style: NodeTypeStyle) => void
@@ -77,6 +84,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   editingTextId: null,
   hideIp: false,
   scanEventTs: 0,
+  serviceStatuses: {},
   fitViewPending: false,
 
   past: [],
@@ -485,6 +493,16 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   markUnsaved: () => set({ hasUnsavedChanges: true }),
 
   notifyScanDeviceFound: () => set({ scanEventTs: Date.now() }),
+
+  setServiceStatuses: (nodeId, statuses) =>
+    set((state) => {
+      // Live overlay only — never touches node data, so it stays out of saves.
+      const next = { ...state.serviceStatuses }
+      for (const s of statuses) {
+        next[serviceStatusKey(nodeId, s.port, s.protocol)] = s.status
+      }
+      return { serviceStatuses: next }
+    }),
 
   toggleHideIp: () => set((s) => ({ hideIp: !s.hideIp })),
 

@@ -253,6 +253,20 @@ export async function subscribeStatus(
   return wsSubscribe<StatusUpdate>('homelable/status/subscribe', cb)
 }
 
+// ─── Per-service status subscription ────────────────────────────────────────
+
+export interface ServiceStatusUpdate {
+  node_id: string
+  services: Array<{ port?: number; protocol?: string; status: 'online' | 'offline' | 'unknown' }>
+  checked_at?: string
+}
+
+export async function subscribeServiceStatus(
+  cb: (update: ServiceStatusUpdate) => void
+): Promise<() => void> {
+  return wsSubscribe<ServiceStatusUpdate>('homelable/service_status/subscribe', cb)
+}
+
 // ─── Scan event subscription (progressive scan) ─────────────────────────────
 
 export type ScanEvent =

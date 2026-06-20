@@ -4,29 +4,37 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import scanner, status_checker, zigbee
 from .const import (
     CONF_SCAN_RANGES,
+    CONF_SERVICE_CHECK_ENABLED,
+    CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
     DEFAULT_DESIGN_ICON,
     DEFAULT_DESIGN_NAME,
     DEFAULT_DESIGN_TYPE,
     DEFAULT_SCAN_RANGES,
+    DEFAULT_SERVICE_CHECK_ENABLED,
+    DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
     DOMAIN,
     MAX_SCAN_RUNS,
+    MIN_SERVICE_CHECK_INTERVAL,
     SCAN_SIGNAL,
+    SERVICE_STATUS_SIGNAL,
     STORAGE_KEY_CANVAS,
     STORAGE_KEY_DESIGNS,
     STORAGE_KEY_PENDING,
@@ -111,6 +119,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._pending: dict[str, Any] | None = None
         self._runs: list[dict[str, Any]] | None = None
         self._scan_run_id: str | None = None
+        self._service_check_unsub: Callable[[], None] | None = None
 
     # ─── Status checks (periodic) ────────────────────────────────────────────
 
@@ -158,6 +167,105 @@ class HomelableCoordinator(DataUpdateCoordinator):
                     "response_time_ms": None,
                 }
         return results
+
+    # ─── Per-service status checks (periodic, independent) ────────────────────
+
+    def get_service_check_enabled(self) -> bool:
+        """Whether per-service checks are enabled (options → data → default)."""
+        return bool(
+            self.entry.options.get(
+                CONF_SERVICE_CHECK_ENABLED,
+                self.entry.data.get(
+                    CONF_SERVICE_CHECK_ENABLED, DEFAULT_SERVICE_CHECK_ENABLED
+                ),
+            )
+        )
+
+    def get_service_check_interval(self) -> int:
+        """Service-check interval in seconds, floored at MIN_SERVICE_CHECK_INTERVAL."""
+        raw = self.entry.options.get(
+            CONF_SERVICE_CHECK_INTERVAL,
+            self.entry.data.get(
+                CONF_SERVICE_CHECK_INTERVAL, DEFAULT_SERVICE_CHECK_INTERVAL
+            ),
+        )
+        try:
+            return max(MIN_SERVICE_CHECK_INTERVAL, int(raw))
+        except (TypeError, ValueError):
+            return DEFAULT_SERVICE_CHECK_INTERVAL
+
+    @callback
+    def async_start_service_checks(self) -> None:
+        """Schedule the periodic service-check job if enabled.
+
+        Returns nothing; the unsub is stored and released by
+        async_stop_service_checks (wired to entry unload in __init__.py).
+        Reload on options change recreates the coordinator, so the interval is
+        always picked up fresh — no live reschedule needed.
+        """
+        if not self.get_service_check_enabled():
+            return
+        interval = timedelta(seconds=self.get_service_check_interval())
+        self._service_check_unsub = async_track_time_interval(
+            self.hass, self._run_service_checks, interval
+        )
+        _LOGGER.debug(
+            "Service checks every %ds", self.get_service_check_interval()
+        )
+
+    @callback
+    def async_stop_service_checks(self) -> None:
+        """Cancel the periodic service-check job, if running."""
+        if self._service_check_unsub is not None:
+            self._service_check_unsub()
+            self._service_check_unsub = None
+
+    async def _run_service_checks(self, _now: datetime | None = None) -> None:
+        """Check every service of every canvas node; dispatch per-node results.
+
+        Mirrors the node-status SSRF policy: hosts that resolve to unsafe
+        addresses outside the configured scan ranges are reported offline.
+        """
+        await self._ensure_loaded()
+        allowed_networks = status_checker._parse_allowed_networks(
+            self.get_scan_ranges()
+        )
+        now = _utc_now_iso()
+        seen: set[str] = set()
+        for node in self._all_canvas_nodes():
+            node_id = node.get("id")
+            if not node_id or node_id in seen:
+                continue
+            seen.add(node_id)
+            data = node.get("data") or {}
+            services = node.get("services") or data.get("services") or []
+            if not services:
+                continue
+            host = self._node_host(
+                node.get("ip") or data.get("ip"),
+                node.get("hostname") or data.get("hostname"),
+            )
+            try:
+                statuses = await status_checker.check_services(
+                    host, services, allowed_networks
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Service checks failed for %s: %s", node_id, exc)
+                continue
+            async_dispatcher_send(
+                self.hass,
+                SERVICE_STATUS_SIGNAL,
+                {"node_id": node_id, "services": statuses, "checked_at": now},
+            )
+
+    @staticmethod
+    def _node_host(ip: str | None, hostname: str | None) -> str | None:
+        """Pick the address to probe services on: first IP, else hostname."""
+        if ip:
+            first = ip.split(",")[0].strip()
+            if first:
+                return first
+        return hostname or None
 
     # ─── Designs (multiple canvases) ─────────────────────────────────────────
 
