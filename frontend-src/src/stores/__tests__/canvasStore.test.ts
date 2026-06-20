@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useCanvasStore } from '@/stores/canvasStore'
+import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
 
@@ -900,5 +900,33 @@ describe('canvasStore — custom style apply', () => {
     expect(ns.data.custom_colors?.border).toBeUndefined()
     expect(e.data?.custom_color).toBe('#aabbcc')
     expect(useCanvasStore.getState().hasUnsavedChanges).toBe(true)
+  })
+})
+
+describe('canvasStore — per-service status overlay', () => {
+  beforeEach(() => {
+    useCanvasStore.setState({ serviceStatuses: {}, hasUnsavedChanges: false })
+  })
+
+  it('serviceStatusKey is stable for the same node/port/protocol', () => {
+    expect(serviceStatusKey('n1', 80, 'tcp')).toBe('n1:80/tcp')
+    expect(serviceStatusKey('n1', undefined, undefined)).toBe('n1:/')
+  })
+
+  it('setServiceStatuses stores statuses keyed per node+service', () => {
+    useCanvasStore.getState().setServiceStatuses('n1', [
+      { port: 80, protocol: 'tcp', status: 'offline' },
+      { port: 443, protocol: 'tcp', status: 'online' },
+    ])
+    const { serviceStatuses } = useCanvasStore.getState()
+    expect(serviceStatuses[serviceStatusKey('n1', 80, 'tcp')]).toBe('offline')
+    expect(serviceStatuses[serviceStatusKey('n1', 443, 'tcp')]).toBe('online')
+  })
+
+  it('overlay never marks the canvas dirty (stays out of saves)', () => {
+    useCanvasStore.getState().setServiceStatuses('n1', [
+      { port: 80, protocol: 'tcp', status: 'offline' },
+    ])
+    expect(useCanvasStore.getState().hasUnsavedChanges).toBe(false)
   })
 })

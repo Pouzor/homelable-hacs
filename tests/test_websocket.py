@@ -293,6 +293,29 @@ async def test_scan_subscribe_forwards_dispatcher_events(
     assert msg["event"] == payload
 
 
+async def test_service_status_subscribe_pushes_events(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    from custom_components.homelable.const import SERVICE_STATUS_SIGNAL
+
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/service_status/subscribe"})
+    ack = await client.receive_json()
+    assert ack["success"] is True
+
+    payload = {
+        "node_id": "n1",
+        "services": [{"port": 80, "protocol": "tcp", "status": "offline"}],
+        "checked_at": "2024-01-01T00:00:00+00:00",
+    }
+    async_dispatcher_send(hass, SERVICE_STATUS_SIGNAL, payload)
+    msg = await client.receive_json()
+    assert msg["type"] == "event"
+    assert msg["event"] == payload
+
+
 # ─── Not setup ───────────────────────────────────────────────────────────────
 
 

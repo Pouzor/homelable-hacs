@@ -36,6 +36,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if PLATFORMS:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Optional independent per-service status checks (off by default). Reload on
+    # options change recreates the coordinator, so the timer always reflects the
+    # latest setting.
+    coordinator.async_start_service_checks()
+    entry.async_on_unload(coordinator.async_stop_service_checks)
+
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 

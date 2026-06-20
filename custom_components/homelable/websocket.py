@@ -8,7 +8,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from .const import DOMAIN, SCAN_SIGNAL
+from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .zigbee import ZigbeeMqttNotReadyError
 
 
@@ -31,6 +31,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
     websocket_api.async_register_command(hass, ws_status_subscribe)
+    websocket_api.async_register_command(hass, ws_service_status_subscribe)
     websocket_api.async_register_command(hass, ws_scan_subscribe)
     websocket_api.async_register_command(hass, ws_scan_approve_batch)
     websocket_api.async_register_command(hass, ws_scan_hide_batch)
@@ -399,6 +400,33 @@ def ws_scan_subscribe(
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
     unsub = async_dispatcher_connect(hass, SCAN_SIGNAL, _forward)
+    connection.subscriptions[msg["id"]] = unsub
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/service_status/subscribe"}
+)
+@callback
+def ws_service_status_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Push per-service status results as the coordinator computes them.
+
+    Each event is {node_id, services: [{port, protocol, status}], checked_at}.
+    Independent of the node-status subscription; only fires when per-service
+    checks are enabled in the options flow.
+    """
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+
+    @callback
+    def _forward(payload: dict[str, Any]) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], payload))
+
+    unsub = async_dispatcher_connect(hass, SERVICE_STATUS_SIGNAL, _forward)
     connection.subscriptions[msg["id"]] = unsub
     connection.send_result(msg["id"])
 

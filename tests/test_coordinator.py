@@ -537,3 +537,85 @@ async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  #
     assert len(devices) == 1
     assert devices[0]["mac"] == "AA:BB:CC:11:22:33"
     assert devices[0]["hostname"] == "now-known.lan"
+
+
+# --- Per-service status checks (#196 follow-up) ---
+
+
+@pytest.mark.asyncio
+async def test_service_check_getters_default_disabled(coord) -> None:  # noqa: ANN001
+    assert coord.get_service_check_enabled() is False
+    assert coord.get_service_check_interval() == 300
+
+
+@pytest.mark.asyncio
+async def test_service_check_interval_floored_at_minimum(hass) -> None:  # noqa: ANN001
+    entry = _mock_entry()
+    entry.options = {"service_check_enabled": True, "service_check_interval": 5}
+    c = HomelableCoordinator(hass, entry)
+    assert c.get_service_check_enabled() is True
+    assert c.get_service_check_interval() == 30  # MIN_SERVICE_CHECK_INTERVAL
+
+
+@pytest.mark.asyncio
+async def test_start_service_checks_noop_when_disabled(coord) -> None:  # noqa: ANN001
+    coord.async_start_service_checks()
+    assert coord._service_check_unsub is None
+
+
+@pytest.mark.asyncio
+async def test_start_stop_service_checks_when_enabled(hass) -> None:  # noqa: ANN001
+    entry = _mock_entry()
+    entry.options = {"service_check_enabled": True}
+    c = HomelableCoordinator(hass, entry)
+    c.async_start_service_checks()
+    assert c._service_check_unsub is not None
+    c.async_stop_service_checks()
+    assert c._service_check_unsub is None
+
+
+@pytest.mark.asyncio
+async def test_run_service_checks_dispatches_per_node(hass) -> None:  # noqa: ANN001
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.homelable.const import SERVICE_STATUS_SIGNAL
+
+    entry = _mock_entry()
+    entry.options = {"service_check_enabled": True}
+    c = HomelableCoordinator(hass, entry)
+    await c.save_canvas(
+        {
+            "nodes": [
+                {
+                    "id": "n1",
+                    "ip": "192.168.1.5",
+                    "services": [{"port": 80, "protocol": "tcp", "service_name": "http"}],
+                },
+                {"id": "n2", "ip": "192.168.1.6", "services": []},  # skipped: no services
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+
+    received: list[dict] = []
+    unsub = async_dispatcher_connect(
+        hass, SERVICE_STATUS_SIGNAL, lambda p: received.append(p)
+    )
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_services",
+        AsyncMock(return_value=[{"port": 80, "protocol": "tcp", "status": "offline"}]),
+    ) as mock:
+        await c._run_service_checks()
+        await hass.async_block_till_done()
+    unsub()
+
+    assert mock.called
+    # Only the node with services is checked / dispatched.
+    assert len(received) == 1
+    assert received[0]["node_id"] == "n1"
+    assert received[0]["services"] == [
+        {"port": 80, "protocol": "tcp", "status": "offline"}
+    ]
+    # host derived from the node's first IP.
+    assert mock.call_args.args[0] == "192.168.1.5"

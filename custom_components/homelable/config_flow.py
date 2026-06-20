@@ -10,13 +10,18 @@ from homeassistant.core import callback
 from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
+    CONF_SERVICE_CHECK_ENABLED,
+    CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_RANGES,
+    DEFAULT_SERVICE_CHECK_ENABLED,
+    DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
     DOMAIN,
+    MIN_SERVICE_CHECK_INTERVAL,
 )
 
 
@@ -97,6 +102,18 @@ class HomelableOptionsFlow(OptionsFlow):
                         CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC
                     ),
                 ): str,
+                vol.Required(
+                    CONF_SERVICE_CHECK_ENABLED,
+                    default=data.get(
+                        CONF_SERVICE_CHECK_ENABLED, DEFAULT_SERVICE_CHECK_ENABLED
+                    ),
+                ): bool,
+                vol.Required(
+                    CONF_SERVICE_CHECK_INTERVAL,
+                    default=data.get(
+                        CONF_SERVICE_CHECK_INTERVAL, DEFAULT_SERVICE_CHECK_INTERVAL
+                    ),
+                ): vol.All(int, vol.Range(min=MIN_SERVICE_CHECK_INTERVAL)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
