@@ -47,9 +47,25 @@ describe('EdgeModal', () => {
   it('calls onSubmit with label when filled', () => {
     const onSubmit = vi.fn()
     render(<EdgeModal open onClose={vi.fn()} onSubmit={onSubmit} />)
-    fireEvent.change(screen.getByPlaceholderText('e.g. 1G, trunk...'), { target: { value: 'uplink' } })
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. 1G, trunk/), { target: { value: 'uplink' } })
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
     expect(onSubmit.mock.calls[0][0].label).toBe('uplink')
+  })
+
+  it('preserves newlines in label so it can span multiple lines (issue #183)', () => {
+    const onSubmit = vi.fn()
+    render(<EdgeModal open onClose={vi.fn()} onSubmit={onSubmit} />)
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. 1G, trunk/), { target: { value: 'line one\nline two' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(onSubmit.mock.calls[0][0].label).toBe('line one\nline two')
+  })
+
+  it('trims surrounding whitespace and drops a blank label', () => {
+    const onSubmit = vi.fn()
+    render(<EdgeModal open onClose={vi.fn()} onSubmit={onSubmit} />)
+    fireEvent.change(screen.getByPlaceholderText(/e\.g\. 1G, trunk/), { target: { value: '  \n  ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(onSubmit.mock.calls[0][0].label).toBeUndefined()
   })
 
   it('omits label from payload when empty', () => {
@@ -171,7 +187,7 @@ describe('EdgeModal', () => {
 
   it('pre-fills label from initial prop', () => {
     render(<EdgeModal open onClose={vi.fn()} onSubmit={vi.fn()} initial={{ label: 'trunk' }} />)
-    const input = screen.getByPlaceholderText('e.g. 1G, trunk...') as HTMLInputElement
+    const input = screen.getByPlaceholderText(/e\.g\. 1G, trunk/) as HTMLTextAreaElement
     expect(input.value).toBe('trunk')
   })
 
