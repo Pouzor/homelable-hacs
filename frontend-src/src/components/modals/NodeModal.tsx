@@ -68,6 +68,8 @@ interface ParentCandidate {
   id: string
   label: string
   type: NodeType
+  /** True when the node has container mode on, so any node can nest inside it. */
+  container_mode?: boolean
 }
 
 interface NodeModalProps {
@@ -110,12 +112,14 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
     const canUseContainerMode = CONTAINER_MODE_TYPES.includes(selectedType)
     const isZigbee = selectedType.startsWith('zigbee_')
     const validParentTypes = getValidParentTypes(selectedType)
+    // A parent is valid either by the type rules (lxc/vm/docker_container) or
+    // because the candidate is a container-mode node (any child can nest in it).
+    const isValidParent = (p: ParentCandidate) =>
+      validParentTypes.includes(p.type) || p.container_mode === true
     let safeParentId = form.parent_id
-    if (validParentTypes.length === 0) {
-      safeParentId = undefined
-    } else if (safeParentId) {
+    if (safeParentId) {
       const parent = parentCandidates.find((n) => n.id === safeParentId)
-      if (!parent || !validParentTypes.includes(parent.type)) safeParentId = undefined
+      if (!parent || !isValidParent(parent)) safeParentId = undefined
     }
     onSubmit({
       ...form,
@@ -143,7 +147,12 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 const t = v as NodeType
                 setForm((f) => {
                   const next: Partial<NodeData> = { ...f, type: t }
-                  if (getValidParentTypes(t).length === 0) next.parent_id = undefined
+                  // Drop the parent only if it's no longer a valid target for the
+                  // new type — keep container-mode parents (any node can nest).
+                  const parent = parentCandidates.find((n) => n.id === f.parent_id)
+                  if (f.parent_id && !(parent && (getValidParentTypes(t).includes(parent.type) || parent.container_mode === true))) {
+                    next.parent_id = undefined
+                  }
                   return next
                 })
               }}>
@@ -361,9 +370,12 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
             {(() => {
               const childType = (form.type ?? 'generic') as NodeType
               const validParentTypes = getValidParentTypes(childType)
-              if (validParentTypes.length === 0) return null
+              // Candidates: type-based parents (lxc/vm/docker_container) plus any
+              // container-mode node. The current parent is always kept so an
+              // already-nested node can be re-targeted or detached here.
               const validParents = parentCandidates.filter(
-                (n) => n.id !== currentNodeId && validParentTypes.includes(n.type),
+                (n) => n.id !== currentNodeId &&
+                  (validParentTypes.includes(n.type) || n.container_mode === true || n.id === form.parent_id),
               )
               if (validParents.length === 0) return null
               return (
