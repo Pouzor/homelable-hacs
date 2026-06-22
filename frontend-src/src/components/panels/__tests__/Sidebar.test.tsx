@@ -107,6 +107,16 @@ describe('Sidebar', () => {
     expect(screen.getByText('Scan Network')).toBeInTheDocument()
   })
 
+  it('calls onSave with no arguments when Save Canvas is clicked', () => {
+    // Regression: passing the click event leaks it as handleSave's
+    // designIdOverride, so the save lands under the wrong design id.
+    const onSave = vi.fn()
+    render(<Sidebar {...defaultProps} onSave={onSave} />)
+    fireEvent.click(screen.getByText('Save Canvas'))
+    expect(onSave).toHaveBeenCalledTimes(1)
+    expect(onSave).toHaveBeenCalledWith()
+  })
+
   it('shows all view nav items', () => {
     render(<Sidebar {...defaultProps} />)
     expect(screen.getByText('Canvas')).toBeInTheDocument()

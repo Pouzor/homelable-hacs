@@ -262,7 +262,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
           icon={Save}
           label="Save Canvas"
           collapsed={collapsed}
-          onClick={onSave}
+          onClick={() => onSave()}
           badge={hasUnsavedChanges}
           accent
         />
