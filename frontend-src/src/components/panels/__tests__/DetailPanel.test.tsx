@@ -33,6 +33,7 @@ function setupStore(nodeData: Partial<NodeData> = {}) {
     snapshotHistory: vi.fn(),
     createGroup: vi.fn(),
     ungroup: vi.fn(),
+    setNodeSize: vi.fn(),
   } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
 }
 
@@ -48,6 +49,7 @@ describe('DetailPanel', () => {
       snapshotHistory: vi.fn(),
       createGroup: vi.fn(),
       ungroup: vi.fn(),
+      setNodeSize: vi.fn(),
     } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
   })
 
@@ -485,6 +487,71 @@ describe('DetailPanel', () => {
       setupStore({ ip: undefined, services: [{ protocol: 'tcp', service_name: 'health', path: '' }] })
       render(<DetailPanel onEdit={vi.fn()} />)
       expect(screen.getByText('health').tagName).not.toBe('A')
+    })
+  })
+
+  describe('Size section', () => {
+    function setupSized(node: Partial<Node<NodeData>>, setNodeSize = vi.fn()) {
+      const state = {
+        nodes: [{ ...makeNode({}), ...node }],
+        selectedNodeId: 'n1',
+        selectedNodeIds: [],
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode: vi.fn(),
+        snapshotHistory: vi.fn(),
+        createGroup: vi.fn(),
+        ungroup: vi.fn(),
+        setNodeSize,
+        serviceStatuses: {},
+      }
+      vi.mocked(canvasStore.useCanvasStore).mockImplementation(
+        ((sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state)) as unknown as typeof canvasStore.useCanvasStore,
+      )
+      return setNodeSize
+    }
+
+    it('shows the current width/height, preferring explicit over measured', () => {
+      setupSized({ width: 220, height: 130, measured: { width: 999, height: 999 } })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('220')
+      expect((screen.getByLabelText('Height') as HTMLInputElement).value).toBe('130')
+    })
+
+    it('falls back to the measured size before a resize', () => {
+      setupSized({ measured: { width: 187, height: 73 } })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('187')
+      expect((screen.getByLabelText('Height') as HTMLInputElement).value).toBe('73')
+    })
+
+    it('commits a manual width on blur', () => {
+      const setNodeSize = setupSized({ width: 200, height: 100 })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      const w = screen.getByLabelText('Width')
+      fireEvent.change(w, { target: { value: '260' } })
+      fireEvent.blur(w)
+      expect(setNodeSize).toHaveBeenCalledWith('n1', { width: 260 })
+    })
+
+    it('reverts invalid input without committing', () => {
+      const setNodeSize = setupSized({ width: 200, height: 100 })
+      render(<DetailPanel onEdit={vi.fn()} />)
+      const w = screen.getByLabelText('Width') as HTMLInputElement
+      fireEvent.change(w, { target: { value: 'abc' } })
+      fireEvent.blur(w)
+      expect(setNodeSize).not.toHaveBeenCalled()
+      expect(w.value).toBe('200')
+    })
+
+    it('resyncs the field when the node is resized by corner drag', () => {
+      setupSized({ width: 200, height: 100 })
+      const { rerender } = render(<DetailPanel onEdit={vi.fn()} />)
+      expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('200')
+      // Simulate a corner-drag resize updating the store dimension.
+      setupSized({ width: 340, height: 100 })
+      rerender(<DetailPanel onEdit={vi.fn()} />)
+      expect((screen.getByLabelText('Width') as HTMLInputElement).value).toBe('340')
     })
   })
 })
