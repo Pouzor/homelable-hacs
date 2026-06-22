@@ -27,6 +27,7 @@ import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
+import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -40,7 +41,7 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes, addToGroup, addToContainer } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
@@ -58,6 +59,8 @@ export default function App() {
   const [addTextOpen, setAddTextOpen] = useState(false)
   const [editNodeId, setEditNodeId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
+  const [pendingGroupAdd, setPendingGroupAdd] = useState<{ nodeId: string; groupId: string } | null>(null)
+  const [pendingContainerAdd, setPendingContainerAdd] = useState<{ nodeId: string; containerId: string } | null>(null)
   const [editEdgeId, setEditEdgeId] = useState<string | null>(null)
   const [scanConfigOpen, setScanConfigOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
@@ -563,6 +566,8 @@ export default function App() {
                     onEdgeDoubleClick={handleEdgeDoubleClick}
                     onNodeDoubleClick={handleNodeDoubleClick}
                     onNodeDragStart={snapshotHistory}
+                    onRequestAddToGroup={setPendingGroupAdd}
+                    onRequestAddToContainer={setPendingContainerAdd}
                     onOpenPending={(deviceId) => {
                       setHighlightPendingId(undefined)
                       setSidebarForceView(undefined)
@@ -585,7 +590,7 @@ export default function App() {
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}
           title="Add Node"
-          parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))}
+          parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -612,7 +617,7 @@ export default function App() {
             }
             return nodes
               .filter((n) => !descendants.has(n.id))
-              .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))
+              .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))
           })()}
           currentNodeId={editNodeId ?? undefined}
         />
@@ -738,6 +743,29 @@ export default function App() {
           }}
         />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+        <ConfirmAddToGroupModal
+          open={!!pendingGroupAdd}
+          nodeLabel={pendingGroupAdd ? (nodes.find((n) => n.id === pendingGroupAdd.nodeId)?.data.label ?? '') : ''}
+          targetLabel={pendingGroupAdd ? (nodes.find((n) => n.id === pendingGroupAdd.groupId)?.data.label ?? '') : ''}
+          onConfirm={() => {
+            if (pendingGroupAdd) addToGroup(pendingGroupAdd.groupId, pendingGroupAdd.nodeId)
+            setPendingGroupAdd(null)
+          }}
+          onCancel={() => setPendingGroupAdd(null)}
+        />
+
+        <ConfirmAddToGroupModal
+          open={!!pendingContainerAdd}
+          variant="container"
+          nodeLabel={pendingContainerAdd ? (nodes.find((n) => n.id === pendingContainerAdd.nodeId)?.data.label ?? '') : ''}
+          targetLabel={pendingContainerAdd ? (nodes.find((n) => n.id === pendingContainerAdd.containerId)?.data.label ?? '') : ''}
+          onConfirm={() => {
+            if (pendingContainerAdd) addToContainer(pendingContainerAdd.containerId, pendingContainerAdd.nodeId)
+            setPendingContainerAdd(null)
+          }}
+          onCancel={() => setPendingContainerAdd(null)}
+        />
 
         <ExportModal
           open={exportModalOpen}

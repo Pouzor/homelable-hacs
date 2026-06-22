@@ -7,6 +7,8 @@ interface LazyCanvasProps {
   onEdgeDoubleClick?: (edge: Edge<EdgeData>) => void
   onNodeDoubleClick?: (node: Node<NodeData>) => void
   onNodeDragStart?: () => void
+  onRequestAddToGroup?: (payload: { nodeId: string; groupId: string }) => void
+  onRequestAddToContainer?: (payload: { nodeId: string; containerId: string }) => void
   onOpenPending?: (deviceId: string) => void
 }
 

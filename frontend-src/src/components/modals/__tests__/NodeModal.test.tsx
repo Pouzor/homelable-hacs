@@ -371,6 +371,48 @@ describe('NodeModal', () => {
     expect(screen.queryByText('Parent Container')).toBeNull()
   })
 
+  it('renders Parent Container for a plain node when a container-mode candidate exists', () => {
+    renderModal({
+      initial: { ...BASE, type: 'server' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox', container_mode: true }],
+    })
+    expect(screen.getByText('Parent Container')).toBeDefined()
+  })
+
+  it('still hides Parent Container for a plain node when the candidate is not in container mode', () => {
+    renderModal({
+      initial: { ...BASE, type: 'server' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox', container_mode: false }],
+    })
+    expect(screen.queryByText('Parent Container')).toBeNull()
+  })
+
+  it('renders Parent Container for an already-nested plain node so it can be detached', () => {
+    renderModal({
+      initial: { ...BASE, type: 'server', parent_id: 'px1' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox', container_mode: true }],
+    })
+    expect(screen.getByText('Parent Container')).toBeDefined()
+  })
+
+  it('keeps a container-mode parent_id on submit for a plain node', () => {
+    const { onSubmit } = renderModal({
+      initial: { ...BASE, type: 'server', parent_id: 'px1' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox', container_mode: true }],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).parent_id).toBe('px1')
+  })
+
+  it('drops a parent_id that is not a valid container on submit', () => {
+    const { onSubmit } = renderModal({
+      initial: { ...BASE, type: 'server', parent_id: 'px1' },
+      parentCandidates: [{ id: 'px1', label: 'PVE', type: 'proxmox', container_mode: false }],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).parent_id).toBeUndefined()
+  })
+
   // ── Appearance ────────────────────────────────────────────────────────
 
   it('renders 3 color swatch labels (border, background, icon)', () => {
