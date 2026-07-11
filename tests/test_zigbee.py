@@ -219,6 +219,43 @@ async def test_import_zigbee_devices_adds_to_pending(coordinator: HomelableCoord
     assert pending[0]["source"] == "zigbee"
 
 
+async def test_import_zigbee_devices_records_scan_run(
+    coordinator: HomelableCoordinator,
+) -> None:
+    devs = [
+        {"id": "0xC", "ieee_address": "0xC", "friendly_name": "Coord", "type": "zigbee_coordinator"},
+        {"id": "0xR", "ieee_address": "0xR", "friendly_name": "Router", "type": "zigbee_router"},
+    ]
+    await coordinator.import_zigbee_devices(devs)
+    runs = await coordinator.list_runs()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["kind"] == "zigbee"
+    assert run["status"] == "done"
+    assert run["devices_found"] == 2
+    assert run["started_at"]
+    assert run["finished_at"]
+    assert run["error"] is None
+
+
+async def test_import_zigbee_devices_records_error_run(
+    coordinator: HomelableCoordinator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def boom(devices: list[dict]) -> dict[str, int]:
+        raise RuntimeError("import blew up")
+
+    monkeypatch.setattr(coordinator, "_import_zigbee_devices", boom)
+    with pytest.raises(RuntimeError, match="import blew up"):
+        await coordinator.import_zigbee_devices([{"ieee_address": "0xC"}])
+    runs = await coordinator.list_runs()
+    assert len(runs) == 1
+    assert runs[0]["kind"] == "zigbee"
+    assert runs[0]["status"] == "error"
+    assert runs[0]["error"] == "import blew up"
+    assert runs[0]["devices_found"] == 0
+
+
 async def test_import_zigbee_devices_skips_duplicates(
     coordinator: HomelableCoordinator,
 ) -> None:

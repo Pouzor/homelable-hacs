@@ -971,6 +971,49 @@ class HomelableCoordinator(DataUpdateCoordinator):
     async def import_zigbee_devices(
         self, devices: list[dict[str, Any]]
     ) -> dict[str, int]:
+        """Import Zigbee devices and record the operation in scan history.
+
+        Thin wrapper around :meth:`_import_zigbee_devices` that surfaces the
+        import under Scan History as a ``kind="zigbee"`` run, carrying the
+        number of nodes scanned and the timing — mirroring IP scan runs.
+        """
+        run_id = uuid.uuid4().hex
+        started_at = _utc_now_iso()
+        base = self.get_zigbee_base_topic()
+        ranges = [base] if base else []
+        try:
+            result = await self._import_zigbee_devices(devices)
+        except Exception as exc:  # noqa: BLE001
+            await self._record_run(
+                {
+                    "id": run_id,
+                    "status": "error",
+                    "kind": "zigbee",
+                    "ranges": ranges,
+                    "devices_found": 0,
+                    "started_at": started_at,
+                    "finished_at": _utc_now_iso(),
+                    "error": str(exc),
+                }
+            )
+            raise
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "done",
+                "kind": "zigbee",
+                "ranges": ranges,
+                "devices_found": len(devices),
+                "started_at": started_at,
+                "finished_at": _utc_now_iso(),
+                "error": None,
+            }
+        )
+        return result
+
+    async def _import_zigbee_devices(
+        self, devices: list[dict[str, Any]]
+    ) -> dict[str, int]:
         """Push selected Zigbee devices into the pending store.
 
         Each entry in `devices` is a parsed networkmap node dict from
