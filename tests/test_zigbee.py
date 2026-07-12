@@ -338,8 +338,12 @@ async def test_import_zigbee_devices_refreshes_approved_canvas_node(
         ]
     )
     assert result == {"added": 0, "skipped": 0, "refreshed": 1}
-    # No new pending row created.
-    assert await coordinator.list_pending(source="zigbee") == []
+    # No new/duplicate pending row — the device stays as a single "approved"
+    # inventory row (Device Inventory keeps approved devices listed and badged).
+    inv = await coordinator.list_pending(source="zigbee")
+    assert len(inv) == 1
+    assert inv[0]["status"] == "approved"
+    assert inv[0]["canvas_count"] == 1
     # Props refreshed, visibility preserved.
     canvas = await coordinator.get_canvas()
     refreshed = next(n for n in canvas["nodes"] if n["ieee_address"] == "0xR1")
@@ -348,17 +352,15 @@ async def test_import_zigbee_devices_refreshes_approved_canvas_node(
     assert lqi["visible"] is True
 
 
-async def test_import_zigbee_devices_relists_after_node_deleted(
+async def test_import_zigbee_devices_stays_listed_after_node_deleted(
     coordinator: HomelableCoordinator,
 ) -> None:
-    """Regression for homelable#167: approve → delete canvas node → re-import
-    must re-list the device in Pending.
+    """Regression for homelable#167: an approved device is never swallowed.
 
-    The standalone repo keeps an ``"approved"`` PendingDevice row and has to
-    revive it on re-import. This integration instead *removes* the pending row
-    on approval (see ``approve_pending``), so a deleted canvas node leaves no
-    orphan and re-import simply re-adds the device. This test guards that the
-    "found N but Pending stays empty" symptom can't reappear here.
+    With Device Inventory, ``approve_pending`` keeps the row (flipped to
+    ``"approved"``) instead of deleting it. So the device stays visible in the
+    inventory through approval, canvas-node deletion (canvas_count drops to 0),
+    and re-import (skipped as already present) — it can never vanish.
     """
     dev = {
         "id": "0xR1",
@@ -373,20 +375,25 @@ async def test_import_zigbee_devices_relists_after_node_deleted(
     # Import → pending.
     await coordinator.import_zigbee_devices([dev])
     pending = await coordinator.list_pending(source="zigbee")
-    # Approve → node on canvas, pending row removed.
+    # Approve → node on canvas, row kept as "approved" and badged.
     node = await coordinator.approve_pending(pending[0]["id"])
     assert node is not None
-    assert await coordinator.list_pending(source="zigbee") == []
+    approved = await coordinator.list_pending(source="zigbee")
+    assert len(approved) == 1
+    assert approved[0]["status"] == "approved"
+    assert approved[0]["canvas_count"] == 1
     # User deletes the canvas node (frontend saves the canvas without it).
     canvas = await coordinator.get_canvas()
     canvas["nodes"] = [n for n in canvas["nodes"] if n.get("ieee_address") != "0xR1"]
     await coordinator.save_canvas(canvas)
-    # Re-import → device reappears in Pending instead of being swallowed.
+    # Re-import → device is already present (approved), so it's skipped, not
+    # duplicated. It stays in the inventory with canvas_count now 0.
     result = await coordinator.import_zigbee_devices([dev])
-    assert result == {"added": 1, "skipped": 0, "refreshed": 0}
+    assert result == {"added": 0, "skipped": 1, "refreshed": 0}
     relisted = await coordinator.list_pending(source="zigbee")
     assert {p["ieee_address"] for p in relisted} == {"0xR1"}
-    assert relisted[0]["status"] == "pending"
+    assert relisted[0]["status"] == "approved"
+    assert relisted[0]["canvas_count"] == 0
 
 
 async def test_import_zigbee_devices_keeps_hidden_hidden_on_reimport(

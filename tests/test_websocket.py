@@ -78,6 +78,49 @@ async def test_scan_start_returns_run_id(
     assert msg["result"]["run_id"] == "abc"
 
 
+async def test_scan_start_forwards_deep_scan_options(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    """Deep-scan params on scan/start are forwarded to trigger_scan."""
+    client = await hass_ws_client(hass)
+    trigger = AsyncMock(return_value={"run_id": "abc"})
+    with patch.object(setup_ws, "trigger_scan", trigger):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": "homelable/scan/start",
+                "http_ranges": ["8000-8100"],
+                "http_probe_enabled": True,
+                "verify_tls": True,
+            }
+        )
+        msg = await client.receive_json()
+    assert msg["success"] is True
+    trigger.assert_awaited_once_with(
+        http_ranges=["8000-8100"], http_probe_enabled=True, verify_tls=True
+    )
+
+
+async def test_scan_start_rejects_invalid_port_range(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    """A malformed deep-scan port range is rejected before a scan starts."""
+    client = await hass_ws_client(hass)
+    trigger = AsyncMock(return_value={"run_id": "abc"})
+    with patch.object(setup_ws, "trigger_scan", trigger):
+        await client.send_json(
+            {
+                "id": 1,
+                "type": "homelable/scan/start",
+                "http_ranges": ["not-a-range"],
+            }
+        )
+        msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "invalid_port_range"
+    trigger.assert_not_awaited()
+
+
 async def test_scan_cancel(
     hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
 ) -> None:

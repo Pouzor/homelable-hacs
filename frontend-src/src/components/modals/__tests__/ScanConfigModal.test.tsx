@@ -74,4 +74,45 @@ describe('ScanConfigModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  // --- Deep scan (per-scan override; not persisted in HACS) ---
+
+  it('reveals deep-scan fields when the section is toggled', async () => {
+    render(<ScanConfigModal open onClose={vi.fn()} onScanNow={vi.fn()} />)
+    await screen.findByDisplayValue('192.168.1.0/24')
+    expect(screen.queryByText('Enable HTTP probe')).toBeNull()
+    fireEvent.click(screen.getByText('Deep Scan'))
+    expect(screen.getByText('Enable HTTP probe')).toBeDefined()
+  })
+
+  it('passes deep-scan overrides to trigger() as a per-scan override', async () => {
+    render(<ScanConfigModal open onClose={vi.fn()} onScanNow={vi.fn()} />)
+    await screen.findByDisplayValue('192.168.1.0/24')
+    fireEvent.click(screen.getByText('Deep Scan'))
+    fireEvent.change(screen.getByPlaceholderText('8000-8100, 9000-9100'), {
+      target: { value: '8000-8100, 9000' },
+    })
+    fireEvent.click(screen.getByLabelText('Enable HTTP probe'))
+    fireEvent.click(screen.getByRole('button', { name: 'Scan Now' }))
+    await waitFor(() => {
+      expect(scanApi.trigger).toHaveBeenCalledWith({
+        http_ranges: ['8000-8100', '9000'],
+        http_probe_enabled: true,
+        verify_tls: false,
+      })
+    })
+  })
+
+  it('defaults deep-scan overrides to empty/off when the section is untouched', async () => {
+    render(<ScanConfigModal open onClose={vi.fn()} onScanNow={vi.fn()} />)
+    await screen.findByDisplayValue('192.168.1.0/24')
+    fireEvent.click(screen.getByRole('button', { name: 'Scan Now' }))
+    await waitFor(() => {
+      expect(scanApi.trigger).toHaveBeenCalledWith({
+        http_ranges: [],
+        http_probe_enabled: false,
+        verify_tls: false,
+      })
+    })
+  })
 })

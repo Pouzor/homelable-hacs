@@ -72,7 +72,9 @@ async def test_trigger_scan_adds_new_device_to_pending(coord) -> None:  # noqa: 
 
 
 @pytest.mark.asyncio
-async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: ANN001
+async def test_trigger_scan_excludes_hidden_but_keeps_canvas(coord) -> None:  # noqa: ANN001
+    """Device Inventory: on-canvas devices are NOT excluded (they stay listed and
+    badged); only user-hidden devices are suppressed."""
     await coord.save_canvas(
         {
             "nodes": [
@@ -102,7 +104,8 @@ async def test_trigger_scan_excludes_canvas_and_hidden(coord) -> None:  # noqa: 
         await coord.trigger_scan()
         await coord.hass.async_block_till_done()
 
-    assert "192.168.1.1" in captured["exclude"]
+    # Canvas IP stays scannable; only the hidden IP is excluded.
+    assert "192.168.1.1" not in captured["exclude"]
     assert "192.168.1.99" in captured["exclude"]
 
 
@@ -267,8 +270,13 @@ async def test_approve_pending_creates_canvas_node(coord) -> None:  # noqa: ANN0
     assert stored["ip"] == "10.0.0.5"
     assert stored["services"] == []
     assert stored["pos_x"] == 100
-    # device removed from pending
-    assert await coord.list_pending() == []
+    # Device Inventory: the device is NOT removed — it stays listed as "approved"
+    # and is badged with the number of canvases it appears on.
+    inventory = await coord.list_pending()
+    assert len(inventory) == 1
+    assert inventory[0]["id"] == "pd-1"
+    assert inventory[0]["status"] == "approved"
+    assert inventory[0]["canvas_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -619,3 +627,102 @@ async def test_run_service_checks_dispatches_per_node(hass) -> None:  # noqa: AN
     ]
     # host derived from the node's first IP.
     assert mock.call_args.args[0] == "192.168.1.5"
+
+
+# ── Device Inventory: canvas_count + approved retention + deep scan ────────────
+
+@pytest.mark.asyncio
+async def test_list_pending_inventory_includes_approved_with_canvas_count(coord) -> None:  # noqa: ANN001
+    """The inventory view returns approved devices badged with their canvas count."""
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {"id": "n1", "type": "server", "position": {"x": 0, "y": 0},
+                 "ip": "10.0.0.5"}
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {"id": "pd-1", "ip": "10.0.0.5", "status": "approved", "services": []}
+    )
+    pending["devices"].append(
+        {"id": "pd-2", "ip": "10.0.0.9", "status": "pending", "services": []}
+    )
+    await coord._save_pending()
+
+    inventory = await coord.list_pending()
+    by_id = {d["id"]: d for d in inventory}
+    assert set(by_id) == {"pd-1", "pd-2"}
+    assert by_id["pd-1"]["canvas_count"] == 1  # on the canvas
+    assert by_id["pd-2"]["canvas_count"] == 0  # not on any canvas
+
+
+@pytest.mark.asyncio
+async def test_list_pending_canvas_count_matches_by_ieee(coord) -> None:  # noqa: ANN001
+    """Zigbee devices correlate by ieee_address, not IP."""
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {"id": "zb1", "type": "zigbee_router", "position": {"x": 0, "y": 0},
+                 "ieee_address": "0x00124b0012345678"}
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {
+            "id": "pd-zb",
+            "ip": None,
+            "status": "approved",
+            "services": [],
+            "data_extras": {"ieee_address": "0x00124b0012345678"},
+        }
+    )
+    await coord._save_pending()
+
+    inventory = await coord.list_pending()
+    assert inventory[0]["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_pending_does_not_persist_canvas_count(coord) -> None:  # noqa: ANN001
+    """canvas_count is transient — it never leaks back into the store."""
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {"id": "pd-1", "ip": "10.0.0.9", "status": "pending", "services": []}
+    )
+    await coord._save_pending()
+
+    await coord.list_pending()
+    store = await coord._get_pending()
+    assert "canvas_count" not in store["devices"][0]
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_forwards_deep_scan_options(coord) -> None:  # noqa: ANN001
+    """Per-scan deep-scan options reach scanner.run_scan as a DeepScanOptions."""
+    captured: dict = {}
+
+    async def _fake(ranges, run_id=None, *, exclude_ips=None, on_event=None,
+                    hass=None, deep_scan=None, **_kw):
+        captured["deep_scan"] = deep_scan
+        return []
+
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan", _fake
+    ):
+        await coord.trigger_scan(
+            http_ranges=["8000-8100"], http_probe_enabled=True, verify_tls=True
+        )
+        await coord.hass.async_block_till_done()
+
+    deep = captured["deep_scan"]
+    assert deep is not None
+    assert deep.http_ranges == ["8000-8100"]
+    assert deep.http_probe_enabled is True
+    assert deep.verify_tls is True

@@ -3,6 +3,7 @@ from custom_components.homelable import fingerprint
 from custom_components.homelable.fingerprint import (
     fingerprint_ports,
     match_port,
+    match_service,
     preload,
     suggest_node_type,
     suggest_type_from_mac,
@@ -146,3 +147,47 @@ def test_suggest_node_type_ubiquiti_mac_with_bgp_upgrades_to_router() -> None:
         mac="24:a4:3c:11:22:33",
     )
     assert result == "router"
+
+
+# ── Tiered service matching (deep-scan HTTP probe) ────────────────────────────
+
+def test_match_service_no_probe_matches_pre_probe_behaviour() -> None:
+    """Without http_signals, match_service behaves like the old port-only match."""
+    assert match_service(22, "tcp") == match_port(22, "tcp")
+
+
+def test_match_service_port_agnostic_matches_on_http_title() -> None:
+    """A port:null signature matches on the probe title regardless of port."""
+    signals = {"title": "Jellyfin", "headers": {}}
+    sig = match_service(38096, "tcp", http_signals=signals)
+    assert sig is not None
+    assert sig["service_name"] == "Jellyfin"
+
+
+def test_match_service_port_agnostic_ignored_without_probe() -> None:
+    """port:null signatures never match when no probe ran (no regression)."""
+    assert match_service(38096, "tcp") is None
+
+
+def test_match_service_http_regex_beats_port_only() -> None:
+    """Tier 1 (port + http_regex) wins over a generic port-only guess on 80."""
+    signals = {"title": "Home Assistant", "headers": {}}
+    sig = match_service(80, "tcp", http_signals=signals)
+    assert sig is not None
+    assert sig["service_name"] == "Home Assistant"
+
+
+def test_match_service_http_signal_from_server_header() -> None:
+    """The Server header feeds the http_regex haystack too."""
+    signals = {"title": None, "headers": {"Server": "Portainer"}}
+    sig = match_service(59000, "tcp", http_signals=signals)
+    assert sig is not None
+    assert sig["service_name"] == "Portainer"
+
+
+def test_fingerprint_ports_uses_http_signals() -> None:
+    """fingerprint_ports threads http_signals into the matcher."""
+    result = fingerprint_ports(
+        [{"port": 40000, "protocol": "tcp", "http_signals": {"title": "Grafana", "headers": {}}}]
+    )
+    assert result[0]["service_name"] == "Grafana"

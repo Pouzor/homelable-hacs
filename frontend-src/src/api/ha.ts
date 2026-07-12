@@ -82,14 +82,22 @@ export const designsApi = {
 
 // ─── Scan ────────────────────────────────────────────────────────────────────
 
+export interface DeepScanConfig {
+  http_ranges: string[]
+  http_probe_enabled: boolean
+  verify_tls: boolean
+}
+
 export const scanApi = {
-  trigger: async () => {
+  /** Start a scan. Optional deep-scan options are a per-scan override (extra
+   *  port ranges + HTTP probe); they are not persisted. */
+  trigger: async (deepScan?: Partial<DeepScanConfig>) => {
     const result = await wsCall<{
       run_id: string
       status: string
       devices_found: number
       new_devices: number
-    }>('homelable/scan/start')
+    }>('homelable/scan/start', deepScan ?? {})
     return toAxiosLike(result)
   },
   pending: async () => {
