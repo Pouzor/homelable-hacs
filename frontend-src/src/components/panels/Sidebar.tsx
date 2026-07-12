@@ -21,7 +21,7 @@ type SidebarView = 'canvas' | 'pending' | 'hidden' | 'history'
 
 const ALL_VIEWS = [
   { id: 'canvas' as SidebarView, icon: LayoutDashboard, label: 'Canvas' },
-  { id: 'pending' as SidebarView, icon: ScanLine, label: 'Pending Devices' },
+  { id: 'pending' as SidebarView, icon: ScanLine, label: 'Device Inventory' },
   { id: 'hidden' as SidebarView, icon: EyeOff, label: 'Hidden Devices' },
   { id: 'history' as SidebarView, icon: Clock, label: 'Scan History' },
 ]

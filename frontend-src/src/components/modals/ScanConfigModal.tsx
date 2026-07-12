@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings } from 'lucide-react'
+import { Settings, ChevronRight, ChevronDown } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,12 +17,30 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
   const [ranges, setRanges] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
+  // Deep-scan section. Options here are a per-scan override passed to trigger();
+  // HACS does not persist deep-scan defaults (ranges are config-flow managed).
+  const [deepOpen, setDeepOpen] = useState(false)
+  const [httpProbe, setHttpProbe] = useState(false)
+  const [verifyTls, setVerifyTls] = useState(false)
+  const [httpRangesText, setHttpRangesText] = useState('')
+
   useEffect(() => {
     if (!open) return
+    // Reset the per-scan deep-scan overrides each time the dialog opens.
+    const resetDeep = () => {
+      setDeepOpen(false)
+      setHttpProbe(false)
+      setVerifyTls(false)
+      setHttpRangesText('')
+    }
     scanApi.getConfig()
       .then((res) => setRanges(res.data.ranges))
       .catch(() => setRanges([]))
+      .finally(resetDeep)
   }, [open])
+
+  const parseHttpRanges = () =>
+    httpRangesText.split(',').map((r) => r.trim()).filter(Boolean)
 
   const handleScanNow = async () => {
     if (ranges.length === 0) {
@@ -31,7 +49,11 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
     }
     setSaving(true)
     try {
-      const res = await scanApi.trigger()
+      const res = await scanApi.trigger({
+        http_ranges: parseHttpRanges(),
+        http_probe_enabled: httpProbe,
+        verify_tls: verifyTls,
+      })
       if (res.data?.status === 'already_running') {
         toast.message('A scan is already running')
       } else {
@@ -70,6 +92,57 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                   className="font-mono text-sm bg-[#0d1117] border-border"
                 />
               ))
+            )}
+          </div>
+
+          {/* Deep Scan (opt-in, per-scan only) */}
+          <div className="space-y-2 border-t border-border pt-3">
+            <button
+              type="button"
+              onClick={() => setDeepOpen((v) => !v)}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              {deepOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              Deep Scan
+            </button>
+
+            {deepOpen && (
+              <div className="space-y-3 pl-1">
+                <p className="text-xs text-muted-foreground">
+                  Scan extra ports and probe HTTP services to identify apps on custom ports.
+                  Applies to this scan only.
+                </p>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Extra port ranges</Label>
+                  <Input
+                    value={httpRangesText}
+                    onChange={(e) => setHttpRangesText(e.target.value)}
+                    placeholder="8000-8100, 9000-9100"
+                    className="font-mono text-sm bg-[#0d1117] border-border"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={httpProbe}
+                    onChange={(e) => setHttpProbe(e.target.checked)}
+                    className="accent-[#00d4ff]"
+                  />
+                  Enable HTTP probe
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={verifyTls}
+                    onChange={(e) => setVerifyTls(e.target.checked)}
+                    className="accent-[#00d4ff]"
+                  />
+                  Verify TLS certificates
+                </label>
+              </div>
             )}
           </div>
 

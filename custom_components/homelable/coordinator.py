@@ -455,21 +455,71 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if self._pending is not None:
             await self.pending_store.async_save(self._pending)
 
+    def _canvas_design_index(
+        self,
+    ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+        """Index canvas nodes by ip / ieee_address → set of design ids they're on.
+
+        Used to badge inventory devices with how many canvases they appear on.
+        Nodes are stored flat (top-level ip/ieee_address) but may also carry the
+        values under `data` after a frontend round-trip, so read both shapes.
+        """
+        by_ip: dict[str, set[str]] = {}
+        by_ieee: dict[str, set[str]] = {}
+        for design_id, canvas in (self._canvases or {}).items():
+            for n in canvas.get("nodes", []):
+                data = n.get("data") or {}
+                ip = n.get("ip") or data.get("ip")
+                ieee = n.get("ieee_address") or data.get("ieee_address")
+                if ip:
+                    by_ip.setdefault(ip, set()).add(design_id)
+                if ieee:
+                    by_ieee.setdefault(ieee, set()).add(design_id)
+        return by_ip, by_ieee
+
     async def list_pending(
         self, *, status: str = "pending", source: str | None = None
     ) -> list[dict[str, Any]]:
-        """Return pending devices filtered by status and (optionally) source.
+        """Return inventory devices filtered by status and (optionally) source.
+
+        `status="pending"` is the Device Inventory view: it returns every
+        non-hidden device — freshly discovered (`pending`) AND already approved
+        onto a canvas (`approved`) — each badged with a `canvas_count` of how
+        many canvases it appears on. `status="hidden"` returns hidden devices.
 
         Devices written before the `source` field existed are treated as "scan".
         Zigbee-specific fields (`ieee_address`, `friendly_name`, ...) are
         stored under `data_extras` to keep the schema additive; flatten them
         into the top-level dict for the wire so the frontend sees one shape.
         """
+        await self._ensure_loaded()
         store = await self._get_pending()
-        out = [d for d in store["devices"] if d.get("status") == status]
+        if status == "pending":
+            # Inventory view: pending + approved. Transient "discovering" rows
+            # (mid-scan, not yet enriched) and hidden rows are excluded.
+            out = [
+                d for d in store["devices"] if d.get("status") in ("pending", "approved")
+            ]
+        else:
+            # Exact-status query (e.g. "hidden", "discovering").
+            out = [d for d in store["devices"] if d.get("status") == status]
         if source is not None:
             out = [d for d in out if (d.get("source") or "scan") == source]
-        return [self._flatten_pending(d) for d in out]
+
+        by_ip, by_ieee = self._canvas_design_index()
+        wire: list[dict[str, Any]] = []
+        for d in out:
+            # Copy so the transient canvas_count never leaks back into the store.
+            fd = dict(self._flatten_pending(d))
+            designs: set[str] = set()
+            ieee = fd.get("ieee_address")
+            if ieee:
+                designs |= by_ieee.get(ieee, set())
+            if fd.get("ip"):
+                designs |= by_ip.get(fd["ip"], set())
+            fd["canvas_count"] = len(designs)
+            wire.append(fd)
+        return wire
 
     @staticmethod
     def _flatten_pending(device: dict[str, Any]) -> dict[str, Any]:
@@ -658,7 +708,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
         canvas.setdefault("nodes", []).append(node)
         await self.save_canvas(canvas, design_id)
 
-        await self.remove_pending(device_id)
+        # Device Inventory: keep the row, flip it to "approved" rather than
+        # deleting it, so the device stays listed and gets badged with the
+        # number of canvases it appears on (see list_pending / _canvas_design_index).
+        device["status"] = "approved"
+        await self._save_pending()
         return node
 
     # ─── Scan ────────────────────────────────────────────────────────────────
@@ -696,11 +750,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
             ranges = [r.strip() for r in ranges.split(",") if r.strip()]
         return list(ranges)
 
-    async def trigger_scan(self) -> dict[str, Any]:
+    async def trigger_scan(
+        self,
+        *,
+        http_ranges: list[str] | None = None,
+        http_probe_enabled: bool = False,
+        verify_tls: bool = False,
+    ) -> dict[str, Any]:
         """Kick off a scan in the background. Returns immediately.
 
         Response: {run_id, status: "running"|"already_running", devices_found: 0, new_devices: 0}.
         UI polls history for progress / completion.
+
+        Deep-scan options (per-scan; not persisted) extend the port list and run
+        an HTTP probe so services on custom ports can be identified.
         """
         if self._scan_run_id is not None:
             return {
@@ -713,13 +776,17 @@ class HomelableCoordinator(DataUpdateCoordinator):
         ranges = self.get_scan_ranges()
         await self._ensure_loaded()
         pending = await self._get_pending()
-        canvas_ips = {
-            n.get("ip") or n.get("data", {}).get("ip")
-            for n in self._all_canvas_nodes()
-            if n.get("ip") or n.get("data", {}).get("ip")
-        }
+        # Device Inventory: on-canvas devices are intentionally NOT excluded any
+        # more — they stay in the inventory and are badged with a canvas count.
+        # Only user-hidden devices are suppressed.
         hidden_ips = {d["ip"] for d in pending["devices"] if d.get("status") == "hidden"}
-        exclude = canvas_ips | hidden_ips
+        exclude = hidden_ips
+
+        deep_scan = scanner.DeepScanOptions(
+            http_ranges=list(http_ranges or []),
+            http_probe_enabled=bool(http_probe_enabled),
+            verify_tls=bool(verify_tls),
+        )
 
         run_id = uuid.uuid4().hex
         self._scan_run_id = run_id
@@ -737,7 +804,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         )
 
         self.hass.async_create_task(
-            self._run_scan_task(run_id, ranges, exclude, started_at)
+            self._run_scan_task(run_id, ranges, exclude, started_at, deep_scan)
         )
         return {
             "run_id": run_id,
@@ -784,8 +851,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "discovered_at": _utc_now_iso(),
                     }
                 )
-            elif existing.get("status") in ("discovering", "pending"):
-                # Refresh meta if we got better info this run.
+            elif existing.get("status") in ("discovering", "pending", "approved"):
+                # Refresh meta if we got better info this run (approved rows keep
+                # their status — they just get fresher fields).
                 existing["mac"] = device.get("mac") or existing.get("mac")
                 existing["hostname"] = (
                     device.get("hostname") or existing.get("hostname")
@@ -815,7 +883,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "discovered_at": _utc_now_iso(),
                     }
                 )
-            elif existing.get("status") in ("discovering", "pending"):
+            elif existing.get("status") in ("discovering", "pending", "approved"):
+                # Approved (on-canvas) devices keep their status on re-scan; only
+                # their scanned fields refresh.
+                keep_approved = existing.get("status") == "approved"
                 existing.update(
                     {
                         "mac": device.get("mac") or existing.get("mac"),
@@ -825,7 +896,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "services": device.get("services", []),
                         "suggested_type": device.get("suggested_type"),
                         "discovery_source": device.get("discovery_source"),
-                        "status": "pending",
+                        "status": "approved" if keep_approved else "pending",
                     }
                 )
             # Echo the stored device id back so the frontend can reconcile.
@@ -843,6 +914,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         ranges: list[str],
         exclude: set[str],
         started_at: str,
+        deep_scan: scanner.DeepScanOptions | None = None,
     ) -> None:
         """Background scan body. Records run state, merges into pending store."""
         async def _on_event(payload: dict[str, Any]) -> None:
@@ -855,6 +927,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 exclude_ips=exclude,
                 on_event=_on_event,
                 hass=self.hass,
+                deep_scan=deep_scan,
             )
         except Exception as exc:  # noqa: BLE001 — record any failure, then exit
             _LOGGER.exception("Scan %s failed", run_id)
@@ -906,7 +979,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "discovered_at": now,
                     }
                 )
-            elif existing.get("status") in ("discovering", "pending"):
+            elif existing.get("status") in ("discovering", "pending", "approved"):
+                # Approved (on-canvas) devices keep their status; fields refresh.
+                keep_approved = existing.get("status") == "approved"
                 existing.update(
                     {
                         "mac": dev.get("mac") or existing.get("mac"),
@@ -916,7 +991,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                         "services": dev.get("services", []),
                         "suggested_type": dev.get("suggested_type"),
                         "discovery_source": dev.get("discovery_source"),
-                        "status": "pending",
+                        "status": "approved" if keep_approved else "pending",
                     }
                 )
 

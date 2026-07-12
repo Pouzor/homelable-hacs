@@ -8,6 +8,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
+from . import scanner
 from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .zigbee import ZigbeeMqttNotReadyError
 
@@ -195,7 +196,15 @@ async def ws_designs_delete(
 
 # ─── Scan ────────────────────────────────────────────────────────────────────
 
-@websocket_api.websocket_command({vol.Required("type"): "homelable/scan/start"})
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/start",
+        # Deep-scan overrides (per-scan only; not persisted).
+        vol.Optional("http_ranges"): [str],
+        vol.Optional("http_probe_enabled"): bool,
+        vol.Optional("verify_tls"): bool,
+    }
+)
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_scan_start(
@@ -205,7 +214,19 @@ async def ws_scan_start(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    result = await coord.trigger_scan()
+    http_ranges = msg.get("http_ranges")
+    if http_ranges:
+        invalid = [r for r in http_ranges if not scanner._valid_port_range(r.strip())]
+        if invalid:
+            connection.send_error(
+                msg["id"], "invalid_port_range", f"Invalid port range(s): {invalid}"
+            )
+            return
+    result = await coord.trigger_scan(
+        http_ranges=http_ranges,
+        http_probe_enabled=bool(msg.get("http_probe_enabled", False)),
+        verify_tls=bool(msg.get("verify_tls", False)),
+    )
     connection.send_result(msg["id"], result)
 
 

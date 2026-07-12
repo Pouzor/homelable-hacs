@@ -19,10 +19,12 @@ import socket
 import subprocess
 import threading
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from .fingerprint import fingerprint_ports, suggest_node_type
 from .fingerprint import preload as preload_fingerprints
+from .http_probe import probe_open_ports
 from .tcp_scanner import tcp_connect_scan
 
 # Coroutine the caller can pass to receive incremental scan events. Schema:
@@ -63,6 +65,68 @@ _EXTRA_PORTS = (
 )
 
 _PORT_LIST: tuple[int, ...] = tuple(int(p) for p in _EXTRA_PORTS.split(","))
+
+# Deep scan (opt-in): extra TCP ports + an HTTP probe that identifies services on
+# custom ports. Off by default → identical to the standard scan.
+_PORT_RANGE_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
+# Safety cap so a wide user range can't explode the per-host TCP connect fan-out.
+_MAX_EXTRA_PORTS = 2048
+
+
+@dataclass
+class DeepScanOptions:
+    """Per-scan deep-scan settings (empty/False → standard scan, today's behaviour)."""
+
+    http_ranges: list[str] = field(default_factory=list)
+    http_probe_enabled: bool = False
+    verify_tls: bool = False
+
+
+def _valid_port_range(spec: str) -> bool:
+    """True for a single port ('N') or an inclusive range ('N-M') within 1..65535."""
+    if not _PORT_RANGE_RE.match(spec):
+        return False
+    parts = [int(p) for p in spec.split("-")]
+    if any(p < 1 or p > 65535 for p in parts):
+        return False
+    return len(parts) == 1 or parts[0] <= parts[1]
+
+
+def _expand_port_ranges(http_ranges: list[str] | None) -> tuple[int, ...]:
+    """Expand validated 'N'/'N-M' specs into a de-duplicated extra-port tuple.
+
+    Ports already in the base ``_PORT_LIST`` are skipped; the total is capped at
+    ``_MAX_EXTRA_PORTS``. Invalid specs are silently dropped (the API layer
+    validates and rejects earlier — this is defence in depth).
+    """
+    if not http_ranges:
+        return ()
+    base = set(_PORT_LIST)
+    seen: set[int] = set()
+    extra: list[int] = []
+    for spec in http_ranges:
+        spec = spec.strip()
+        if not _valid_port_range(spec):
+            continue
+        parts = [int(p) for p in spec.split("-")]
+        lo, hi = (parts[0], parts[0]) if len(parts) == 1 else (parts[0], parts[1])
+        for port in range(lo, hi + 1):
+            if port in base or port in seen:
+                continue
+            seen.add(port)
+            extra.append(port)
+            if len(extra) >= _MAX_EXTRA_PORTS:
+                _LOGGER.warning(
+                    "Deep-scan extra port ranges exceed %d ports; truncating",
+                    _MAX_EXTRA_PORTS,
+                )
+                return tuple(extra)
+    return tuple(extra)
+
+
+def _build_port_list(http_ranges: list[str] | None) -> tuple[int, ...]:
+    """Combine the default port list with validated user ranges for the TCP scan."""
+    return _PORT_LIST + _expand_port_ranges(http_ranges)
 
 _MDNS_SERVICE_TYPES = [
     "_http._tcp.local.",
@@ -231,11 +295,13 @@ async def _phase2_port_scan(
     alive: dict[str, dict[str, Any]],
     *,
     on_host_done: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    port_list: tuple[int, ...] = _PORT_LIST,
 ) -> list[dict[str, Any]]:
     """Phase 2: per-IP TCP connect scan with bounded concurrency.
 
     `on_host_done` (if provided) is awaited per host as soon as that host's
     scan completes — the caller uses this to stream `device_enriched` events.
+    `port_list` defaults to the standard set; deep scan passes an extended list.
     """
     if not alive:
         return []
@@ -244,7 +310,7 @@ async def _phase2_port_scan(
 
     async def _scan_and_notify(host_dict: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            result = await tcp_connect_scan(host_dict, _PORT_LIST)
+            result = await tcp_connect_scan(host_dict, port_list)
         if on_host_done is not None:
             try:
                 await on_host_done(result)
@@ -270,6 +336,7 @@ async def _scan_target(
     *,
     on_phase1_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     on_phase2_host: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    port_list: tuple[int, ...] = _PORT_LIST,
 ) -> list[dict[str, Any]]:
     """Two-phase scan for a CIDR range (ping → TCP port scan).
 
@@ -279,7 +346,9 @@ async def _scan_target(
     """
     alive = await _ping_sweep(target, on_host=on_phase1_host)
     if alive:
-        return await _phase2_port_scan(alive, on_host_done=on_phase2_host)
+        return await _phase2_port_scan(
+            alive, on_host_done=on_phase2_host, port_list=port_list
+        )
 
     _LOGGER.info(
         "[Phase 1] no hosts via ping/ARP for %s — full TCP sweep fallback", target
@@ -306,7 +375,9 @@ async def _scan_target(
         if on_phase2_host is not None:
             await on_phase2_host(host)
 
-    results = await _phase2_port_scan(full_alive, on_host_done=_filtered_phase2)
+    results = await _phase2_port_scan(
+        full_alive, on_host_done=_filtered_phase2, port_list=port_list
+    )
     return [h for h in results if h.get("open_ports")]
 
 
@@ -393,12 +464,35 @@ async def _mdns_discover(
     return list(discovered.values())
 
 
-def _enrich(host: dict[str, Any], discovery_source: str) -> dict[str, Any]:
-    """Add fingerprint + suggested_type + discovery_source to a host dict."""
-    services = fingerprint_ports(host.get("open_ports", []))
-    suggested_type = suggest_node_type(
-        host.get("open_ports", []), host.get("mac")
-    )
+async def _enrich(
+    host: dict[str, Any],
+    discovery_source: str,
+    deep_scan: DeepScanOptions | None = None,
+) -> dict[str, Any]:
+    """Add fingerprint + suggested_type + discovery_source to a host dict.
+
+    With deep scan's HTTP probe enabled, open ports are first probed for
+    title/header signals so fingerprint can confirm services on custom ports.
+    The probe is idempotent per host: it only runs on ports that don't yet
+    carry an ``http_signals`` key, so the two enrichment passes (streamed
+    phase-2 event + the final device list) probe each host at most once.
+    """
+    open_ports = host.get("open_ports", [])
+    if (
+        deep_scan is not None
+        and deep_scan.http_probe_enabled
+        and open_ports
+        and discovery_source == "tcp"
+        and any("http_signals" not in p for p in open_ports)
+    ):
+        probed = await probe_open_ports(
+            host["ip"], open_ports, verify_tls=deep_scan.verify_tls
+        )
+        host["open_ports"] = probed
+        open_ports = probed
+
+    services = fingerprint_ports(open_ports)
+    suggested_type = suggest_node_type(open_ports, host.get("mac"))
     return {
         **host,
         "services": services,
@@ -414,6 +508,7 @@ async def run_scan(
     exclude_ips: set[str] | None = None,
     on_event: ScanEventCallback | None = None,
     hass: Any | None = None,
+    deep_scan: DeepScanOptions | None = None,
 ) -> list[dict[str, Any]]:
     """Execute a scan for the given CIDR ranges.
 
@@ -435,6 +530,8 @@ async def run_scan(
         ValueError: if any range is not a valid CIDR.
     """
     exclude_ips = exclude_ips or set()
+    deep_scan = deep_scan or DeepScanOptions()
+    port_list = _build_port_list(deep_scan.http_ranges)
     for r in ranges:
         try:
             ipaddress.ip_network(r, strict=False)
@@ -475,7 +572,7 @@ async def run_scan(
         # already gated, but a host could enter via the ARP-only path).
         if ip in exclude_ips:
             return
-        enriched = _enrich(host, discovery_source="tcp")
+        enriched = await _enrich(host, discovery_source="tcp", deep_scan=deep_scan)
         await _safe_emit(
             on_event,
             {"event": "device_enriched", "device": enriched},
@@ -494,6 +591,7 @@ async def run_scan(
                 cidr,
                 on_phase1_host=_emit_phase1,
                 on_phase2_host=_emit_phase2,
+                port_list=port_list,
             )
             for host in hosts:
                 if _is_cancelled(run_id):
@@ -504,7 +602,9 @@ async def run_scan(
                 # seen_ips was populated by _emit_phase1 above; for hosts that
                 # only came through the ARP fallback (no ping), add now.
                 seen_ips.add(ip)
-                devices.append(_enrich(host, discovery_source="tcp"))
+                devices.append(
+                    await _enrich(host, discovery_source="tcp", deep_scan=deep_scan)
+                )
 
         if not _is_cancelled(run_id):
             mdns_hosts = await mdns_task
@@ -515,7 +615,7 @@ async def run_scan(
                 if ip in exclude_ips or ip in seen_ips:
                     continue
                 seen_ips.add(ip)
-                enriched = _enrich(host, discovery_source="mdns")
+                enriched = await _enrich(host, discovery_source="mdns")
                 devices.append(enriched)
                 # mDNS is single-shot: emit discovery + enrichment together so
                 # the UI gets a fully populated card in one frame.

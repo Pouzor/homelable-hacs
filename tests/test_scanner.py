@@ -169,6 +169,125 @@ async def test_phase2_invokes_on_host_done_callback() -> None:
     assert seen[0]["open_ports"][0]["port"] == 22
 
 
+# ── Deep scan (extra port ranges + HTTP probe) ────────────────────────────────
+
+def test_valid_port_range_accepts_single_and_range() -> None:
+    assert scanner._valid_port_range("8080")
+    assert scanner._valid_port_range("8000-8100")
+    assert not scanner._valid_port_range("0")
+    assert not scanner._valid_port_range("70000")
+    assert not scanner._valid_port_range("8100-8000")  # inverted
+    assert not scanner._valid_port_range("abc")
+
+
+def test_build_port_list_appends_extra_ranges_without_dupes() -> None:
+    """Extra ranges expand and append; ports already in the base list are skipped."""
+    result = scanner._build_port_list(["8000-8002", "80"])
+    # 80 is already in the base list → not duplicated; 8000 too. 8001/8002 are new.
+    assert result[: len(scanner._PORT_LIST)] == scanner._PORT_LIST
+    extra = result[len(scanner._PORT_LIST):]
+    assert 80 not in extra
+    assert set(extra) == {8001, 8002}
+
+
+def test_build_port_list_empty_is_base() -> None:
+    assert scanner._build_port_list(None) == scanner._PORT_LIST
+    assert scanner._build_port_list([]) == scanner._PORT_LIST
+
+
+@pytest.mark.asyncio
+async def test_run_scan_deep_scan_passes_extended_port_list() -> None:
+    """Deep-scan extra ranges reach _scan_target as an extended port_list."""
+    seen_ports: dict[str, tuple[int, ...]] = {}
+
+    async def _fake_scan(target: str, *, port_list=scanner._PORT_LIST, **_kwargs) -> list[dict]:
+        seen_ports["ports"] = port_list
+        return []
+
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
+        return []
+
+    with (
+        patch.object(scanner, "_scan_target", _fake_scan),
+        patch.object(scanner, "_mdns_discover", _no_mdns),
+    ):
+        await scanner.run_scan(
+            ["10.0.0.0/24"],
+            deep_scan=scanner.DeepScanOptions(http_ranges=["9000-9001"]),
+        )
+
+    assert 9000 in seen_ports["ports"]
+    assert 9001 in seen_ports["ports"]
+
+
+@pytest.mark.asyncio
+async def test_run_scan_http_probe_identifies_custom_port_service() -> None:
+    """With the probe on, a port:null http_regex signature matches a custom port."""
+
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
+        return [
+            {
+                "ip": "10.0.0.5",
+                "hostname": None,
+                "mac": None,
+                "os": None,
+                "open_ports": [{"port": 39000, "protocol": "tcp", "banner": ""}],
+            }
+        ]
+
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
+        return []
+
+    async def _fake_probe(ip, open_ports, verify_tls=False):  # noqa: ANN001, ANN201
+        return [{**p, "http_signals": {"title": "Jellyfin", "headers": {}}} for p in open_ports]
+
+    with (
+        patch.object(scanner, "_scan_target", _fake_scan),
+        patch.object(scanner, "_mdns_discover", _no_mdns),
+        patch.object(scanner, "probe_open_ports", _fake_probe),
+    ):
+        devices = await scanner.run_scan(
+            ["10.0.0.0/24"],
+            deep_scan=scanner.DeepScanOptions(http_probe_enabled=True),
+        )
+
+    names = [s["service_name"] for s in devices[0]["services"]]
+    assert "Jellyfin" in names
+
+
+@pytest.mark.asyncio
+async def test_run_scan_probe_not_called_when_disabled() -> None:
+    """No probe runs on a standard scan — behaviour is unchanged."""
+    called = {"n": 0}
+
+    async def _fake_scan(target: str, **_kwargs) -> list[dict]:
+        return [
+            {
+                "ip": "10.0.0.5",
+                "hostname": None,
+                "mac": None,
+                "os": None,
+                "open_ports": [{"port": 39000, "protocol": "tcp", "banner": ""}],
+            }
+        ]
+
+    async def _no_mdns(*_args, **_kwargs) -> list[dict]:
+        return []
+
+    async def _spy_probe(ip, open_ports, verify_tls=False):  # noqa: ANN001, ANN201
+        called["n"] += 1
+        return open_ports
+
+    with (
+        patch.object(scanner, "_scan_target", _fake_scan),
+        patch.object(scanner, "_mdns_discover", _no_mdns),
+        patch.object(scanner, "probe_open_ports", _spy_probe),
+    ):
+        await scanner.run_scan(["10.0.0.0/24"])
+
+    assert called["n"] == 0
+
+
 def test_request_cancel_records_run_id() -> None:
     """request_cancel marks the run_id; _is_cancelled reflects it."""
     scanner.request_cancel("my-run")
