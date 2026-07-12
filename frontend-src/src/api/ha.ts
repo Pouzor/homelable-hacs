@@ -188,7 +188,7 @@ export const scanApi = {
 
 // ─── Zigbee2MQTT ────────────────────────────────────────────────────────────
 
-import type { ZigbeeNetworkmap, ZigbeeImportResult, ZigbeeNode } from '@/components/zigbee/types'
+import type { ZigbeeNetworkmap, ZigbeeImportResult } from '@/components/zigbee/types'
 
 export const zigbeeApi = {
   /** Fetch the Z2M networkmap. May reject with WS error `mqtt_not_configured`,
@@ -197,11 +197,11 @@ export const zigbeeApi = {
     const result = await wsCall<ZigbeeNetworkmap>('homelable/zigbee/devices')
     return toAxiosLike(result)
   },
-  /** Push selected devices into the pending store (status="pending", source="zigbee"). */
-  importDevices: async (devices: ZigbeeNode[]) => {
-    const result = await wsCall<ZigbeeImportResult>('homelable/zigbee/import', {
-      devices,
-    })
+  /** Kick off a background Zigbee import (fetch network map + push all
+   *  discovered devices into the pending store). Returns a running scan run;
+   *  progress/completion is polled via Scan History. */
+  startImport: async () => {
+    const result = await wsCall<ZigbeeImportResult>('homelable/zigbee/import')
     return toAxiosLike(result)
   },
 }

@@ -607,20 +607,18 @@ async def ws_zigbee_devices(
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "homelable/zigbee/import",
-        vol.Required("devices"): [dict],
-    }
+    {vol.Required("type"): "homelable/zigbee/import"}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_zigbee_import(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Kick off a background Zigbee import; surfaces under Scan History."""
+    """Kick off a background Zigbee import (fetch + import); surfaces under
+    Scan History with a running → done transition."""
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    result = await coord.trigger_zigbee_import(msg["devices"])
+    result = await coord.trigger_zigbee_import()
     connection.send_result(msg["id"], result)
