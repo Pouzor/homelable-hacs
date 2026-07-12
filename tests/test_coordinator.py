@@ -316,7 +316,7 @@ async def test_approve_zigbee_child_links_to_flat_parent(coord) -> None:  # noqa
     """Approving a zigbee child should link to an already-approved (flat) parent.
 
     Both parent and child are stored flat (ieee_address / parent_id top-level),
-    so _create_zigbee_parent_edge must match on the flat shape.
+    so _create_wireless_parent_edge must match on the flat shape.
     """
     # Parent already approved → flat node on the canvas.
     pending = await coord._get_pending()
@@ -358,7 +358,7 @@ async def test_approve_zigbee_child_links_to_flat_parent(coord) -> None:  # noqa
     await coord._save_pending()
     child_node = await coord.approve_pending("pd-child")
 
-    edge = await coord._create_zigbee_parent_edge(child_node)
+    edge = await coord._create_wireless_parent_edge(child_node)
     assert edge is not None
     assert edge["source"] == parent_node["id"]
     assert edge["target"] == child_node["id"]

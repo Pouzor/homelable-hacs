@@ -58,6 +58,11 @@ vi.mock('@/components/zigbee/ZigbeeImportModal', () => ({
     open ? <div data-testid="zigbee-import-modal" /> : null,
 }))
 
+vi.mock('@/components/zwave/ZwaveImportModal', () => ({
+  ZwaveImportModal: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="zwave-import-modal" /> : null,
+}))
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const makeNode = (id: string, status: NodeData['status'], type: NodeData['type'] = 'server'): Node<NodeData> => ({
@@ -287,6 +292,12 @@ describe('Sidebar', () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Import Zigbee'))
     await waitFor(() => expect(screen.getByTestId('zigbee-import-modal')).toBeInTheDocument())
+  })
+
+  it('opens ZwaveImportModal when Import Z-Wave is clicked', async () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Import Z-Wave'))
+    await waitFor(() => expect(screen.getByTestId('zwave-import-modal')).toBeInTheDocument())
   })
 
 })

@@ -11,6 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from . import scanner
 from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .zigbee import ZigbeeMqttNotReadyError
+from .zwave import ZwaveMqttNotReadyError
 
 
 @callback
@@ -41,6 +42,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_restore_batch)
     websocket_api.async_register_command(hass, ws_zigbee_devices)
     websocket_api.async_register_command(hass, ws_zigbee_import)
+    websocket_api.async_register_command(hass, ws_zwave_devices)
+    websocket_api.async_register_command(hass, ws_zwave_import)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -248,7 +251,7 @@ async def ws_scan_cancel(
     {
         vol.Required("type"): "homelable/scan/pending",
         vol.Optional("status", default="pending"): vol.In(["pending", "hidden"]),
-        vol.Optional("source"): vol.In(["scan", "zigbee"]),
+        vol.Optional("source"): vol.In(["scan", "zigbee", "zwave"]),
     }
 )
 @websocket_api.async_response
@@ -285,7 +288,7 @@ async def ws_scan_approve(
     if node is None:
         connection.send_error(msg["id"], "not_found", "Device not found")
         return
-    auto_edge = await coord._create_zigbee_parent_edge(
+    auto_edge = await coord._create_wireless_parent_edge(
         node, overrides.get("design_id")
     )
     edges = [auto_edge] if auto_edge else []
@@ -486,7 +489,7 @@ async def ws_scan_approve_batch(
         nodes.append(node)
         device_ids.append(device_id)
         node_ids.append(node["id"])
-        auto_edge = await coord._create_zigbee_parent_edge(node, design_id)
+        auto_edge = await coord._create_wireless_parent_edge(node, design_id)
         if auto_edge:
             edges.append(auto_edge)
     connection.send_result(
@@ -642,4 +645,55 @@ async def ws_zigbee_import(
         _send_not_setup(connection, msg["id"])
         return
     result = await coord.trigger_zigbee_import()
+    connection.send_result(msg["id"], result)
+
+
+# ─── Z-Wave JS UI ─────────────────────────────────────────────────────────────
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/zwave/devices"}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_zwave_devices(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Fetch the Z-Wave node list and return parsed nodes + edges."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        nodes, edges = await coord.fetch_zwave_network()
+    except ZwaveMqttNotReadyError as exc:
+        connection.send_error(msg["id"], "mqtt_not_configured", str(exc))
+        return
+    except TimeoutError as exc:
+        connection.send_error(msg["id"], "timeout", str(exc))
+        return
+    except ValueError as exc:
+        connection.send_error(msg["id"], "bad_response", str(exc))
+        return
+    prefix, gateway = coord.get_zwave_config()
+    connection.send_result(
+        msg["id"],
+        {"nodes": nodes, "edges": edges, "prefix": prefix, "gateway": gateway},
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/zwave/import"}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_zwave_import(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Kick off a background Z-Wave import (fetch + import); surfaces under
+    Scan History with a running → done transition."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    result = await coord.trigger_zwave_import()
     connection.send_result(msg["id"], result)

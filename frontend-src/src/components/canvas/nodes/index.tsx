@@ -2,7 +2,7 @@ import { type NodeProps, type Node } from '@xyflow/react'
 import {
   Globe, Router, Network, Server, Layers, Box, Container,
   HardDrive, Cpu, Wifi, Circle, Cctv, Printer, Monitor, Laptop, Smartphone, PlugZap, Anchor, Package, Flame,
-  Radio, Antenna,
+  Radio, Antenna, RadioTower, Share2,
   Grid3x3, Battery, Fuel, Sun, Repeat2, Split, ToggleLeft, Lightbulb, Gauge, Combine, Cable, Zap,
 } from 'lucide-react'
 import { BaseNode } from './BaseNode'
@@ -34,6 +34,10 @@ export const GenericNode  = (props: N) => <BaseNode {...props} icon={Circle} />
 export const ZigbeeCoordinatorNode = (props: N) => <BaseNode {...props} icon={Network} />
 export const ZigbeeRouterNode      = (props: N) => <BaseNode {...props} icon={Radio} />
 export const ZigbeeEndDeviceNode   = (props: N) => <BaseNode {...props} icon={Antenna} />
+// Z-Wave node types (Z-Wave JS UI importer)
+export const ZwaveCoordinatorNode = (props: N) => <BaseNode {...props} icon={RadioTower} />
+export const ZwaveRouterNode      = (props: N) => <BaseNode {...props} icon={Share2} />
+export const ZwaveEndDeviceNode   = (props: N) => <BaseNode {...props} icon={Lightbulb} />
 
 // Electrical node types
 export const GridNode             = (props: N) => <BaseNode {...props} icon={Grid3x3} />

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -14,6 +14,7 @@ import { useLatestRelease } from '@/hooks/useLatestRelease'
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
 import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
+import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -43,6 +44,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   const [_collapsed, setCollapsed] = useState(false)
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
   const [zigbeeOpen, setZigbeeOpen] = useState(false)
+  const [zwaveOpen, setZwaveOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
   const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
   const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
@@ -238,6 +240,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         <SidebarItem icon={Type} label="Add Text" collapsed={collapsed} onClick={onAddText} />
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
         <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
+        <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
         <SidebarItem
           icon={hideIp ? EyeOff : Eye}
           label={hideIp ? 'Show IPs' : 'Hide IPs'}
@@ -263,6 +266,13 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         onImported={() => {
           // Import runs in the background — surface it under Scan History
           // (running → done), mirroring the IP scan flow.
+          setScanHistoryOpen(true)
+        }}
+      />
+      <ZwaveImportModal
+        open={zwaveOpen}
+        onClose={() => setZwaveOpen(false)}
+        onImported={() => {
           setScanHistoryOpen(true)
         }}
       />
