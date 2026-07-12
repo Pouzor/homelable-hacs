@@ -19,6 +19,10 @@ vi.mock('@/utils/zigbeeProperties', () => ({
   buildZigbeeProperties: () => [],
   isZigbeeType: (t: string) => t.startsWith('zigbee'),
 }))
+vi.mock('@/utils/zwaveProperties', () => ({
+  buildZwaveProperties: () => [],
+  isZwaveType: (t: string) => t.startsWith('zwave'),
+}))
 vi.mock('@/utils/macProperty', () => ({ buildMacProperty: () => [] }))
 
 vi.mock('@/api/ha', () => ({
@@ -47,6 +51,14 @@ const DEVICE_IP = {
 const DEVICE_NOSVC = {
   id: 'dev-b', ip: '10.0.0.6', mac: null, hostname: 'host-b', os: null,
   services: [], suggested_type: 'iot', status: 'pending', discovery_source: 'tcp',
+  discovered_at: '2020-01-01T00:00:00Z',
+}
+
+const DEVICE_ZWAVE = {
+  id: 'dev-z', ip: null, mac: null, hostname: 'Z Sensor', os: null,
+  ieee_address: 'zwave-0x1-3', vendor: 'Aeotec', model: 'MultiSensor',
+  services: [], suggested_type: 'zwave_enddevice', status: 'pending',
+  source: 'zwave', discovery_source: 'zwavejs2mqtt',
   discovered_at: '2020-01-01T00:00:00Z',
 }
 
@@ -113,5 +125,21 @@ describe('PendingDevicesModal — Device Inventory', () => {
     fireEvent.click(screen.getByRole('button', { name: /Hide on-canvas/ }))
     expect(screen.queryByTestId('pending-card-dev-b')).not.toBeInTheDocument()
     expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument()
+  })
+
+  it('filters to Z-Wave devices via the Z-Wave source filter', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP, DEVICE_ZWAVE] } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-z')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Z-Wave' }))
+    expect(screen.getByTestId('pending-card-dev-z')).toBeInTheDocument()
+    expect(screen.queryByTestId('pending-card-dev-a')).not.toBeInTheDocument()
+  })
+
+  it('labels a Z-Wave device card with the Z-WAVE source chip', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_ZWAVE] } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-z')).toBeInTheDocument())
+    expect(screen.getByText('Z-WAVE')).toBeInTheDocument()
   })
 })

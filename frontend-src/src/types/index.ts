@@ -37,6 +37,9 @@ export type NodeType =
   | 'zigbee_coordinator'
   | 'zigbee_router'
   | 'zigbee_enddevice'
+  | 'zwave_coordinator'
+  | 'zwave_router'
+  | 'zwave_enddevice'
   | 'grid'
   | 'ups'
   | 'battery'
@@ -181,6 +184,9 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   zigbee_coordinator: 'Zigbee Coordinator',
   zigbee_router: 'Zigbee Router',
   zigbee_enddevice: 'Zigbee End Device',
+  zwave_coordinator: 'Z-Wave Controller',
+  zwave_router: 'Z-Wave Router',
+  zwave_enddevice: 'Z-Wave End Device',
   grid: 'Grid Connection',
   ups: 'UPS',
   battery: 'Battery',

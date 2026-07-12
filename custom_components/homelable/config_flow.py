@@ -14,12 +14,16 @@ from .const import (
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    CONF_ZWAVE_GATEWAY,
+    CONF_ZWAVE_PREFIX,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_RANGES,
     DEFAULT_SERVICE_CHECK_ENABLED,
     DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
+    DEFAULT_ZWAVE_GATEWAY,
+    DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
     MIN_SERVICE_CHECK_INTERVAL,
 )
@@ -53,6 +57,12 @@ class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
                 ): int,
                 vol.Optional(
                     CONF_ZIGBEE_BASE_TOPIC, default=DEFAULT_ZIGBEE_BASE_TOPIC
+                ): str,
+                vol.Optional(
+                    CONF_ZWAVE_PREFIX, default=DEFAULT_ZWAVE_PREFIX
+                ): str,
+                vol.Optional(
+                    CONF_ZWAVE_GATEWAY, default=DEFAULT_ZWAVE_GATEWAY
                 ): str,
             }
         )
@@ -101,6 +111,14 @@ class HomelableOptionsFlow(OptionsFlow):
                     default=data.get(
                         CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC
                     ),
+                ): str,
+                vol.Optional(
+                    CONF_ZWAVE_PREFIX,
+                    default=data.get(CONF_ZWAVE_PREFIX, DEFAULT_ZWAVE_PREFIX),
+                ): str,
+                vol.Optional(
+                    CONF_ZWAVE_GATEWAY,
+                    default=data.get(CONF_ZWAVE_GATEWAY, DEFAULT_ZWAVE_GATEWAY),
                 ): str,
                 vol.Required(
                     CONF_SERVICE_CHECK_ENABLED,

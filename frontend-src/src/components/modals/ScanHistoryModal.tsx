@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, X, Loader2, StopCircle, Clock, ScanLine, Network, Inbox } from 'lucide-react'
+import { RefreshCw, X, Loader2, StopCircle, Clock, ScanLine, Network, RadioTower, Inbox } from 'lucide-react'
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { scanApi } from '@/api/client'
@@ -22,8 +22,19 @@ interface ScanHistoryModalProps {
   onClose: () => void
 }
 
-type KindFilter = 'all' | 'ip' | 'zigbee'
+type KindFilter = 'all' | 'ip' | 'zigbee' | 'zwave'
 type StatusFilter = 'all' | 'running' | 'done' | 'error' | 'cancelled'
+
+/** Normalise a ScanRun.kind into one of the known display kinds. */
+function runKind(kind: string | undefined): 'ip' | 'zigbee' | 'zwave' {
+  return kind === 'zigbee' ? 'zigbee' : kind === 'zwave' ? 'zwave' : 'ip'
+}
+
+const KIND_META = {
+  ip: { label: 'IP', color: '#a855f7' },
+  zigbee: { label: 'Zigbee', color: '#00d4ff' },
+  zwave: { label: 'Z-Wave', color: '#ff6e00' },
+} as const
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -37,6 +48,7 @@ const KIND_FILTERS: { key: KindFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'ip', label: 'IP' },
   { key: 'zigbee', label: 'Zigbee' },
+  { key: 'zwave', label: 'Z-Wave' },
 ]
 
 function statusColor(s: string): string {
@@ -90,8 +102,9 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
           toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
         }
         if (prev?.status === 'running' && run.status === 'done') {
-          if (run.kind === 'zigbee') {
-            toast.success(`Zigbee import done — ${run.devices_found} device${run.devices_found !== 1 ? 's' : ''}`)
+          if (run.kind === 'zigbee' || run.kind === 'zwave') {
+            const label = run.kind === 'zwave' ? 'Z-Wave' : 'Zigbee'
+            toast.success(`${label} import done — ${run.devices_found} device${run.devices_found !== 1 ? 's' : ''}`)
           }
           useCanvasStore.getState().notifyScanDeviceFound()
         }
@@ -143,7 +156,7 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
   }
 
   const filtered = runs.filter((r) => {
-    const k = r.kind === 'zigbee' ? 'zigbee' : 'ip'
+    const k = runKind(r.kind)
     if (kindFilter !== 'all' && k !== kindFilter) return false
     if (statusFilter !== 'all' && r.status !== statusFilter) return false
     return true
@@ -216,7 +229,9 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
             </div>
           )}
           {filtered.map((r) => {
-            const isZigbee = r.kind === 'zigbee'
+            const kind = runKind(r.kind)
+            const meta = KIND_META[kind]
+            const KindIcon = kind === 'zigbee' ? Network : kind === 'zwave' ? RadioTower : ScanLine
             return (
               <div key={r.id} className="rounded-lg border border-border bg-[#161b22] p-3">
                 <div className="flex items-center gap-2">
@@ -225,12 +240,10 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
                   {r.status === 'running' && <Loader2 size={12} className="animate-spin text-[#e3b341]" />}
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
-                    style={isZigbee
-                      ? { background: '#00d4ff22', color: '#00d4ff' }
-                      : { background: '#a855f722', color: '#a855f7' }}
+                    style={{ background: `${meta.color}22`, color: meta.color }}
                   >
-                    {isZigbee ? <Network size={10} /> : <ScanLine size={10} />}
-                    {isZigbee ? 'Zigbee' : 'IP'}
+                    <KindIcon size={10} />
+                    {meta.label}
                   </span>
                   <span className="ml-auto text-xs text-muted-foreground font-mono">
                     {r.devices_found} found

@@ -11,7 +11,7 @@ import {
   // Security & Auth
   Shield, ShieldCheck, Lock, Key, Users, UserCheck, Flame,
   // Automation & IoT
-  Zap, Workflow, Bot, Home, Thermometer, Lightbulb, Radio, BotMessageSquare, Webhook,
+  Zap, Workflow, Bot, Home, Thermometer, Lightbulb, Radio, RadioTower, Share2, BotMessageSquare, Webhook,
   // Smart Home / Sensors
   Plug, Power, BatteryCharging, Sun, DoorOpen, KeyRound, AlarmSmoke, Siren,
   Radar, PersonStanding, Vibrate, Droplet, Droplets, Wind, AirVent, Fan,
@@ -182,6 +182,9 @@ export const NODE_TYPE_DEFAULT_ICONS: Record<NodeType, LucideIcon> = {
   zigbee_coordinator: Radio,
   zigbee_router:      Zap,
   zigbee_enddevice:   Lightbulb,
+  zwave_coordinator: RadioTower,
+  zwave_router:       Share2,
+  zwave_enddevice:    Lightbulb,
   grid:              Zap,
   ups:               Power,
   battery:           BatteryCharging,

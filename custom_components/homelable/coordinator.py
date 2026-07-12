@@ -15,13 +15,15 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from . import scanner, status_checker, zigbee
+from . import scanner, status_checker, zigbee, zwave
 from .const import (
     CONF_SCAN_RANGES,
     CONF_SERVICE_CHECK_ENABLED,
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    CONF_ZWAVE_GATEWAY,
+    CONF_ZWAVE_PREFIX,
     DEFAULT_DESIGN_ICON,
     DEFAULT_DESIGN_NAME,
     DEFAULT_DESIGN_TYPE,
@@ -30,6 +32,8 @@ from .const import (
     DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
+    DEFAULT_ZWAVE_GATEWAY,
+    DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
     MAX_SCAN_RUNS,
     MIN_SERVICE_CHECK_INTERVAL,
@@ -49,6 +53,13 @@ _LOGGER = logging.getLogger(__name__)
 
 _EMPTY_CANVAS = {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
 _EMPTY_PENDING: dict[str, Any] = {"devices": []}
+
+
+def _is_wireless(node_type: str | None) -> bool:
+    """Zigbee + Z-Wave mesh devices share online status / no ICMP check."""
+    return bool(node_type) and (
+        node_type.startswith("zigbee_") or node_type.startswith("zwave_")
+    )
 
 
 def build_mac_property(mac: str | None) -> list[dict[str, Any]]:
@@ -144,8 +155,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
             # legacy/test data may put them under `data`. Read both.
             data = node.get("data") or {}
             node_type = node.get("type") or data.get("type") or ""
-            if node_type.startswith("zigbee_"):
-                # Zigbee devices are one-shot imports from Z2M; no live check.
+            if _is_wireless(node_type):
+                # Zigbee / Z-Wave devices are one-shot mesh imports; no live check.
                 check = "none"
             else:
                 check = node.get("check_method") or data.get("check_method") or "ping"
@@ -573,11 +584,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 return True
         return False
 
-    async def _create_zigbee_parent_edge(
+    async def _create_wireless_parent_edge(
         self, child_node: dict[str, Any], design_id: str | None = None
     ) -> dict[str, Any] | None:
-        """If child is a zigbee node with a known parent on the same design's
-        canvas, append a parent → child edge to that canvas and return it.
+        """If child is a zigbee/zwave node with a known parent on the same
+        design's canvas, append a parent → child edge to that canvas and return
+        it.
 
         Idempotent: skips if an edge with the same source+target already exists.
         """
@@ -641,32 +653,41 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # the node dict below only copies explicit keys + data_extras + data.
         design_id = await self._resolve_design_id(overrides.get("design_id"))
         node_type = overrides.get("type") or device.get("suggested_type") or "generic"
-        # Zigbee devices are imported one-shot from Z2M; no live status check
-        # is possible, so default check_method to "none" (status_checker treats
-        # "none" as always-online).
-        is_zigbee = (
-            device.get("source") == "zigbee" or node_type.startswith("zigbee_")
+        # Zigbee / Z-Wave devices are imported one-shot from their mesh gateway;
+        # no live status check is possible, so default check_method to "none"
+        # (status_checker treats "none" as always-online).
+        is_wireless = (
+            device.get("source") in ("zigbee", "zwave")
+            or node_type.startswith("zigbee_")
+            or node_type.startswith("zwave_")
         )
-        default_check = "none" if is_zigbee else "ping"
-        # Zigbee devices report from Z2M as reachable, so they land online; the
-        # status checker never polls them (check_method "none").
-        default_status = "online" if is_zigbee else "unknown"
-        # Zigbee devices carry their own canonical fields (ieee_address, model,
+        is_zwave = device.get("source") == "zwave" or node_type.startswith("zwave_")
+        default_check = "none" if is_wireless else "ping"
+        # Mesh devices report from their gateway as reachable, so they land
+        # online; the status checker never polls them (check_method "none").
+        default_status = "online" if is_wireless else "unknown"
+        # Mesh devices carry their own canonical fields (ieee_address, model,
         # vendor, lqi, parent_id) under data_extras; merge them so the node on
-        # the canvas has everything the zigbee node component renders.
+        # the canvas has everything the zigbee/zwave node component renders.
         data_extras = device.get("data_extras") or {}
-        # Surface IEEE/Vendor/Model/LQI as right-panel property rows (hidden by
-        # default — users opt in to showing them on the canvas card).
-        zigbee_props = (
-            zigbee.build_zigbee_properties(
+        # Surface Identity/Vendor/Model/LQI as right-panel property rows (hidden
+        # by default — users opt in to showing them on the canvas card). Z-Wave
+        # has no LQI row.
+        if not is_wireless:
+            wireless_props: list[dict[str, Any]] = []
+        elif is_zwave:
+            wireless_props = zwave.build_zwave_properties(
+                data_extras.get("ieee_address"),
+                data_extras.get("vendor"),
+                data_extras.get("model"),
+            )
+        else:
+            wireless_props = zigbee.build_zigbee_properties(
                 data_extras.get("ieee_address"),
                 data_extras.get("vendor"),
                 data_extras.get("model"),
                 data_extras.get("lqi"),
             )
-            if is_zigbee
-            else []
-        )
         # Canvas nodes are stored FLAT (top-level ip/services/pos_x/...), to
         # match what the frontend serializes on Save and reads back on load
         # (deserializeApiNode). Building a nested {position, data:{...}} node
@@ -690,16 +711,16 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "services": device.get("services", []),
             "status": overrides.get("status", default_status),
             "check_method": overrides.get("check_method", default_check),
-            "properties": zigbee_props,
+            "properties": wireless_props,
             "pos_x": position.get("x", 0),
             "pos_y": position.get("y", 0),
             **data_extras,
             **overrides.get("data", {}),
         }
-        # Non-zigbee nodes carry the scanned MAC as a hidden property row so the
+        # Non-mesh nodes carry the scanned MAC as a hidden property row so the
         # user can opt in to showing it on the canvas card. Merge (rather than
         # overwrite) to preserve any properties carried on the approve payload.
-        if not is_zigbee:
+        if not is_wireless:
             node["properties"] = merge_mac_property(
                 node.get("properties"), device.get("mac")
             )
@@ -1138,11 +1159,37 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
         """
+        return await self._import_wireless_devices(
+            devices,
+            source="zigbee",
+            discovery_source="zigbee2mqtt",
+            build_props=lambda ieee, vendor, model, lqi: zigbee.build_zigbee_properties(
+                ieee, vendor, model, lqi
+            ),
+        )
+
+    async def _import_wireless_devices(
+        self,
+        devices: list[dict[str, Any]],
+        *,
+        source: str,
+        discovery_source: str,
+        build_props,
+    ) -> dict[str, int]:
+        """Push selected Zigbee/Z-Wave mesh devices into the pending store.
+
+        Shared body behind ``import_zigbee_devices`` / ``import_zwave_devices``.
+        Already-pending identities (matched by source) are skipped;
+        already-approved (on-canvas) devices have their property rows refreshed
+        (via ``build_props``) instead of being re-added.
+
+        Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
+        """
         pending = await self._get_pending()
         await self._ensure_loaded()
         assert self._canvases is not None
 
-        # IEEE addresses already represented anywhere — avoid duplicates.
+        # Identities already represented anywhere — avoid duplicates.
         # Scan every design's canvas; nodes may be flat (top-level ieee_address)
         # or nested under `data`. Map ieee -> (design_id, node) so a refresh
         # saves the right canvas.
@@ -1156,7 +1203,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         already_pending = {
             d.get("data_extras", {}).get("ieee_address")
             for d in pending["devices"]
-            if d.get("source") == "zigbee"
+            if d.get("source") == source
         }
         existing = on_canvas | already_pending
 
@@ -1170,13 +1217,13 @@ class HomelableCoordinator(DataUpdateCoordinator):
             if not ieee:
                 skipped += 1
                 continue
-            # Already approved onto a canvas: refresh its IEEE/Vendor/Model/LQI
-            # props (preserving the user's visibility choices) and skip creating
-            # a pending row, so approved devices stay out of pending/hidden.
+            # Already approved onto a canvas: refresh its property rows
+            # (preserving the user's visibility choices) and skip creating a
+            # pending row, so approved devices stay out of pending/hidden.
             entry = canvas_by_ieee.get(ieee)
             if entry is not None:
                 did, node = entry
-                props = zigbee.build_zigbee_properties(
+                props = build_props(
                     ieee, dev.get("vendor"), dev.get("model"), dev.get("lqi")
                 )
                 node["properties"] = zigbee.merge_zigbee_properties(
@@ -1198,8 +1245,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
                     "open_ports": [],
                     "services": [],
                     "suggested_type": dev.get("type"),
-                    "discovery_source": "zigbee2mqtt",
-                    "source": "zigbee",
+                    "discovery_source": discovery_source,
+                    "source": source,
                     "status": "pending",
                     "discovered_at": now,
                     "data_extras": {
@@ -1221,3 +1268,124 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if dirty_designs:
             await self._save_canvases()
         return {"added": added, "skipped": skipped, "refreshed": refreshed}
+
+    # ─── Z-Wave JS UI ────────────────────────────────────────────────────────
+
+    def get_zwave_config(self) -> tuple[str, str]:
+        """Return the configured (prefix, gateway_name) for Z-Wave JS UI."""
+        prefix = self.entry.options.get(
+            CONF_ZWAVE_PREFIX,
+            self.entry.data.get(CONF_ZWAVE_PREFIX, DEFAULT_ZWAVE_PREFIX),
+        )
+        gateway = self.entry.options.get(
+            CONF_ZWAVE_GATEWAY,
+            self.entry.data.get(CONF_ZWAVE_GATEWAY, DEFAULT_ZWAVE_GATEWAY),
+        )
+        return prefix, gateway
+
+    async def fetch_zwave_network(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Trigger a Z-Wave getNodes request and return parsed (nodes, edges)."""
+        prefix, gateway = self.get_zwave_config()
+        return await zwave.fetch_zwave_network(self.hass, prefix, gateway)
+
+    async def trigger_zwave_import(self) -> dict[str, Any]:
+        """Kick off a Z-Wave import in the background. Returns immediately.
+
+        Mirrors ``trigger_zigbee_import``: records a ``kind="zwave"`` scan run
+        (running) and spawns the getNodes fetch + pending-store write so the
+        import surfaces under Scan History with a running → done transition.
+
+        Response: ``{run_id, status: "running", devices_found: 0}``.
+        """
+        run_id = uuid.uuid4().hex
+        started_at = _utc_now_iso()
+        prefix, gateway = self.get_zwave_config()
+        target = f"{prefix}/{gateway}"
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "running",
+                "kind": "zwave",
+                "ranges": [target],
+                "devices_found": 0,
+                "started_at": started_at,
+                "finished_at": None,
+                "error": None,
+            }
+        )
+        self.hass.async_create_task(
+            self._run_zwave_import_task(run_id, started_at)
+        )
+        return {"run_id": run_id, "status": "running", "devices_found": 0}
+
+    async def _run_zwave_import_task(
+        self, run_id: str, started_at: str
+    ) -> None:
+        """Background Z-Wave import body: fetch node list, import, record."""
+        prefix, gateway = self.get_zwave_config()
+        ranges = [f"{prefix}/{gateway}"]
+        try:
+            nodes, _edges = await self.fetch_zwave_network()
+            await self.import_zwave_devices(nodes)
+        except Exception as exc:  # noqa: BLE001 — record any failure, then exit
+            _LOGGER.exception("Z-Wave import %s failed", run_id)
+            await self._record_run(
+                {
+                    "id": run_id,
+                    "status": "error",
+                    "kind": "zwave",
+                    "ranges": ranges,
+                    "devices_found": 0,
+                    "started_at": started_at,
+                    "finished_at": _utc_now_iso(),
+                    "error": str(exc),
+                }
+            )
+            async_dispatcher_send(
+                self.hass,
+                SCAN_SIGNAL,
+                {"event": "scan_error", "run_id": run_id, "error": str(exc)},
+            )
+            return
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "done",
+                "kind": "zwave",
+                "ranges": ranges,
+                "devices_found": len(nodes),
+                "started_at": started_at,
+                "finished_at": _utc_now_iso(),
+                "error": None,
+            }
+        )
+        async_dispatcher_send(
+            self.hass,
+            SCAN_SIGNAL,
+            {
+                "event": "scan_finished",
+                "run_id": run_id,
+                "devices_found": len(nodes),
+            },
+        )
+
+    async def import_zwave_devices(
+        self, devices: list[dict[str, Any]]
+    ) -> dict[str, int]:
+        """Push selected Z-Wave devices into the pending store.
+
+        Each entry is a parsed node dict from ``zwave.parse_zwave_nodes``.
+        Z-Wave has no LQI, so the property builder omits that row.
+
+        Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
+        """
+        return await self._import_wireless_devices(
+            devices,
+            source="zwave",
+            discovery_source="zwavejs2mqtt",
+            build_props=lambda ieee, vendor, model, lqi: zwave.build_zwave_properties(
+                ieee, vendor, model
+            ),
+        )

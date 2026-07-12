@@ -173,7 +173,7 @@ export const scanApi = {
     )
     return toAxiosLike(result)
   },
-  pendingBySource: async (source: 'scan' | 'zigbee') => {
+  pendingBySource: async (source: 'scan' | 'zigbee' | 'zwave') => {
     const result = await wsCall<{ devices: object[] }>(
       'homelable/scan/pending',
       { status: 'pending', source }
@@ -210,6 +210,26 @@ export const zigbeeApi = {
    *  progress/completion is polled via Scan History. */
   startImport: async () => {
     const result = await wsCall<ZigbeeImportResult>('homelable/zigbee/import')
+    return toAxiosLike(result)
+  },
+}
+
+// ─── Z-Wave JS UI ───────────────────────────────────────────────────────────
+
+import type { ZwaveNetwork, ZwaveImportResult } from '@/components/zwave/types'
+
+export const zwaveApi = {
+  /** Fetch the Z-Wave node list. May reject with WS error `mqtt_not_configured`,
+   *  `timeout`, or `bad_response`. */
+  fetchDevices: async () => {
+    const result = await wsCall<ZwaveNetwork>('homelable/zwave/devices')
+    return toAxiosLike(result)
+  },
+  /** Kick off a background Z-Wave import (fetch node list + push all discovered
+   *  devices into the pending store). Returns a running scan run;
+   *  progress/completion is polled via Scan History. */
+  startImport: async () => {
+    const result = await wsCall<ZwaveImportResult>('homelable/zwave/import')
     return toAxiosLike(result)
   },
 }
