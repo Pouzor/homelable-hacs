@@ -219,37 +219,49 @@ async def test_import_zigbee_devices_adds_to_pending(coordinator: HomelableCoord
     assert pending[0]["source"] == "zigbee"
 
 
-async def test_import_zigbee_devices_records_scan_run(
-    coordinator: HomelableCoordinator,
+async def test_trigger_zigbee_import_records_running_then_done(
+    coordinator: HomelableCoordinator, hass: HomeAssistant
 ) -> None:
     devs = [
         {"id": "0xC", "ieee_address": "0xC", "friendly_name": "Coord", "type": "zigbee_coordinator"},
         {"id": "0xR", "ieee_address": "0xR", "friendly_name": "Router", "type": "zigbee_router"},
     ]
-    await coordinator.import_zigbee_devices(devs)
+    # Returns immediately with a running run for the UI to poll.
+    res = await coordinator.trigger_zigbee_import(devs)
+    assert res["status"] == "running"
+    assert res["devices_found"] == 0
+    run_id = res["run_id"]
+
+    await hass.async_block_till_done()
+
     runs = await coordinator.list_runs()
     assert len(runs) == 1
     run = runs[0]
+    assert run["id"] == run_id
     assert run["kind"] == "zigbee"
     assert run["status"] == "done"
     assert run["devices_found"] == 2
-    assert run["started_at"]
     assert run["finished_at"]
     assert run["error"] is None
+    # Devices actually landed in pending.
+    assert len(await coordinator.list_pending(source="zigbee")) == 2
 
 
-async def test_import_zigbee_devices_records_error_run(
+async def test_trigger_zigbee_import_records_error_run(
     coordinator: HomelableCoordinator,
+    hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def boom(devices: list[dict]) -> dict[str, int]:
         raise RuntimeError("import blew up")
 
-    monkeypatch.setattr(coordinator, "_import_zigbee_devices", boom)
-    with pytest.raises(RuntimeError, match="import blew up"):
-        await coordinator.import_zigbee_devices([{"ieee_address": "0xC"}])
+    monkeypatch.setattr(coordinator, "import_zigbee_devices", boom)
+    res = await coordinator.trigger_zigbee_import([{"ieee_address": "0xC"}])
+    await hass.async_block_till_done()
+
     runs = await coordinator.list_runs()
     assert len(runs) == 1
+    assert runs[0]["id"] == res["run_id"]
     assert runs[0]["kind"] == "zigbee"
     assert runs[0]["status"] == "error"
     assert runs[0]["error"] == "import blew up"
@@ -433,7 +445,18 @@ async def test_ws_zigbee_import_pushes_to_pending(
     )
     msg = await client.receive_json()
     assert msg["success"] is True
-    assert msg["result"] == {"added": 1, "skipped": 0, "refreshed": 0}
+    # Import runs in the background; WS returns a running run for Scan History.
+    assert msg["result"]["status"] == "running"
+    assert "run_id" in msg["result"]
+
+    await hass.async_block_till_done()
+    pending = await setup_ws.list_pending(source="zigbee")
+    assert len(pending) == 1
+    assert pending[0]["ieee_address"] == "0xC"
+    runs = await setup_ws.list_runs()
+    assert runs[0]["kind"] == "zigbee"
+    assert runs[0]["status"] == "done"
+    assert runs[0]["devices_found"] == 1
 
 
 async def test_ws_zigbee_devices_happy_path_with_mocked_mqtt(

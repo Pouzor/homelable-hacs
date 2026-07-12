@@ -124,11 +124,9 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
     if (!selected.length) return
     setImporting(true)
     try {
-      const res = await zigbeeApi.importDevices(selected)
-      const { added, skipped } = res.data
-      if (added) toast.success(`${added} device${added !== 1 ? 's' : ''} added to Pending`)
-      if (skipped) toast.info(`${skipped} skipped (already known)`)
-      onImported?.(added)
+      await zigbeeApi.importDevices(selected)
+      toast.success('Zigbee import started — check Scan History for results')
+      onImported?.(selected.length)
       resetAndClose()
     } catch (err) {
       const { message } = extractWsError(err)

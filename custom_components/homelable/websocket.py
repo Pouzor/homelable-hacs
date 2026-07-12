@@ -617,10 +617,10 @@ async def ws_zigbee_devices(
 async def ws_zigbee_import(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Push selected Z2M devices into the pending devices store."""
+    """Kick off a background Zigbee import; surfaces under Scan History."""
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    result = await coord.import_zigbee_devices(msg["devices"])
+    result = await coord.trigger_zigbee_import(msg["devices"])
     connection.send_result(msg["id"], result)

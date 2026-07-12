@@ -30,6 +30,7 @@ export interface ZigbeeNetworkmap {
 }
 
 export interface ZigbeeImportResult {
-  added: number
-  skipped: number
+  run_id: string
+  status: string
+  devices_found: number
 }

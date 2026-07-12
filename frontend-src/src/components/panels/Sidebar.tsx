@@ -261,7 +261,9 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         open={zigbeeOpen}
         onClose={() => setZigbeeOpen(false)}
         onImported={() => {
-          useCanvasStore.getState().notifyScanDeviceFound()
+          // Import runs in the background — surface it under Scan History
+          // (running → done), mirroring the IP scan flow.
+          setScanHistoryOpen(true)
         }}
       />
       <PendingDevicesModal
