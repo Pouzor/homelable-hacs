@@ -968,6 +968,89 @@ class HomelableCoordinator(DataUpdateCoordinator):
         """Trigger a Z2M networkmap request and return parsed (nodes, edges)."""
         return await zigbee.fetch_networkmap(self.hass, self.get_zigbee_base_topic())
 
+    async def trigger_zigbee_import(self) -> dict[str, Any]:
+        """Kick off a Zigbee import in the background. Returns immediately.
+
+        Records a ``kind="zigbee"`` scan run (running) and spawns the actual
+        network-map fetch + pending-store write, so the import surfaces under
+        Scan History with a live running → done transition — mirroring IP
+        scans. The MQTT round-trip (which can take minutes on large meshes)
+        runs in the background instead of blocking the UI. The panel polls
+        history for progress / completion.
+
+        Response: ``{run_id, status: "running", devices_found: 0}``.
+        """
+        run_id = uuid.uuid4().hex
+        started_at = _utc_now_iso()
+        base = self.get_zigbee_base_topic()
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "running",
+                "kind": "zigbee",
+                "ranges": [base] if base else [],
+                "devices_found": 0,
+                "started_at": started_at,
+                "finished_at": None,
+                "error": None,
+            }
+        )
+        self.hass.async_create_task(
+            self._run_zigbee_import_task(run_id, started_at)
+        )
+        return {"run_id": run_id, "status": "running", "devices_found": 0}
+
+    async def _run_zigbee_import_task(
+        self, run_id: str, started_at: str
+    ) -> None:
+        """Background Zigbee import body: fetch network map, import, record."""
+        base = self.get_zigbee_base_topic()
+        ranges = [base] if base else []
+        try:
+            nodes, _edges = await self.fetch_zigbee_networkmap()
+            await self.import_zigbee_devices(nodes)
+        except Exception as exc:  # noqa: BLE001 — record any failure, then exit
+            _LOGGER.exception("Zigbee import %s failed", run_id)
+            await self._record_run(
+                {
+                    "id": run_id,
+                    "status": "error",
+                    "kind": "zigbee",
+                    "ranges": ranges,
+                    "devices_found": 0,
+                    "started_at": started_at,
+                    "finished_at": _utc_now_iso(),
+                    "error": str(exc),
+                }
+            )
+            async_dispatcher_send(
+                self.hass,
+                SCAN_SIGNAL,
+                {"event": "scan_error", "run_id": run_id, "error": str(exc)},
+            )
+            return
+        await self._record_run(
+            {
+                "id": run_id,
+                "status": "done",
+                "kind": "zigbee",
+                "ranges": ranges,
+                "devices_found": len(nodes),
+                "started_at": started_at,
+                "finished_at": _utc_now_iso(),
+                "error": None,
+            }
+        )
+        async_dispatcher_send(
+            self.hass,
+            SCAN_SIGNAL,
+            {
+                "event": "scan_finished",
+                "run_id": run_id,
+                "devices_found": len(nodes),
+            },
+        )
+
     async def import_zigbee_devices(
         self, devices: list[dict[str, Any]]
     ) -> dict[str, int]:

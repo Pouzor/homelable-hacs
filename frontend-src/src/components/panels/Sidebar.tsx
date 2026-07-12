@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, RefreshCw, Loader2, Square, Eye, StopCircle, Radio, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
-import { scanApi, designsApi } from '@/api/client'
+import { designsApi } from '@/api/client'
 import { resolveDesignIcon, DEFAULT_DESIGN_ICON } from '@/utils/designIcons'
 import { DesignModal, type DesignFormData } from '@/components/modals/DesignModal'
 import type { Design } from '@/types'
@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 import { useLatestRelease } from '@/hooks/useLatestRelease'
 
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
+import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
@@ -25,16 +26,6 @@ const ALL_VIEWS = [
   { id: 'history' as SidebarView, icon: Clock, label: 'Scan History' },
 ]
 const VIEWS = STANDALONE ? ALL_VIEWS.slice(0, 1) : ALL_VIEWS
-
-interface ScanRun {
-  id: string
-  status: string
-  ranges: string[]
-  devices_found: number
-  started_at: string
-  finished_at: string | null
-  error: string | null
-}
 
 interface SidebarProps {
   onAddNode: () => void
@@ -54,6 +45,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   const [zigbeeOpen, setZigbeeOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
   const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
+  const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
 
   // When forceView is set, override local state without useEffect
   const collapsed = forceView ? false : _collapsed
@@ -208,23 +200,18 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                 setPendingModalOpen(true)
                 return
               }
+              if (id === 'history') {
+                setScanHistoryOpen(true)
+                return
+              }
               setActiveView(id)
             }}
           />
         ))}
       </nav>
 
-      {/* View content (only when expanded) — pending/hidden moved to modal */}
-      {!collapsed && activeView !== 'canvas' && activeView !== 'pending' && activeView !== 'hidden' && (
-        <div className="flex-1 min-h-0 overflow-y-auto border-t border-border">
-          {activeView === 'history' && <ScanHistoryPanel />}
-        </div>
-      )}
-
-      {/* Stats (only on canvas view) */}
-      {!collapsed && activeView === 'canvas' && (
-        <div className="flex-1" />
-      )}
+      {/* Spacer — pending / hidden / history all open in modals */}
+      {!collapsed && <div className="flex-1" />}
 
       {/* Stats footer */}
       {!collapsed && (
@@ -274,7 +261,9 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         open={zigbeeOpen}
         onClose={() => setZigbeeOpen(false)}
         onImported={() => {
-          useCanvasStore.getState().notifyScanDeviceFound()
+          // Import runs in the background — surface it under Scan History
+          // (running → done), mirroring the IP scan flow.
+          setScanHistoryOpen(true)
         }}
       />
       <PendingDevicesModal
@@ -282,6 +271,10 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         onClose={() => setPendingModalOpen(false)}
         highlightId={highlightPendingId}
         initialStatus={pendingModalStatus}
+      />
+      <ScanHistoryModal
+        open={scanHistoryOpen}
+        onClose={() => setScanHistoryOpen(false)}
       />
 
       <DesignModal
@@ -296,120 +289,6 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
       />
     </aside>
-  )
-}
-
-function ScanHistoryPanel() {
-  const [runs, setRuns] = useState<ScanRun[]>([])
-  const [loading, setLoading] = useState(false)
-  const prevRunsRef = useRef<ScanRun[]>([])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await scanApi.runs()
-      const next: ScanRun[] = res.data
-
-      // Toast when a run transitions from running → error
-      for (const run of next) {
-        const prev = prevRunsRef.current.find((r) => r.id === run.id)
-        if (prev?.status === 'running' && run.status === 'error') {
-          toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
-        }
-      }
-      prevRunsRef.current = next
-      setRuns(next)
-    } catch {
-      toast.error('Failed to load scan history')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Initial load
-  useEffect(() => { load() }, [load])
-
-  // Auto-refresh every 3s while any run is still running
-  useEffect(() => {
-    const hasRunning = runs.some((r) => r.status === 'running')
-    if (!hasRunning) return
-    const id = setInterval(load, 3000)
-    return () => clearInterval(id)
-  }, [runs, load])
-
-  const [stopping, setStopping] = useState<string | null>(null)
-
-  const handleStop = async (runId: string) => {
-    setStopping(runId)
-    try {
-      await scanApi.stop(runId)
-      toast.success('Scan stop requested')
-    } catch {
-      toast.error('Failed to stop scan')
-    } finally {
-      setStopping(null)
-    }
-  }
-
-  const statusColor = (s: string) =>
-    s === 'done' ? '#39d353'
-    : s === 'running' ? '#e3b341'
-    : s === 'error' ? '#f85149'
-    : s === 'cancelled' ? '#8b949e'
-    : '#8b949e'
-
-  return (
-    <div className="p-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">History</span>
-        <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5">
-          <RefreshCw size={12} />
-        </button>
-      </div>
-      {loading && runs.length === 0 && <Loader2 size={14} className="animate-spin text-muted-foreground mx-auto my-4" />}
-      {!loading && runs.length === 0 && (
-        <p className="text-xs text-muted-foreground text-center py-4">No scans yet</p>
-      )}
-      {runs.map((r) => (
-        <div key={r.id} className="mb-2 p-2 rounded-md bg-[#21262d] text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: statusColor(r.status) }} />
-            <span className="font-mono text-foreground capitalize">{r.status}</span>
-            {r.status === 'running' && <Loader2 size={10} className="animate-spin text-[#e3b341]" />}
-            <span className="ml-auto text-muted-foreground font-mono">{r.devices_found} found</span>
-            {r.status === 'running' && (
-              <Tooltip>
-                <TooltipTrigger>
-                  <button
-                    aria-label="Stop scan"
-                    onClick={() => handleStop(r.id)}
-                    disabled={stopping === r.id}
-                    className="p-0.5 text-[#f85149] hover:bg-[#f85149]/10 rounded transition-colors disabled:opacity-50"
-                  >
-                    {stopping === r.id
-                      ? <Loader2 size={11} className="animate-spin" />
-                      : <StopCircle size={11} />
-                    }
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left">Stop scan</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          <div className="text-muted-foreground text-[10px] mt-0.5">
-            {new Date(r.started_at.endsWith('Z') ? r.started_at : r.started_at + 'Z').toLocaleString()}
-          </div>
-          {r.ranges.length > 0 && (
-            <div className="text-[#8b949e] text-[10px] font-mono truncate">{r.ranges.join(', ')}</div>
-          )}
-          {r.error && (
-            <div className="text-[#f85149] text-[10px] mt-1 leading-tight wrap-break-word whitespace-pre-wrap">
-              {r.error}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
   )
 }
 

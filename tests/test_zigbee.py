@@ -219,6 +219,63 @@ async def test_import_zigbee_devices_adds_to_pending(coordinator: HomelableCoord
     assert pending[0]["source"] == "zigbee"
 
 
+async def test_trigger_zigbee_import_records_running_then_done(
+    coordinator: HomelableCoordinator,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nodes = [
+        {"id": "0xC", "ieee_address": "0xC", "friendly_name": "Coord", "type": "zigbee_coordinator"},
+        {"id": "0xR", "ieee_address": "0xR", "friendly_name": "Router", "type": "zigbee_router"},
+    ]
+
+    async def fake_fetch() -> tuple[list[dict], list[dict]]:
+        return nodes, []
+
+    monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", fake_fetch)
+
+    # Returns immediately with a running run for the UI to poll.
+    res = await coordinator.trigger_zigbee_import()
+    assert res["status"] == "running"
+    assert res["devices_found"] == 0
+    run_id = res["run_id"]
+
+    await hass.async_block_till_done()
+
+    runs = await coordinator.list_runs()
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["id"] == run_id
+    assert run["kind"] == "zigbee"
+    assert run["status"] == "done"
+    assert run["devices_found"] == 2
+    assert run["finished_at"]
+    assert run["error"] is None
+    # Discovered devices actually landed in pending.
+    assert len(await coordinator.list_pending(source="zigbee")) == 2
+
+
+async def test_trigger_zigbee_import_records_error_run(
+    coordinator: HomelableCoordinator,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def boom() -> tuple[list[dict], list[dict]]:
+        raise RuntimeError("mqtt not ready")
+
+    monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", boom)
+    res = await coordinator.trigger_zigbee_import()
+    await hass.async_block_till_done()
+
+    runs = await coordinator.list_runs()
+    assert len(runs) == 1
+    assert runs[0]["id"] == res["run_id"]
+    assert runs[0]["kind"] == "zigbee"
+    assert runs[0]["status"] == "error"
+    assert runs[0]["error"] == "mqtt not ready"
+    assert runs[0]["devices_found"] == 0
+
+
 async def test_import_zigbee_devices_skips_duplicates(
     coordinator: HomelableCoordinator,
 ) -> None:
@@ -378,25 +435,35 @@ async def test_ws_zigbee_devices_returns_mqtt_not_configured(
 async def test_ws_zigbee_import_pushes_to_pending(
     hass: HomeAssistant, hass_ws_client, hass_admin_user, setup_ws  # noqa: ANN001, ARG001
 ) -> None:
-    client = await hass_ws_client(hass)
-    await client.send_json(
+    nodes = [
         {
-            "id": 1,
-            "type": "homelable/zigbee/import",
-            "devices": [
-                {
-                    "id": "0xC",
-                    "ieee_address": "0xC",
-                    "friendly_name": "Coord",
-                    "type": "zigbee_coordinator",
-                    "device_type": "Coordinator",
-                }
-            ],
+            "id": "0xC",
+            "ieee_address": "0xC",
+            "friendly_name": "Coord",
+            "type": "zigbee_coordinator",
+            "device_type": "Coordinator",
         }
-    )
-    msg = await client.receive_json()
-    assert msg["success"] is True
-    assert msg["result"] == {"added": 1, "skipped": 0, "refreshed": 0}
+    ]
+    with patch.object(
+        setup_ws, "fetch_zigbee_networkmap", new=AsyncMock(return_value=(nodes, []))
+    ):
+        client = await hass_ws_client(hass)
+        await client.send_json({"id": 1, "type": "homelable/zigbee/import"})
+        msg = await client.receive_json()
+        assert msg["success"] is True
+        # Import runs in the background; WS returns a running run for Scan History.
+        assert msg["result"]["status"] == "running"
+        assert "run_id" in msg["result"]
+
+        await hass.async_block_till_done()
+
+    pending = await setup_ws.list_pending(source="zigbee")
+    assert len(pending) == 1
+    assert pending[0]["ieee_address"] == "0xC"
+    runs = await setup_ws.list_runs()
+    assert runs[0]["kind"] == "zigbee"
+    assert runs[0]["status"] == "done"
+    assert runs[0]["devices_found"] == 1
 
 
 async def test_ws_zigbee_devices_happy_path_with_mocked_mqtt(
