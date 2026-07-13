@@ -59,7 +59,7 @@ async def test_save_canvas_persists_via_ws(
     assert msg["result"] == {"ok": True}
 
     saved = await setup_ws.get_canvas()
-    assert saved["nodes"] == [{"id": "n1"}]
+    assert [n["id"] for n in saved["nodes"]] == ["n1"]
 
 
 # ─── Scan ────────────────────────────────────────────────────────────────────

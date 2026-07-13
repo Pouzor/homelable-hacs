@@ -475,35 +475,8 @@ async def ws_scan_approve_batch(
         _send_not_setup(connection, msg["id"])
         return
     overrides = _overrides_with_design(msg)
-    design_id = overrides.get("design_id")
-    nodes: list[dict[str, Any]] = []
-    device_ids: list[str] = []
-    node_ids: list[str] = []
-    edges: list[dict[str, Any]] = []
-    not_found: list[str] = []
-    for device_id in msg["device_ids"]:
-        node = await coord.approve_pending(device_id, overrides)
-        if node is None:
-            not_found.append(device_id)
-            continue
-        nodes.append(node)
-        device_ids.append(device_id)
-        node_ids.append(node["id"])
-        auto_edge = await coord._create_wireless_parent_edge(node, design_id)
-        if auto_edge:
-            edges.append(auto_edge)
-    connection.send_result(
-        msg["id"],
-        {
-            "approved": len(nodes),
-            "nodes": nodes,
-            "device_ids": device_ids,
-            "node_ids": node_ids,
-            "edges": edges,
-            "edges_created": len(edges),
-            "not_found": not_found,
-        },
-    )
+    result = await coord.approve_batch(msg["device_ids"], overrides)
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
