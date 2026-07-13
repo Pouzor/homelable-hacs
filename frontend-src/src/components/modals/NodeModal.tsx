@@ -1,17 +1,78 @@
 import { Fragment, createElement, useState } from 'react'
 import modalStyles from './modal-interactive.module.css'
-import { RotateCcw, ChevronDown } from 'lucide-react'
+import { RotateCcw, ChevronDown, Palette } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { NODE_TYPE_LABELS, type NodeData, type NodeType, type CheckMethod } from '@/types'
+import { NODE_TYPE_LABELS, type NodeData, type NodeType, type CheckMethod, type NodeTypeStyle } from '@/types'
+import { useThemeStore } from '@/stores/themeStore'
 import { resolveNodeColors } from '@/utils/nodeColors'
 import { ICON_REGISTRY, ICON_CATEGORIES, NODE_TYPE_DEFAULT_ICONS, isBrandIconKey, brandIconSlug, brandIconUrl } from '@/utils/nodeIcons'
 import { BrandIconPicker } from './BrandIconPicker'
-import { MIN_BOTTOM_HANDLES, MAX_BOTTOM_HANDLES, clampBottomHandles } from '@/utils/handleUtils'
+import { MAX_HANDLES, clampHandles, sideDefault, handleCountField, type Side } from '@/utils/handleUtils'
 import { getValidParentTypes } from '@/utils/virtualEdgeParent'
+
+// Maps a side to its per-type default field on NodeTypeStyle.
+const SIDE_STYLE_KEY: Record<Side, keyof NodeTypeStyle> = {
+  top: 'topHandles',
+  bottom: 'bottomHandles',
+  left: 'leftHandles',
+  right: 'rightHandles',
+}
+
+/**
+ * Compact per-side connection-point control: [− N +] with a typable value.
+ * Placed spatially around a node preview (see the Connection Points section).
+ */
+function CPStepper({ label, side, value, onChange }: {
+  label: string
+  side: Side
+  value: number
+  onChange: (v: number) => void
+}) {
+  const min = sideDefault(side)
+  const labelEl = <span className="text-[10px] text-muted-foreground/80 leading-none">{label}</span>
+  const belowLabel = side === 'bottom'
+  const btn = 'w-6 h-full flex items-center justify-center text-sm text-muted-foreground hover:text-foreground hover:bg-[#21262d] disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-default'
+  return (
+    <div className="flex flex-col items-center gap-1">
+      {!belowLabel && labelEl}
+      <div className="flex items-center h-7 rounded-md border border-[#30363d] bg-[#0d1117] overflow-hidden">
+        <button
+          type="button"
+          aria-label={`Decrease ${label} connection points`}
+          onClick={() => onChange(clampHandles(side, value - 1))}
+          disabled={value <= min}
+          className={btn}
+        >
+          −
+        </button>
+        <input
+          type="number"
+          min={min}
+          max={MAX_HANDLES}
+          value={value}
+          aria-label={`${label} connection points`}
+          onChange={(e) => onChange(clampHandles(side, Number(e.target.value)))}
+          className="w-9 h-full bg-transparent text-center text-xs font-mono text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          aria-label={`Increase ${label} connection points`}
+          onClick={() => onChange(clampHandles(side, value + 1))}
+          disabled={value >= MAX_HANDLES}
+          className={btn}
+        >
+          +
+        </button>
+      </div>
+      {belowLabel && labelEl}
+    </div>
+  )
+}
 
 const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
   { label: 'Hardware',       types: ['isp', 'router', 'firewall', 'switch', 'server', 'nas', 'ap', 'printer'] },
@@ -80,11 +141,13 @@ interface NodeModalProps {
   title?: string
   parentCandidates?: ParentCandidate[]
   currentNodeId?: string
+  /** Shortcut: open the Custom Style editor for this node's type (canvas-wide). */
+  onEditTypeStyle?: (type: NodeType) => void
 }
 
 // NodeModal is always mounted with a key that changes on open/edit, so useState
 // initial value is enough - no need for a reset effect.
-export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId }: NodeModalProps) {
+export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node', parentCandidates = [], currentNodeId, onEditTypeStyle }: NodeModalProps) {
   const [form, setForm] = useState<Partial<NodeData>>({ ...DEFAULT_DATA, ...initial })
   const [iconSearch, setIconSearch] = useState('')
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
@@ -100,6 +163,16 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
 
   const set = (key: keyof NodeData, value: unknown) =>
     setForm((f) => ({ ...f, [key]: value }))
+
+  const customStyle = useThemeStore((s) => s.customStyle)
+  // Effective default count for a side: the per-type style default if set,
+  // otherwise the intrinsic side default (top/bottom → 1, left/right → 0).
+  const effectiveSideDefault = (side: Side): number => {
+    const styleVal = customStyle.nodes[(form.type ?? 'generic') as NodeType]?.[SIDE_STYLE_KEY[side]]
+    return clampHandles(side, typeof styleVal === 'number' ? styleVal : sideDefault(side))
+  }
+  const sideValue = (side: Side): number =>
+    clampHandles(side, form[handleCountField(side)] ?? effectiveSideDefault(side))
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -121,8 +194,17 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
       const parent = parentCandidates.find((n) => n.id === safeParentId)
       if (!parent || !isValidParent(parent)) safeParentId = undefined
     }
+    const isGroupType = selectedType === 'groupRect' || selectedType === 'group'
     onSubmit({
       ...form,
+      // Persist the resolved per-side counts so type-style defaults (and
+      // untouched steppers) are baked into the node. Skipped for group types.
+      ...(isGroupType ? {} : {
+        top_handles: sideValue('top'),
+        bottom_handles: sideValue('bottom'),
+        left_handles: sideValue('left'),
+        right_handles: sideValue('right'),
+      }),
       check_method: isZigbee ? 'none' : form.check_method,
       check_target: isZigbee ? undefined : form.check_target,
       parent_id: safeParentId,
@@ -133,13 +215,17 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#161b22] border-[#30363d] text-foreground max-w-md max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-[#161b22] border-[#30363d] text-foreground max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            {/* ── LEFT column: identity & network ── */}
+            <div className="flex flex-col gap-4 min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Information</div>
+            <div className="grid grid-cols-2 gap-3">
             {/* Type + Icon on the same row */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs text-muted-foreground">Type</Label>
@@ -217,6 +303,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 <ChevronDown size={12} className="text-muted-foreground shrink-0" style={{ transform: iconPickerOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }} />
               </button>
             </div>
+            </div>{/* end Type/Icon subgrid */}
 
             {/* Inline icon picker - full width, shown below the type+icon row */}
             {iconPickerOpen && (
@@ -314,6 +401,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               {labelError && <p className="text-[11px] text-[#f85149]">Label is required</p>}
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
             {/* Hostname */}
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs text-muted-foreground">Hostname</Label>
@@ -336,10 +424,11 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               />
               <span className="text-[10px] text-muted-foreground/50">comma-separated</span>
             </div>
+            </div>{/* end Hostname/IP subgrid */}
 
             {/* Check method — hidden for Zigbee (one-shot import, no live check) */}
             {!(form.type ?? '').toString().startsWith('zigbee_') && (
-              <>
+              <div className="grid grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Check Method</Label>
                   <Select value={form.check_method ?? 'ping'} onValueChange={(v) => set('check_method', v as CheckMethod)}>
@@ -363,7 +452,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
                   />
                 </div>
-              </>
+              </div>
             )}
 
             {/* Parent Container */}
@@ -428,6 +517,22 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               </div>
             )}
 
+            {/* Notes */}
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Notes</Label>
+              <Textarea
+                value={form.notes ?? ''}
+                onChange={(e) => set('notes', e.target.value)}
+                placeholder="Optional notes"
+                rows={3}
+                className={`bg-[#21262d] border-[#30363d] text-sm resize-y min-h-16 ${modalStyles['modal-radius']}`}
+              />
+            </div>
+            </div>{/* ── end LEFT column ── */}
+
+            {/* ── RIGHT column: display ── */}
+            <div className="flex flex-col gap-4 min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Design</div>
             {/* Service visibility */}
             {form.type !== 'groupRect' && form.type !== 'group' && (
               <div className="flex items-start justify-between col-span-2 py-1">
@@ -511,33 +616,53 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <p className="text-[10px] text-muted-foreground/50">Using default colors for {NODE_TYPE_LABELS[form.type ?? 'generic']}. Click a swatch to customize.</p>
                 )}
               </div>
+              {onEditTypeStyle && form.type !== 'group' && form.type !== 'groupRect' && (
+                <button
+                  type="button"
+                  onClick={() => onEditTypeStyle((form.type ?? 'generic') as NodeType)}
+                  className="flex items-center gap-1 self-start text-[10px] text-[#00d4ff] hover:underline"
+                >
+                  <Palette size={10} /> Edit {NODE_TYPE_LABELS[form.type ?? 'generic']} style for all nodes on the canvas
+                </button>
+              )}
             </div>
 
-            {/* Bottom connection points (not for group containers) */}
+            {/* Connection points per side (not for group containers) */}
             {form.type !== 'groupRect' && form.type !== 'group' && (
-              <div className="flex flex-col gap-1.5 col-span-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">Bottom Connection Points</Label>
-                  <span className="text-xs font-mono text-foreground">{clampBottomHandles(form.bottom_handles ?? 1)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={MIN_BOTTOM_HANDLES}
-                  max={MAX_BOTTOM_HANDLES}
-                  step={1}
-                  value={clampBottomHandles(form.bottom_handles ?? 1)}
-                  onChange={(e) => set('bottom_handles', clampBottomHandles(Number(e.target.value)))}
-                  aria-label="Bottom connection points slider"
-                  className="w-full accent-[#00d4ff] cursor-pointer"
-                />
-                <div className="flex justify-between text-[10px] text-muted-foreground/60 font-mono">
-                  <span>{MIN_BOTTOM_HANDLES}</span>
-                  <span>{MAX_BOTTOM_HANDLES}</span>
+              <div className="flex flex-col gap-2.5 col-span-2">
+                <Label className="text-xs text-muted-foreground">Connection Points</Label>
+                {/* Spatial cross: each side's stepper sits where that side is. */}
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center justify-items-center gap-x-2 gap-y-2 py-1">
+                  <div />
+                  <CPStepper label="Top" side="top" value={sideValue('top')}
+                    onChange={(v) => set('top_handles', v)} />
+                  <div />
+
+                  <CPStepper label="Left" side="left" value={sideValue('left')}
+                    onChange={(v) => set('left_handles', v)} />
+                  <div
+                    className="flex items-center justify-center rounded-md border text-[9px] uppercase tracking-wide font-medium select-none"
+                    style={{
+                      width: 64, height: 40,
+                      borderColor: resolvedNodeColors.border,
+                      background: `${resolvedNodeColors.background}`,
+                      color: resolvedNodeColors.icon,
+                    }}
+                  >
+                    node
+                  </div>
+                  <CPStepper label="Right" side="right" value={sideValue('right')}
+                    onChange={(v) => set('right_handles', v)} />
+
+                  <div />
+                  <CPStepper label="Bottom" side="bottom" value={sideValue('bottom')}
+                    onChange={(v) => set('bottom_handles', v)} />
+                  <div />
                 </div>
                 <div className="flex items-center justify-between pt-1">
                   <div className="flex flex-col gap-0.5">
                     <Label className="text-xs text-muted-foreground">Show Port Numbers</Label>
-                    <span className="text-[10px] text-muted-foreground/60">Label each bottom connection point</span>
+                    <span className="text-[10px] text-muted-foreground/60">Label each connection point</span>
                   </div>
                   <button
                     type="button"
@@ -558,16 +683,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               </div>
             )}
 
-            {/* Notes */}
-            <div className="flex flex-col gap-1.5 col-span-2">
-              <Label className="text-xs text-muted-foreground">Notes</Label>
-              <Input
-                value={form.notes ?? ''}
-                onChange={(e) => set('notes', e.target.value)}
-                placeholder="Optional notes"
-                className={`bg-[#21262d] border-[#30363d] text-sm h-8 ${modalStyles['modal-radius']}`}
-              />
-            </div>
+            </div>{/* ── end RIGHT column ── */}
           </div>
 
           <div className="flex justify-between gap-2 pt-1">

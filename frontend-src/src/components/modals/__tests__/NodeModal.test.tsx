@@ -105,6 +105,21 @@ describe('NodeModal', () => {
     confirmSpy.mockRestore()
   })
 
+  // ── Custom-style shortcut ─────────────────────────────────────────────
+
+  it('shows the type-style shortcut and calls onEditTypeStyle with the node type', () => {
+    const onEditTypeStyle = vi.fn()
+    renderModal({ initial: BASE, onEditTypeStyle })
+    const link = screen.getByRole('button', { name: /style for all nodes on the canvas/i })
+    fireEvent.click(link)
+    expect(onEditTypeStyle).toHaveBeenCalledWith('server')
+  })
+
+  it('omits the shortcut when onEditTypeStyle is not provided', () => {
+    renderModal({ initial: BASE })
+    expect(screen.queryByText(/style for all nodes on the canvas/i)).toBeNull()
+  })
+
   // ── Label validation ──────────────────────────────────────────────────
 
   it('blocks submit and shows error when label is empty', () => {
@@ -439,57 +454,88 @@ describe('NodeModal', () => {
     expect(screen.getByText(/Using default colors for/)).toBeDefined()
   })
 
-  // ── Bottom connection points ───────────────────────────────────────────
+  // ── Connection points per side (issue #243) ────────────────────────────
 
-  it('shows Bottom Connection Points for server type', () => {
+  it('shows the Connection Points section for server type', () => {
     renderModal({ initial: BASE })
-    expect(screen.getByText('Bottom Connection Points')).toBeDefined()
+    expect(screen.getByText('Connection Points')).toBeDefined()
+    expect(screen.getByLabelText('Top connection points')).toBeDefined()
+    expect(screen.getByLabelText('Right connection points')).toBeDefined()
+    expect(screen.getByLabelText('Bottom connection points')).toBeDefined()
+    expect(screen.getByLabelText('Left connection points')).toBeDefined()
   })
 
-  it('hides Bottom Connection Points for groupRect', () => {
+  it('hides Connection Points for groupRect', () => {
     renderModal({ initial: { ...BASE, type: 'groupRect' } })
-    expect(screen.queryByText('Bottom Connection Points')).toBeNull()
+    expect(screen.queryByText('Connection Points')).toBeNull()
   })
 
-  it('hides Bottom Connection Points for group', () => {
+  it('hides Connection Points for group', () => {
     renderModal({ initial: { ...BASE, type: 'group' } })
-    expect(screen.queryByText('Bottom Connection Points')).toBeNull()
+    expect(screen.queryByText('Connection Points')).toBeNull()
   })
 
-  it('defaults bottom_handles to 1', () => {
+  it('defaults top/bottom to 1 and left/right to 0', () => {
     renderModal({ initial: BASE })
-    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    expect(slider.value).toBe('1')
+    expect((screen.getByLabelText('Top connection points') as HTMLInputElement).value).toBe('1')
+    expect((screen.getByLabelText('Bottom connection points') as HTMLInputElement).value).toBe('1')
+    expect((screen.getByLabelText('Left connection points') as HTMLInputElement).value).toBe('0')
+    expect((screen.getByLabelText('Right connection points') as HTMLInputElement).value).toBe('0')
   })
 
-  it('pre-fills bottom_handles from initial', () => {
-    renderModal({ initial: { ...BASE, bottom_handles: 3 } })
-    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    expect(slider.value).toBe('3')
+  it('pre-fills each side from initial', () => {
+    renderModal({ initial: { ...BASE, top_handles: 2, bottom_handles: 3, left_handles: 4, right_handles: 1 } })
+    expect((screen.getByLabelText('Top connection points') as HTMLInputElement).value).toBe('2')
+    expect((screen.getByLabelText('Bottom connection points') as HTMLInputElement).value).toBe('3')
+    expect((screen.getByLabelText('Left connection points') as HTMLInputElement).value).toBe('4')
+    expect((screen.getByLabelText('Right connection points') as HTMLInputElement).value).toBe('1')
   })
 
-  it('submits updated bottom_handles', () => {
+  it('submits per-side counts edited via the number inputs', () => {
     const { onSubmit } = renderModal({ initial: BASE })
-    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    fireEvent.change(slider, { target: { value: '12' } })
+    fireEvent.change(screen.getByLabelText('Bottom connection points'), { target: { value: '12' } })
+    fireEvent.change(screen.getByLabelText('Left connection points'), { target: { value: '3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(12)
+    const payload = onSubmit.mock.calls[0][0] as Partial<NodeData>
+    expect(payload.bottom_handles).toBe(12)
+    expect(payload.left_handles).toBe(3)
+    expect(payload.top_handles).toBe(1)
+    expect(payload.right_handles).toBe(0)
   })
 
-  it('supports the full 1..64 range (issue #20)', () => {
+  it('increments a side with the + stepper button', () => {
     const { onSubmit } = renderModal({ initial: BASE })
-    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    expect(slider.min).toBe('1')
-    expect(slider.max).toBe('64')
-    fireEvent.change(slider, { target: { value: '52' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Right connection points' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Increase Right connection points' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).right_handles).toBe(2)
+  })
+
+  it('disables the − button at the side minimum (0 for left/right, 1 for top/bottom)', () => {
+    renderModal({ initial: BASE })
+    expect((screen.getByRole('button', { name: 'Decrease Left connection points' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Decrease Top connection points' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('left/right min is 0, top/bottom min is 1; max is 64 everywhere', () => {
+    renderModal({ initial: BASE })
+    expect((screen.getByLabelText('Bottom connection points') as HTMLInputElement).min).toBe('1')
+    expect((screen.getByLabelText('Left connection points') as HTMLInputElement).min).toBe('0')
+    for (const label of ['Top', 'Right', 'Bottom', 'Left']) {
+      expect((screen.getByLabelText(`${label} connection points`) as HTMLInputElement).max).toBe('64')
+    }
+  })
+
+  it('supports the full range up to 64 (issue #20)', () => {
+    const { onSubmit } = renderModal({ initial: BASE })
+    fireEvent.change(screen.getByLabelText('Bottom connection points'), { target: { value: '52' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(52)
   })
 
-  it('clamps pre-filled out-of-range values into [1,64]', () => {
+  it('clamps pre-filled out-of-range values into range', () => {
     renderModal({ initial: { ...BASE, bottom_handles: 9999 } })
-    const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    expect(slider.value).toBe('64')
+    expect((screen.getByLabelText('Bottom connection points') as HTMLInputElement).value).toBe('64')
   })
 
   it('toggles show_port_numbers and submits it (issue #20)', () => {

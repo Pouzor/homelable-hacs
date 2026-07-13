@@ -4,7 +4,7 @@ import { type Node } from '@xyflow/react'
 
 const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
-import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
+import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, migrateClusterHandles, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { getCenteredPosition } from '@/utils/viewportCenter'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
@@ -26,6 +26,7 @@ import { ScanConfigModal } from '@/components/modals/ScanConfigModal'
 import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
 import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
+import { CustomStyleModal } from '@/components/modals/CustomStyleModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
@@ -36,7 +37,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { canvasApi, designsApi } from '@/api/client'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
-import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
+import type { NodeData, EdgeData, CustomStyleDef, NodeType } from '@/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
@@ -51,6 +52,7 @@ export default function App() {
   useStatusPolling()
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
+  const [styleEditorType, setStyleEditorType] = useState<NodeType | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [sidebarForceView, setSidebarForceView] = useState<'pending' | undefined>(undefined)
   const [highlightPendingId, setHighlightPendingId] = useState<string | undefined>(undefined)
@@ -104,8 +106,10 @@ export default function App() {
             .filter((n) => n.type === 'group' || n.container_mode === true)
             .map((n) => [n.id, true])
         )
-        const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
-        const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
+        const { nodes: rfNodes, edges: rfEdges } = migrateClusterHandles(
+          (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap)),
+          (apiEdges as ApiEdge[]).map(deserializeApiEdge),
+        )
         const savedTheme = res.data.viewport?.theme_id
         if (savedTheme) setTheme(savedTheme)
         if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
@@ -145,7 +149,8 @@ export default function App() {
           const { nodes: savedNodes, edges: savedEdges, theme_id, custom_style } = JSON.parse(saved)
           if (theme_id) setTheme(theme_id)
           if (custom_style) setCustomStyle(custom_style)
-          loadCanvas(savedNodes, savedEdges)
+          const migrated = migrateClusterHandles(savedNodes, savedEdges)
+          loadCanvas(migrated.nodes, migrated.edges)
         } else {
           loadCanvas(demoNodes, demoEdges)
         }
@@ -598,6 +603,7 @@ export default function App() {
           onSubmit={handleAddNode}
           title="Add Node"
           parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))}
+          onEditTypeStyle={setStyleEditorType}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -627,6 +633,7 @@ export default function App() {
               .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))
           })()}
           currentNodeId={editNodeId ?? undefined}
+          onEditTypeStyle={setStyleEditorType}
         />
 
         <EdgeModal
@@ -634,11 +641,6 @@ export default function App() {
           open={!!pendingConnection}
           onClose={() => setPendingConnection(null)}
           onSubmit={handleEdgeConfirm}
-          initial={
-            pendingConnection?.sourceHandle?.includes('cluster') || pendingConnection?.targetHandle?.includes('cluster')
-              ? { type: 'cluster' }
-              : undefined
-          }
         />
 
         <EdgeModal
@@ -733,6 +735,15 @@ export default function App() {
           key={themeModalOpen ? 'theme-open' : 'theme-closed'}
           open={themeModalOpen}
           onClose={() => setThemeModalOpen(false)}
+        />
+
+        {/* Custom Style editor, opened from a node's Appearance shortcut with
+            that node's type preselected. */}
+        <CustomStyleModal
+          key={styleEditorType ? `style-${styleEditorType}` : 'style-closed'}
+          open={styleEditorType !== null}
+          initialNodeType={styleEditorType ?? undefined}
+          onClose={() => setStyleEditorType(null)}
         />
 
         <SearchModal

@@ -134,9 +134,15 @@ export interface NodeData extends Record<string, unknown> {
     height?: number
   }
   custom_icon?: string
-  /** Number of bottom connection points, 1..64. Default 1 (centered). */
+  /** Number of top connection points, 0..64. Default 1. */
+  top_handles?: number
+  /** Number of bottom connection points, 0..64. Default 1 (centered). */
   bottom_handles?: number
-  /** Show a port number (1..N) above each bottom connection point. */
+  /** Number of left connection points, 0..64. Default 0 (opt-in). */
+  left_handles?: number
+  /** Number of right connection points, 0..64. Default 0 (opt-in). */
+  right_handles?: number
+  /** Show a port number (1..N) next to each connection point. */
   show_port_numbers?: boolean
   /** Text node content (type === 'text') */
   text_content?: string
@@ -233,6 +239,11 @@ export interface NodeTypeStyle {
   iconOpacity: number
   width: number
   height: number
+  /** Default connection-point counts per side for new nodes of this type. */
+  topHandles?: number
+  bottomHandles?: number
+  leftHandles?: number
+  rightHandles?: number
 }
 
 export interface EdgeTypeStyle {

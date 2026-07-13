@@ -2,11 +2,20 @@ import { describe, it, expect } from 'vitest'
 import {
   MIN_BOTTOM_HANDLES,
   MAX_BOTTOM_HANDLES,
+  MAX_HANDLES,
   bottomHandleId,
   bottomHandlePositions,
   clampBottomHandles,
   normalizeHandle,
   removedBottomHandleIds,
+  handleId,
+  handlePositions,
+  clampHandles,
+  removedHandleIds,
+  sideDefault,
+  handleCountField,
+  isVerticalSide,
+  SIDES,
 } from '../handleUtils'
 
 describe('bottomHandleId', () => {
@@ -172,5 +181,127 @@ describe('removedBottomHandleIds', () => {
     expect(removed.has('bottom-2')).toBe(false)
     expect(removed.has('bottom-3')).toBe(true)
     expect(removed.has('bottom-10')).toBe(true)
+  })
+})
+
+// ─── Side-generic API (issue #243) ──────────────────────────────────────────
+
+describe('sideDefault', () => {
+  it('top/bottom default to 1 (backward-compatible)', () => {
+    expect(sideDefault('top')).toBe(1)
+    expect(sideDefault('bottom')).toBe(1)
+  })
+  it('left/right default to 0 (opt-in, no visual change to old diagrams)', () => {
+    expect(sideDefault('left')).toBe(0)
+    expect(sideDefault('right')).toBe(0)
+  })
+})
+
+describe('handleCountField', () => {
+  it('maps each side to its NodeData field', () => {
+    expect(handleCountField('top')).toBe('top_handles')
+    expect(handleCountField('bottom')).toBe('bottom_handles')
+    expect(handleCountField('left')).toBe('left_handles')
+    expect(handleCountField('right')).toBe('right_handles')
+  })
+})
+
+describe('handleId', () => {
+  it('slot 0 is the bare side name for every side', () => {
+    expect(handleId('top', 0)).toBe('top')
+    expect(handleId('bottom', 0)).toBe('bottom')
+    expect(handleId('left', 0)).toBe('left')
+    expect(handleId('right', 0)).toBe('right')
+  })
+  it('slot N ≥ 1 follows side-N pattern (1-indexed shift)', () => {
+    expect(handleId('top', 1)).toBe('top-2')
+    expect(handleId('left', 2)).toBe('left-3')
+    expect(handleId('right', 47)).toBe('right-48')
+  })
+  it('bottom matches the legacy alias', () => {
+    for (let i = 0; i < 5; i++) expect(handleId('bottom', i)).toBe(bottomHandleId(i))
+  })
+})
+
+describe('clampHandles', () => {
+  it('min is the side default (0 for L/R, 1 for T/B)', () => {
+    expect(clampHandles('top', 0)).toBe(1)
+    expect(clampHandles('bottom', -3)).toBe(1)
+    expect(clampHandles('left', -3)).toBe(0)
+    expect(clampHandles('right', 0)).toBe(0)
+  })
+  it('max is 64 for every side', () => {
+    expect(clampHandles('top', 9999)).toBe(MAX_HANDLES)
+    expect(clampHandles('left', 65)).toBe(64)
+  })
+  it('non-finite / non-number falls back to side min', () => {
+    expect(clampHandles('left', NaN)).toBe(0)
+    expect(clampHandles('top', undefined)).toBe(1)
+    expect(clampHandles('right', '4' as unknown)).toBe(0)
+  })
+  it('floors fractional values', () => {
+    expect(clampHandles('left', 3.9)).toBe(3)
+  })
+})
+
+describe('handlePositions', () => {
+  it('horizontal sides reuse the bottom distribution', () => {
+    expect(handlePositions('top', 3)).toEqual([20, 50, 80])
+    expect(handlePositions('bottom', 4)).toEqual([15, 38, 62, 85])
+  })
+  it('vertical sides use the same offsets (applied to the top axis)', () => {
+    expect(handlePositions('left', 2)).toEqual([25, 75])
+    expect(handlePositions('right', 1)).toEqual([50])
+  })
+  it('count 0 yields no handles (only reachable for L/R)', () => {
+    expect(handlePositions('left', 0)).toEqual([])
+    expect(handlePositions('right', 0)).toEqual([])
+  })
+  it('top/bottom clamp 0 up to 1 (never empty)', () => {
+    expect(handlePositions('top', 0)).toEqual([50])
+    expect(handlePositions('bottom', 0)).toEqual([50])
+  })
+})
+
+describe('isVerticalSide', () => {
+  it('left/right are vertical; top/bottom are not', () => {
+    expect(isVerticalSide('left')).toBe(true)
+    expect(isVerticalSide('right')).toBe(true)
+    expect(isVerticalSide('top')).toBe(false)
+    expect(isVerticalSide('bottom')).toBe(false)
+  })
+})
+
+describe('normalizeHandle — all sides', () => {
+  it('maps left-t / right-t and their -N variants to source ids', () => {
+    expect(normalizeHandle('left-t')).toBe('left')
+    expect(normalizeHandle('right-t')).toBe('right')
+    expect(normalizeHandle('left-2-t')).toBe('left-2')
+    expect(normalizeHandle('right-48-t')).toBe('right-48')
+    expect(normalizeHandle('top-3-t')).toBe('top-3')
+  })
+  it('passes through source ids for every side', () => {
+    expect(normalizeHandle('left')).toBe('left')
+    expect(normalizeHandle('right-2')).toBe('right-2')
+  })
+})
+
+describe('removedHandleIds — all sides', () => {
+  it('left 3 → 0 removes left, left-2, left-3', () => {
+    expect(removedHandleIds('left', 3, 0)).toEqual(new Set(['left', 'left-2', 'left-3']))
+  })
+  it('top 2 → 1 removes only top-2, keeps slot 0', () => {
+    const removed = removedHandleIds('top', 2, 1)
+    expect(removed).toEqual(new Set(['top-2']))
+    expect(removed.has('top')).toBe(false)
+  })
+  it('bottom matches the legacy alias', () => {
+    expect(removedHandleIds('bottom', 4, 1)).toEqual(removedBottomHandleIds(4, 1))
+  })
+})
+
+describe('SIDES', () => {
+  it('lists all four sides', () => {
+    expect([...SIDES].sort()).toEqual(['bottom', 'left', 'right', 'top'])
   })
 })

@@ -27,7 +27,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { nodeTypes } from '@/components/canvas/nodes/nodeTypes'
 import { edgeTypes } from '@/components/canvas/edges/edgeTypes'
-import { deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
+import { deserializeApiNode, deserializeApiEdge, migrateClusterHandles, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { liveviewApi } from '@/api/client'
 import type { NodeData } from '@/types'
 
@@ -56,7 +56,8 @@ function LiveViewCanvas() {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
           const { nodes: savedNodes, edges: savedEdges } = JSON.parse(saved)
-          loadCanvas(savedNodes, savedEdges)
+          const migrated = migrateClusterHandles(savedNodes, savedEdges)
+          loadCanvas(migrated.nodes, migrated.edges)
         }
       } catch {
         // empty canvas on parse error — show empty canvas
@@ -76,10 +77,11 @@ function LiveViewCanvas() {
             .filter((n: ApiNode) => n.type === 'proxmox' || n.type === 'group')
             .map((n: ApiNode) => [n.id, n.type === 'group' ? true : n.container_mode !== false])
         )
-        loadCanvas(
+        const migrated = migrateClusterHandles(
           (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxMap)),
           (apiEdges as ApiEdge[]).map(deserializeApiEdge),
         )
+        loadCanvas(migrated.nodes, migrated.edges)
         setViewState('ready')
       })
       .catch((err) => {
