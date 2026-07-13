@@ -14,6 +14,7 @@ import { buildZigbeeProperties, isZigbeeType } from '@/utils/zigbeeProperties'
 import { buildZwaveProperties, isZwaveType } from '@/utils/zwaveProperties'
 import { buildMacProperty } from '@/utils/macProperty'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
+import { getCenteredPosition } from '@/utils/viewportCenter'
 
 interface PendingDevicesModalProps {
   open: boolean
@@ -279,7 +280,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       addNode({
         id: nodeId,
         type: nodeData.type,
-        position: { x: 400, y: 300 },
+        position: getCenteredPosition(),
         data: { ...nodeData, status: wireless ? ('online' as const) : ('unknown' as const) },
       })
       injectAutoEdges(res.data.edges)
@@ -321,6 +322,9 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       const deviceToNode: Record<string, string> = {}
       res.data.device_ids.forEach((did, i) => { deviceToNode[did] = res.data.node_ids[i] })
       const approvedDevices = devices.filter((d) => ids.includes(d.id))
+      const cols = Math.min(4, approvedDevices.length)
+      const rows = Math.ceil(approvedDevices.length / 4)
+      const origin = getCenteredPosition(cols * 160, rows * 100)
       approvedDevices.forEach((d, i) => {
         const nodeId = deviceToNode[d.id]
         if (!nodeId) return
@@ -330,7 +334,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
         addNode({
           id: nodeId,
           type,
-          position: { x: 400 + (i % 4) * 160, y: 300 + Math.floor(i / 4) * 100 },
+          position: { x: origin.x + (i % 4) * 160, y: origin.y + Math.floor(i / 4) * 100 },
           data: {
             label: deviceLabel(d),
             type,
