@@ -6,6 +6,7 @@ const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
+import { getCenteredPosition } from '@/utils/viewportCenter'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
 import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
@@ -248,7 +249,7 @@ export default function App() {
     // extent, so we don't set them here.
     const position = nestInParent && parentNode
       ? { x: parentNode.position.x + 20, y: parentNode.position.y + 50 }
-      : { x: 300, y: 300 }
+      : getCenteredPosition(isContainerNode ? 300 : 0, isContainerNode ? 200 : 0)
 
     const newNode: Node<NodeData> = {
       id,
@@ -267,7 +268,7 @@ export default function App() {
     const newNode: Node<NodeData> = {
       id,
       type: 'groupRect',
-      position: { x: 200, y: 200 },
+      position: getCenteredPosition(360, 240),
       data: {
         label: data.label,
         type: 'groupRect',
@@ -323,7 +324,7 @@ export default function App() {
     const newNode: Node<NodeData> = {
       id,
       type: 'text',
-      position: { x: 250, y: 250 },
+      position: getCenteredPosition(200, 60),
       data: {
         label: '',
         type: 'text',
