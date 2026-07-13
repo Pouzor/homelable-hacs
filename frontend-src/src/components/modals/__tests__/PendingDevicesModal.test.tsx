@@ -107,6 +107,18 @@ describe('PendingDevicesModal — Device Inventory', () => {
     expect(screen.queryByLabelText(/On \d+ canvas/)).not.toBeInTheDocument()
   })
 
+  it('colours the role badge with the node-type accent, not flat grey', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_ZWAVE] } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    const card = await waitFor(() => screen.getByTestId('pending-card-dev-z'))
+    // zwave_enddevice accent from the default theme = #a855f7 (violet), applied
+    // to both the text colour and a translucent background.
+    const badge = within(card).getByText('zwave_enddevice')
+    // #a855f7 → rgb(168, 85, 247) once jsdom normalises the inline colour.
+    expect(badge).toHaveStyle({ color: 'rgb(168, 85, 247)' })
+    expect(badge.className).not.toContain('text-muted-foreground')
+  })
+
   it('shows a "Discovered" fallback timestamp for a device not on any canvas', async () => {
     mockPending.mockResolvedValue({ data: [{ ...DEVICE_IP, canvas_count: 0 }] } as never)
     render(<PendingDevicesModal {...baseProps} />)
