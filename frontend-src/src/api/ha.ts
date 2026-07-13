@@ -155,6 +155,7 @@ export const scanApi = {
       node_ids: string[]
       edges: Array<{ id: string; source: string; target: string }>
       edges_created: number
+      skipped: string[]
       not_found: string[]
     }>('homelable/scan/approve_batch', { device_ids: ids, overrides, design_id: designId ?? null })
     return toAxiosLike(result)

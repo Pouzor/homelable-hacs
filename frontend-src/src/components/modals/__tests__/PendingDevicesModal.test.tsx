@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { PendingDevicesModal } from '../PendingDevicesModal'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() } }))
@@ -105,6 +105,35 @@ describe('PendingDevicesModal — Device Inventory', () => {
     render(<PendingDevicesModal {...baseProps} />)
     await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
     expect(screen.queryByLabelText(/On \d+ canvas/)).not.toBeInTheDocument()
+  })
+
+  it('shows a "Discovered" fallback timestamp for a device not on any canvas', async () => {
+    mockPending.mockResolvedValue({ data: [{ ...DEVICE_IP, canvas_count: 0 }] } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    const card = await waitFor(() => screen.getByTestId('pending-card-dev-a'))
+    expect(within(card).getByText('Discovered')).toBeInTheDocument()
+    expect(within(card).queryByText('Scan')).not.toBeInTheDocument()
+  })
+
+  it('shows linked-node timestamps for a device on a canvas', async () => {
+    mockPending.mockResolvedValue({
+      data: [{
+        ...DEVICE_IP,
+        canvas_count: 1,
+        node_created_at: '2026-01-02T10:00:00Z',
+        node_last_scan: '2026-06-01T08:30:00Z',
+        node_last_modified: '2026-06-20T12:00:00Z',
+        node_last_seen: '2026-06-25T09:15:00Z',
+      }],
+    } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    const card = await waitFor(() => screen.getByTestId('pending-card-dev-a'))
+    expect(within(card).getByText('Created')).toBeInTheDocument()
+    expect(within(card).getByText('Scan')).toBeInTheDocument()
+    expect(within(card).getByText('Modified')).toBeInTheDocument()
+    expect(within(card).getByText('Seen')).toBeInTheDocument()
+    // The discovery fallback is not shown once node timestamps exist.
+    expect(within(card).queryByText('Discovered')).not.toBeInTheDocument()
   })
 
   it('filters to devices with detected services when "With services" is on', async () => {

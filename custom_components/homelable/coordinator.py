@@ -54,6 +54,18 @@ _LOGGER = logging.getLogger(__name__)
 _EMPTY_CANVAS = {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
 _EMPTY_PENDING: dict[str, Any] = {"devices": []}
 
+# Node lifecycle timestamps managed server-side (in the Store), never authored
+# by the frontend. Stripped when comparing a node's user-editable content so a
+# canvas save only bumps updated_at on a real change, and re-applied from the
+# stored node so a frontend round-trip can't clobber them.
+_NODE_TIMESTAMP_FIELDS = ("created_at", "updated_at", "last_scan", "last_seen")
+
+
+def _node_content(node: dict[str, Any]) -> dict[str, Any]:
+    """A node's user-editable content — everything except the server-managed
+    lifecycle timestamps. Used to decide whether a save really changed a node."""
+    return {k: v for k, v in node.items() if k not in _NODE_TIMESTAMP_FIELDS}
+
 
 def _is_wireless(node_type: str | None) -> bool:
     """Zigbee + Z-Wave mesh devices share online status / no ICMP check."""
@@ -177,6 +189,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
                     "status": "unknown",
                     "response_time_ms": None,
                 }
+
+        # Persist last_seen on every node a check just found up (handles nodes
+        # copied across designs — matched by id, not the de-duped loop above).
+        # This writes the canvas Store on any poll where something is online;
+        # accepted so the inventory can surface a real "Last Seen".
+        now = _utc_now_iso()
+        dirty = False
+        for node in self._all_canvas_nodes():
+            res = results.get(node.get("id"))
+            if res and res.get("status") == "online":
+                node["last_seen"] = now
+                dirty = True
+        if dirty:
+            await self._save_canvases()
         return results
 
     # ─── Per-service status checks (periodic, independent) ────────────────────
@@ -441,8 +467,48 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 DEFAULT_DESIGN_NAME, DEFAULT_DESIGN_ICON, DEFAULT_DESIGN_TYPE
             )
             did = design["id"]
+        self._reconcile_node_timestamps(canvas, self._canvases.get(did))
         self._canvases[did] = canvas
         await self._save_canvases()
+
+    @staticmethod
+    def _reconcile_node_timestamps(
+        canvas: dict[str, Any], prior: dict[str, Any] | None
+    ) -> None:
+        """Stamp/preserve node lifecycle timestamps on an incoming canvas save.
+
+        The frontend round-trips every node on Save but never authors the
+        timestamps, so the Store stays authoritative:
+
+        - ``created_at`` / ``last_scan`` / ``last_seen`` are copied back from the
+          previously stored node (matched by id) — a stale frontend value can't
+          clobber them.
+        - a node with no prior (freshly drawn on the canvas) gets
+          ``created_at = updated_at = now`` and null scan/seen.
+        - ``updated_at`` bumps to now only when the node's user-editable content
+          actually changed; an unrelated save (pan, another node moved) leaves
+          untouched nodes' ``updated_at`` alone.
+        """
+        prior_by_id = {
+            n.get("id"): n
+            for n in (prior or {}).get("nodes", [])
+            if n.get("id")
+        }
+        now = _utc_now_iso()
+        for node in canvas.get("nodes", []):
+            old = prior_by_id.get(node.get("id"))
+            if old is None:
+                node["created_at"] = node.get("created_at") or now
+                node["updated_at"] = now
+                node.setdefault("last_scan", None)
+                node.setdefault("last_seen", None)
+                continue
+            # Store is authoritative for these — re-apply from the stored node.
+            node["created_at"] = old.get("created_at") or now
+            node["last_scan"] = old.get("last_scan")
+            node["last_seen"] = old.get("last_seen")
+            changed = _node_content(node) != _node_content(old)
+            node["updated_at"] = now if changed else (old.get("updated_at") or now)
 
     def _all_canvas_nodes(self) -> list[dict[str, Any]]:
         """Flatten nodes across every design's canvas (status + scan exclusion)."""
@@ -452,6 +518,26 @@ class HomelableCoordinator(DataUpdateCoordinator):
         for canvas in self._canvases.values():
             nodes.extend(canvas.get("nodes", []))
         return nodes
+
+    def _stamp_last_scan(self, devices: list[dict[str, Any]], now: str) -> bool:
+        """Stamp ``last_scan`` on every canvas node a scan observed.
+
+        A node matches a scanned device by ip or mac (nodes are stored flat but
+        may carry the values under ``data`` after a frontend round-trip, so read
+        both). Returns True if any node was stamped, so the caller can persist
+        the canvas Store once.
+        """
+        scanned_ips = {d.get("ip") for d in devices if d.get("ip")}
+        scanned_macs = {d.get("mac") for d in devices if d.get("mac")}
+        changed = False
+        for node in self._all_canvas_nodes():
+            data = node.get("data") or {}
+            ip = node.get("ip") or data.get("ip")
+            mac = node.get("mac") or data.get("mac")
+            if (ip and ip in scanned_ips) or (mac and mac in scanned_macs):
+                node["last_scan"] = now
+                changed = True
+        return changed
 
     # ─── Pending devices ─────────────────────────────────────────────────────
 
@@ -466,27 +552,68 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if self._pending is not None:
             await self.pending_store.async_save(self._pending)
 
-    def _canvas_design_index(
+    def _canvas_node_index(
         self,
-    ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-        """Index canvas nodes by ip / ieee_address → set of design ids they're on.
+    ) -> tuple[
+        dict[str, list[tuple[str, dict[str, Any]]]],
+        dict[str, list[tuple[str, dict[str, Any]]]],
+    ]:
+        """Index canvas nodes by ip / ieee_address → list of (design_id, node).
 
-        Used to badge inventory devices with how many canvases they appear on.
-        Nodes are stored flat (top-level ip/ieee_address) but may also carry the
-        values under `data` after a frontend round-trip, so read both shapes.
+        Backs both the canvas-count badge and the linked-node timestamps on the
+        inventory. Nodes are stored flat (top-level ip/ieee_address) but may also
+        carry the values under `data` after a frontend round-trip, so read both.
         """
-        by_ip: dict[str, set[str]] = {}
-        by_ieee: dict[str, set[str]] = {}
+        by_ip: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        by_ieee: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         for design_id, canvas in (self._canvases or {}).items():
             for n in canvas.get("nodes", []):
                 data = n.get("data") or {}
                 ip = n.get("ip") or data.get("ip")
                 ieee = n.get("ieee_address") or data.get("ieee_address")
                 if ip:
-                    by_ip.setdefault(ip, set()).add(design_id)
+                    by_ip.setdefault(ip, []).append((design_id, n))
                 if ieee:
-                    by_ieee.setdefault(ieee, set()).add(design_id)
+                    by_ieee.setdefault(ieee, []).append((design_id, n))
         return by_ip, by_ieee
+
+    @staticmethod
+    def _agg_timestamp(values: list[str | None], *, newest: bool) -> str | None:
+        """Pick the newest (max) or oldest (min) ISO timestamp, or None.
+
+        Parses to datetime so a missing-microseconds string can't misorder
+        lexicographically; returns the chosen value's original string.
+        """
+        parsed: list[tuple[datetime, str]] = []
+        for v in values:
+            if not v:
+                continue
+            try:
+                parsed.append((datetime.fromisoformat(v.replace("Z", "+00:00")), v))
+            except (ValueError, AttributeError):
+                continue
+        if not parsed:
+            return None
+        return (max(parsed) if newest else min(parsed))[1]
+
+    def _design_placed_keys(
+        self, design_id: str | None
+    ) -> tuple[set[str], set[str]]:
+        """(ips, ieee_addresses) already placed on a design's canvas."""
+        ips: set[str] = set()
+        ieees: set[str] = set()
+        if not design_id:
+            return ips, ieees
+        canvas = (self._canvases or {}).get(design_id) or {}
+        for n in canvas.get("nodes", []):
+            data = n.get("data") or {}
+            ip = n.get("ip") or data.get("ip")
+            ieee = n.get("ieee_address") or data.get("ieee_address")
+            if ip:
+                ips.add(ip)
+            if ieee:
+                ieees.add(ieee)
+        return ips, ieees
 
     async def list_pending(
         self, *, status: str = "pending", source: str | None = None
@@ -517,18 +644,36 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if source is not None:
             out = [d for d in out if (d.get("source") or "scan") == source]
 
-        by_ip, by_ieee = self._canvas_design_index()
+        by_ip, by_ieee = self._canvas_node_index()
         wire: list[dict[str, Any]] = []
         for d in out:
-            # Copy so the transient canvas_count never leaks back into the store.
+            # Copy so the transient fields never leak back into the store.
             fd = dict(self._flatten_pending(d))
-            designs: set[str] = set()
+            matched: list[tuple[str, dict[str, Any]]] = []
             ieee = fd.get("ieee_address")
             if ieee:
-                designs |= by_ieee.get(ieee, set())
+                matched += by_ieee.get(ieee, [])
             if fd.get("ip"):
-                designs |= by_ip.get(fd["ip"], set())
+                matched += by_ip.get(fd["ip"], [])
+            # De-duplicate nodes matched by both ip and ieee_address.
+            matched = list({id(n): (did, n) for did, n in matched}.values())
+            designs = {did for did, _ in matched}
+            nodes = [n for _, n in matched]
             fd["canvas_count"] = len(designs)
+            # Linked-node timestamps: created = oldest across matches; last_scan
+            # / last_modified / last_seen = newest. Null when not on any canvas.
+            fd["node_created_at"] = self._agg_timestamp(
+                [n.get("created_at") for n in nodes], newest=False
+            )
+            fd["node_last_scan"] = self._agg_timestamp(
+                [n.get("last_scan") for n in nodes], newest=True
+            )
+            fd["node_last_modified"] = self._agg_timestamp(
+                [n.get("updated_at") for n in nodes], newest=True
+            )
+            fd["node_last_seen"] = self._agg_timestamp(
+                [n.get("last_seen") for n in nodes], newest=True
+            )
             wire.append(fd)
         return wire
 
@@ -695,6 +840,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # on the next reload, until the user happens to press Save and the
         # frontend rewrites every node flat. Keep it flat from the start.
         position = overrides.get("position") or {"x": 0, "y": 0}
+        now = _utc_now_iso()
         node = {
             "id": overrides.get("id")
             or data_extras.get("ieee_address")
@@ -716,6 +862,14 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "pos_y": position.get("y", 0),
             **data_extras,
             **overrides.get("data", {}),
+            # Inventory lifecycle timestamps (authoritative — set after the
+            # spreads so a frontend-supplied `data` blob can never inject them).
+            # created_at / updated_at start equal; last_scan is stamped when a
+            # scan observes this node, last_seen when a status check finds it up.
+            "created_at": now,
+            "updated_at": now,
+            "last_scan": None,
+            "last_seen": None,
         }
         # Non-mesh nodes carry the scanned MAC as a hidden property row so the
         # user can opt in to showing it on the canvas card. Merge (rather than
@@ -731,10 +885,70 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         # Device Inventory: keep the row, flip it to "approved" rather than
         # deleting it, so the device stays listed and gets badged with the
-        # number of canvases it appears on (see list_pending / _canvas_design_index).
+        # number of canvases it appears on (see list_pending / _canvas_node_index).
         device["status"] = "approved"
         await self._save_pending()
         return node
+
+    async def approve_batch(
+        self, device_ids: list[str], overrides: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Approve several devices onto the active design in one pass.
+
+        Skips any device already placed on that design (matched by ip or
+        ieee_address) — including a duplicate selection within this same batch —
+        so a re-approve or a doubled id never creates a duplicate node. Canvas
+        membership is per-design, so a device already approved onto *another*
+        canvas is still placed here.
+        """
+        overrides = overrides or {}
+        await self._ensure_loaded()
+        design_id = await self._resolve_design_id(overrides.get("design_id"))
+        placed_ips, placed_ieee = self._design_placed_keys(design_id)
+        pending = await self._get_pending()
+        by_id = {d["id"]: d for d in pending["devices"]}
+
+        nodes: list[dict[str, Any]] = []
+        node_ids: list[str] = []
+        approved_ids: list[str] = []
+        edges: list[dict[str, Any]] = []
+        skipped: list[str] = []
+        not_found: list[str] = []
+        for device_id in device_ids:
+            device = by_id.get(device_id)
+            if device is None:
+                not_found.append(device_id)
+                continue
+            ip = device.get("ip")
+            ieee = (device.get("data_extras") or {}).get("ieee_address")
+            if (ip and ip in placed_ips) or (ieee and ieee in placed_ieee):
+                skipped.append(device_id)
+                continue
+            node = await self.approve_pending(device_id, overrides)
+            if node is None:
+                not_found.append(device_id)
+                continue
+            nodes.append(node)
+            node_ids.append(node["id"])
+            approved_ids.append(device_id)
+            # Track within the batch so a repeated ip/ieee isn't placed twice.
+            if ip:
+                placed_ips.add(ip)
+            if ieee:
+                placed_ieee.add(ieee)
+            auto_edge = await self._create_wireless_parent_edge(node, design_id)
+            if auto_edge:
+                edges.append(auto_edge)
+        return {
+            "approved": len(nodes),
+            "nodes": nodes,
+            "device_ids": approved_ids,
+            "node_ids": node_ids,
+            "edges": edges,
+            "edges_created": len(edges),
+            "skipped": skipped,
+            "not_found": not_found,
+        }
 
     # ─── Scan ────────────────────────────────────────────────────────────────
 
@@ -1023,6 +1237,13 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 pending["devices"].remove(d)
 
         await self._save_pending()
+
+        # Stamp last_scan on any canvas node this run observed (matched by ip or
+        # mac). Done once here, at scan end, to match the "persist once" pattern
+        # above rather than writing the canvas Store per host.
+        if self._stamp_last_scan(devices, now):
+            await self._save_canvases()
+
         await self._record_run(
             {
                 "id": run_id,

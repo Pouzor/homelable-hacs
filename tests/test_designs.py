@@ -78,8 +78,8 @@ async def test_canvases_are_isolated_per_design(coord) -> None:  # noqa: ANN001
         {"nodes": [{"id": "b"}], "edges": [], "viewport": {}}, second["id"]
     )
 
-    assert (await coord.get_canvas(default["id"]))["nodes"] == [{"id": "a"}]
-    assert (await coord.get_canvas(second["id"]))["nodes"] == [{"id": "b"}]
+    assert [n["id"] for n in (await coord.get_canvas(default["id"]))["nodes"]] == ["a"]
+    assert [n["id"] for n in (await coord.get_canvas(second["id"]))["nodes"]] == ["b"]
 
 
 async def test_get_canvas_without_id_uses_default_design(coord) -> None:  # noqa: ANN001
@@ -87,7 +87,7 @@ async def test_get_canvas_without_id_uses_default_design(coord) -> None:  # noqa
     await coord.save_canvas(
         {"nodes": [{"id": "z"}], "edges": [], "viewport": {}}, default["id"]
     )
-    assert (await coord.get_canvas())["nodes"] == [{"id": "z"}]
+    assert [n["id"] for n in (await coord.get_canvas())["nodes"]] == ["z"]
 
 
 async def test_update_design_renames_and_reicons(coord) -> None:  # noqa: ANN001
@@ -218,4 +218,4 @@ async def test_ws_save_and_get_canvas_with_design_id(
         {"id": 2, "type": "homelable/get_canvas", "design_id": design["id"]}
     )
     msg = await client.receive_json()
-    assert msg["result"]["nodes"] == [{"id": "n9"}]
+    assert [n["id"] for n in msg["result"]["nodes"]] == ["n9"]

@@ -38,7 +38,13 @@ async def test_get_canvas_returns_default_when_empty(coord) -> None:  # noqa: AN
 async def test_save_canvas_persists(coord) -> None:  # noqa: ANN001
     new_canvas = {"nodes": [{"id": "n1"}], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
     await coord.save_canvas(new_canvas)
-    assert (await coord.get_canvas())["nodes"] == [{"id": "n1"}]
+    saved = (await coord.get_canvas())["nodes"]
+    assert len(saved) == 1
+    assert saved[0]["id"] == "n1"
+    # A newly saved node is stamped with lifecycle timestamps.
+    assert saved[0]["created_at"] == saved[0]["updated_at"]
+    assert saved[0]["last_scan"] is None
+    assert saved[0]["last_seen"] is None
 
 
 @pytest.mark.asyncio
@@ -726,3 +732,251 @@ async def test_trigger_scan_forwards_deep_scan_options(coord) -> None:  # noqa: 
     assert deep.http_ranges == ["8000-8100"]
     assert deep.http_probe_enabled is True
     assert deep.verify_tls is True
+
+
+# ─── Inventory timestamps (port of homelable#233) ────────────────────────────
+
+def _scan_device(ip: str, mac: str | None = None) -> dict:
+    return {
+        "ip": ip,
+        "mac": mac,
+        "hostname": None,
+        "os": None,
+        "open_ports": [],
+        "services": [],
+        "suggested_type": None,
+        "discovery_source": "arp",
+    }
+
+
+@pytest.mark.asyncio
+async def test_approve_stamps_created_and_updated(coord) -> None:  # noqa: ANN001
+    pending = await coord._get_pending()
+    pending["devices"].append({"id": "pd-1", "ip": "10.0.0.5", "status": "pending"})
+    await coord._save_pending()
+
+    node = await coord.approve_pending("pd-1")
+
+    assert node["created_at"] == node["updated_at"]
+    assert node["last_scan"] is None
+    assert node["last_seen"] is None
+
+
+@pytest.mark.asyncio
+async def test_save_canvas_preserves_created_bumps_updated_on_change(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "label": "A"}], "edges": [], "viewport": {}}
+    )
+    first = (await coord.get_canvas())["nodes"][0]
+    created, updated = first["created_at"], first["updated_at"]
+
+    # Re-save identical content: created_at kept, updated_at must not move.
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "label": "A"}], "edges": [], "viewport": {}}
+    )
+    same = (await coord.get_canvas())["nodes"][0]
+    assert same["created_at"] == created
+    assert same["updated_at"] == updated
+
+    # Re-save changed content: created_at preserved, updated_at bumps.
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "label": "B"}], "edges": [], "viewport": {}}
+    )
+    changed = (await coord.get_canvas())["nodes"][0]
+    assert changed["created_at"] == created
+    assert changed["updated_at"] != updated
+
+
+@pytest.mark.asyncio
+async def test_save_canvas_ignores_frontend_supplied_timestamps(coord) -> None:  # noqa: ANN001
+    """The Store stays authoritative — a frontend round-trip can't clobber the
+    server-managed timestamps."""
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "label": "A"}], "edges": [], "viewport": {}}
+    )
+    created = (await coord.get_canvas())["nodes"][0]["created_at"]
+
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {
+                    "id": "n1",
+                    "label": "A",
+                    "created_at": "1999-01-01T00:00:00Z",
+                    "last_scan": "1999-01-01T00:00:00Z",
+                    "last_seen": "1999-01-01T00:00:00Z",
+                }
+            ],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    node = (await coord.get_canvas())["nodes"][0]
+    assert node["created_at"] == created
+    assert node["last_scan"] is None
+    assert node["last_seen"] is None
+
+
+@pytest.mark.asyncio
+async def test_scan_stamps_last_scan_by_ip(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "ip": "192.168.1.5"}], "edges": [], "viewport": {}}
+    )
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan",
+        AsyncMock(return_value=[_scan_device("192.168.1.5")]),
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
+
+    assert (await coord.get_canvas())["nodes"][0]["last_scan"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_stamps_last_scan_by_mac(coord) -> None:  # noqa: ANN001
+    # Node has no ip but a matching mac.
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "mac": "AA:BB:CC:DD:EE:FF"}], "edges": [], "viewport": {}}
+    )
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan",
+        AsyncMock(return_value=[_scan_device("192.168.1.9", mac="AA:BB:CC:DD:EE:FF")]),
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
+
+    assert (await coord.get_canvas())["nodes"][0]["last_scan"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scan_leaves_last_scan_untouched_on_unmatched_node(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {"nodes": [{"id": "n1", "ip": "10.0.0.99"}], "edges": [], "viewport": {}}
+    )
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan",
+        AsyncMock(return_value=[_scan_device("192.168.1.5")]),
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done()
+
+    assert (await coord.get_canvas())["nodes"][0]["last_scan"] is None
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_stamps_last_seen_when_online(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
+    ):
+        await coord._async_update_data()
+    assert (await coord.get_canvas())["nodes"][0]["last_seen"] is not None
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_leaves_last_seen_when_offline(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        AsyncMock(return_value={"status": "offline", "response_time_ms": None}),
+    ):
+        await coord._async_update_data()
+    assert (await coord.get_canvas())["nodes"][0]["last_seen"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_pending_node_timestamps_null_without_node(coord) -> None:  # noqa: ANN001
+    pending = await coord._get_pending()
+    pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "pending"})
+    await coord._save_pending()
+
+    d = (await coord.list_pending())[0]
+    assert d["node_created_at"] is None
+    assert d["node_last_scan"] is None
+    assert d["node_last_modified"] is None
+    assert d["node_last_seen"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_pending_aggregates_node_timestamps_across_matches(coord) -> None:  # noqa: ANN001
+    """Two canvas nodes share the device ip: created = oldest, last_scan = newest."""
+    pending = await coord._get_pending()
+    pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "approved"})
+    await coord._save_pending()
+
+    await coord._ensure_loaded()
+    default = coord._designs[0]["id"]
+    d2 = await coord.create_design("Lab")
+    # Seed nodes directly to control the timestamps precisely.
+    coord._canvases[default]["nodes"] = [
+        {
+            "id": "a", "ip": "192.168.1.100",
+            "created_at": "2026-01-01T00:00:00Z", "last_scan": "2026-03-01T00:00:00Z",
+            "updated_at": "2026-03-01T00:00:00Z", "last_seen": None,
+        }
+    ]
+    coord._canvases[d2["id"]]["nodes"] = [
+        {
+            "id": "b", "ip": "192.168.1.100",
+            "created_at": "2026-05-01T00:00:00Z", "last_scan": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z", "last_seen": None,
+        }
+    ]
+
+    d = (await coord.list_pending())[0]
+    assert d["canvas_count"] == 2
+    assert d["node_created_at"].startswith("2026-01-01")  # oldest
+    assert d["node_last_scan"].startswith("2026-06-01")   # newest
+    assert d["node_last_modified"].startswith("2026-06-01")  # newest
+
+
+@pytest.mark.asyncio
+async def test_approve_batch_places_already_approved_on_another_design(coord) -> None:  # noqa: ANN001
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.10", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.11", "status": "pending"},
+    ]
+    await coord._save_pending()
+    default = (await coord.list_designs())[0]
+    d2 = await coord.create_design("B")
+
+    r1 = await coord.approve_batch(["pd-1", "pd-2"], {"design_id": default["id"]})
+    assert r1["approved"] == 2
+
+    # Re-approve the same (now approved) devices onto design B — must place.
+    r2 = await coord.approve_batch(["pd-1", "pd-2"], {"design_id": d2["id"]})
+    assert r2["approved"] == 2
+    assert r2["skipped"] == []
+    assert len((await coord.get_canvas(d2["id"]))["nodes"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_approve_batch_skips_device_already_on_target(coord) -> None:  # noqa: ANN001
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.10", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.11", "status": "pending"},
+    ]
+    await coord._save_pending()
+    default = (await coord.list_designs())[0]
+    await coord.approve_pending("pd-1", {"design_id": default["id"]})
+
+    r = await coord.approve_batch(["pd-1", "pd-2"], {"design_id": default["id"]})
+    assert r["approved"] == 1
+    assert r["skipped"] == ["pd-1"]
+    ips = sorted(n["ip"] for n in (await coord.get_canvas(default["id"]))["nodes"])
+    assert ips == ["192.168.1.10", "192.168.1.11"]
