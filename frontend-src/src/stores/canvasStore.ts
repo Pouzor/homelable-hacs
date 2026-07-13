@@ -11,7 +11,7 @@ import {
 } from '@xyflow/react'
 import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus } from '@/types'
 import { generateUUID } from '@/utils/uuid'
-import { normalizeHandle, removedBottomHandleIds } from '@/utils/handleUtils'
+import { normalizeHandle, removedHandleIds, handleCountField, sideDefault, handleId, SIDES } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
 
 type HistoryEntry = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
@@ -262,22 +262,26 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         const children = nodes.filter((n) => !!n.parentId)
         nodes = [...parents, ...children]
       }
-      // Remap edges when bottom_handles is reduced so no edge disappears
+      // Remap edges when any side's handle count is reduced so no edge disappears.
+      // Removed handles fall back to the side's slot-0 id, or 'bottom' if the
+      // side dropped to 0 (its slot-0 id no longer exists).
       let edges = state.edges
-      if ('bottom_handles' in data && data.bottom_handles != null) {
-        const currentNode = state.nodes.find((n) => n.id === id)
-        const oldCount = currentNode?.data.bottom_handles ?? 1
-        const newCount = data.bottom_handles
-        if (newCount < oldCount) {
-          const removed = removedBottomHandleIds(oldCount, newCount)
-          edges = state.edges.map((e) => {
-            if (e.source === id && e.sourceHandle && removed.has(e.sourceHandle))
-              return { ...e, sourceHandle: 'bottom' }
-            if (e.target === id && e.targetHandle && removed.has(e.targetHandle))
-              return { ...e, targetHandle: 'bottom' }
-            return e
-          })
-        }
+      const currentNode = state.nodes.find((n) => n.id === id)
+      for (const side of SIDES) {
+        const field = handleCountField(side)
+        if (!(field in data) || data[field] == null) continue
+        const oldCount = currentNode?.data[field] ?? sideDefault(side)
+        const newCount = data[field] as number
+        if (newCount >= oldCount) continue
+        const removed = removedHandleIds(side, oldCount, newCount)
+        const fallback = newCount === 0 ? 'bottom' : handleId(side, 0)
+        edges = edges.map((e) => {
+          if (e.source === id && e.sourceHandle && removed.has(e.sourceHandle))
+            return { ...e, sourceHandle: fallback }
+          if (e.target === id && e.targetHandle && removed.has(e.targetHandle))
+            return { ...e, targetHandle: fallback }
+          return e
+        })
       }
 
       return { nodes, edges, hasUnsavedChanges: true }

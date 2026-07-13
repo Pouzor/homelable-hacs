@@ -1027,6 +1027,60 @@ describe('canvasStore', () => {
     const updated = useCanvasStore.getState().edges.find((e) => e.id === 'e1')
     expect(updated?.sourceHandle).toBe('bottom')
   })
+
+  // ── per-side edge remapping (issue #243) ──────────────────────────────────
+
+  it('remaps top edges to "top" slot 0 when top_handles is reduced', () => {
+    const node = makeNode('n1', { top_handles: 3 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'top-3' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { top_handles: 1 })
+
+    expect(useCanvasStore.getState().edges.find((e) => e.id === 'e1')?.sourceHandle).toBe('top')
+  })
+
+  it('remaps left/right edges to "bottom" when the side drops to 0 (slot 0 gone)', () => {
+    const node = makeNode('n1', { left_handles: 2, right_handles: 2 })
+    const edges = [
+      { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'left' },
+      { ...makeEdge('e2', 'n1', 'n2'), sourceHandle: 'left-2' },
+      { ...makeEdge('e3', 'n1', 'n2'), targetHandle: 'right', source: 'n2', target: 'n1' },
+    ]
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges })
+
+    useCanvasStore.getState().updateNode('n1', { left_handles: 0, right_handles: 0 })
+
+    const after = useCanvasStore.getState().edges
+    expect(after.find((e) => e.id === 'e1')?.sourceHandle).toBe('bottom')
+    expect(after.find((e) => e.id === 'e2')?.sourceHandle).toBe('bottom')
+    expect(after.find((e) => e.id === 'e3')?.targetHandle).toBe('bottom')
+  })
+
+  it('remaps a side to its own slot 0 when shrinking but not to 0', () => {
+    const node = makeNode('n1', { right_handles: 3 })
+    const edge = { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'right-3' }
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges: [edge] })
+
+    useCanvasStore.getState().updateNode('n1', { right_handles: 1 })
+
+    expect(useCanvasStore.getState().edges.find((e) => e.id === 'e1')?.sourceHandle).toBe('right')
+  })
+
+  it('leaves edges on other sides untouched when one side shrinks', () => {
+    const node = makeNode('n1', { top_handles: 3, bottom_handles: 3 })
+    const edges = [
+      { ...makeEdge('e1', 'n1', 'n2'), sourceHandle: 'bottom-3' },
+      { ...makeEdge('e2', 'n1', 'n2'), sourceHandle: 'top-2' },
+    ]
+    useCanvasStore.setState({ nodes: [node, makeNode('n2')], edges })
+
+    useCanvasStore.getState().updateNode('n1', { bottom_handles: 1 })
+
+    const after = useCanvasStore.getState().edges
+    expect(after.find((e) => e.id === 'e1')?.sourceHandle).toBe('bottom')
+    expect(after.find((e) => e.id === 'e2')?.sourceHandle).toBe('top-2')
+  })
 })
 
 describe('canvasStore — custom style apply', () => {

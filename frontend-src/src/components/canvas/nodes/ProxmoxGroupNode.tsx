@@ -1,5 +1,5 @@
 import { createElement, useEffect } from 'react'
-import { Handle, Position, NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from '@xyflow/react'
+import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from '@xyflow/react'
 import { Layers } from 'lucide-react'
 import type { NodeData } from '@/types'
 import { resolveNodeColors } from '@/utils/nodeColors'
@@ -10,47 +10,28 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { maskIp, splitIps } from '@/utils/maskIp'
 import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
-import { bottomHandleId, bottomHandlePositions } from '@/utils/handleUtils'
 import { BaseNode } from './BaseNode'
+import { SideHandles } from './SideHandles'
 
 export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
   const { id, data, selected } = props
   const updateNodeInternals = useUpdateNodeInternals()
-  useEffect(() => { updateNodeInternals(id) }, [data.bottom_handles, id, updateNodeInternals])
+  useEffect(() => { updateNodeInternals(id) }, [data.top_handles, data.bottom_handles, data.left_handles, data.right_handles, id, updateNodeInternals])
 
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const hideIp = useCanvasStore((s) => s.hideIp)
   const theme = THEMES[activeTheme]
   const colors = resolveNodeColors(data, activeTheme)
 
-  // Render as a regular node when container mode is disabled
+  // Render as a regular node when container mode is disabled. Cluster links now
+  // use the configurable per-side connection points (see BaseNode / SideHandles).
   if (data.container_mode === false) {
-    const proxmoxAccent = theme.colors.nodeAccents.proxmox.border
-    return (
-      <>
-        <BaseNode {...props} icon={Layers} />
-        <Handle
-          type="source"
-          position={Position.Left}
-          id="cluster-left"
-          title="Same cluster"
-          style={{ background: proxmoxAccent, borderColor: `${proxmoxAccent}88`, width: 6, height: 6 }}
-        />
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="cluster-right"
-          title="Same cluster"
-          style={{ background: proxmoxAccent, borderColor: `${proxmoxAccent}88`, width: 6, height: 6 }}
-        />
-      </>
-    )
+    return <BaseNode {...props} icon={Layers} />
   }
 
   const statusColor = theme.colors.statusColors[data.status]
   const isOnline = data.status === 'online'
   const glow = colors.border
-  const proxmoxAccent = theme.colors.nodeAccents.proxmox.border
   const resolvedIcon = resolveNodeIcon(Layers, data.custom_icon)
 
   return (
@@ -146,48 +127,11 @@ export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
         <div className="flex-1 relative" />
       </div>
 
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="top"
-        style={{ background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
-      />
-      <Handle type="target" position={Position.Top} id="top-t" style={{ opacity: 0, width: 12, height: 12 }} />
-      {bottomHandlePositions(data.bottom_handles ?? 1).map((leftPct, idx) => {
-        const sourceId = bottomHandleId(idx)
-        const targetId = `${sourceId}-t`
-        return (
-          <span key={sourceId}>
-            <Handle
-              type="source"
-              position={Position.Bottom}
-              id={sourceId}
-              style={{ left: `${leftPct}%`, background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
-            />
-            <Handle
-              type="target"
-              position={Position.Bottom}
-              id={targetId}
-              style={{ left: `${leftPct}%`, opacity: 0, width: 12, height: 12 }}
-            />
-          </span>
-        )
-      })}
-
-      {/* Cluster handles */}
-      <Handle
-        type="source"
-        position={Position.Left}
-        id="cluster-left"
-        title="Same cluster"
-        style={{ background: proxmoxAccent, borderColor: `${proxmoxAccent}88`, width: 6, height: 6 }}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="cluster-right"
-        title="Same cluster"
-        style={{ background: proxmoxAccent, borderColor: `${proxmoxAccent}88`, width: 6, height: 6 }}
+      <SideHandles
+        data={data}
+        handleBackground={theme.colors.handleBackground}
+        handleBorder={theme.colors.handleBorder}
+        labelColor={theme.colors.nodeSubtextColor}
       />
     </>
   )

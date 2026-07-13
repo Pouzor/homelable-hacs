@@ -1,5 +1,5 @@
 import { createElement, useEffect, useMemo } from 'react'
-import { Handle, Position, NodeResizer, useUpdateNodeInternals, useViewport, type NodeProps, type Node } from '@xyflow/react'
+import { NodeResizer, useUpdateNodeInternals, useViewport, type NodeProps, type Node } from '@xyflow/react'
 import { Cpu, MemoryStick, HardDrive, ExternalLink, type LucideIcon } from 'lucide-react'
 import type { NodeData } from '@/types'
 import { resolveNodeColors } from '@/utils/nodeColors'
@@ -10,7 +10,8 @@ import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
 import { maskIp, primaryIp, splitIps } from '@/utils/maskIp'
-import { bottomHandleId, bottomHandlePositions, clampBottomHandles } from '@/utils/handleUtils'
+import { sideHandleCount } from '@/utils/handleUtils'
+import { SideHandles } from './SideHandles'
 import { getServiceUrl } from '@/utils/serviceUrl'
 
 interface BaseNodeProps extends NodeProps<Node<NodeData>> {
@@ -24,7 +25,7 @@ function formatStorage(gb: number): string {
 
 export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: BaseNodeProps) {
   const updateNodeInternals = useUpdateNodeInternals()
-  useEffect(() => { updateNodeInternals(id) }, [data.bottom_handles, id, updateNodeInternals])
+  useEffect(() => { updateNodeInternals(id) }, [data.top_handles, data.bottom_handles, data.left_handles, data.right_handles, id, updateNodeInternals])
 
   const { zoom } = useViewport()
   const borderWidth = useMemo(() => Math.max(1, 1 / zoom), [zoom])
@@ -47,9 +48,15 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
   const showLegacyHardware = !data.properties && data.show_hardware &&
     (data.cpu_count != null || data.cpu_model || data.ram_gb != null || data.disk_gb != null)
 
+  // Resolved per-side connection-point counts (missing field → side default).
+  const topCount = sideHandleCount(data, 'top')
+  const bottomCount = sideHandleCount(data, 'bottom')
+  const leftCount = sideHandleCount(data, 'left')
+  const rightCount = sideHandleCount(data, 'right')
+
   return (
     <div
-      className="relative flex flex-col rounded-lg border transition-all duration-200 overflow-hidden"
+      className="relative flex flex-col rounded-lg border transition-all duration-200"
       style={{
         background: colors.background,
         borderColor: colors.border,
@@ -63,8 +70,9 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
           ? `0 0 0 ${borderWidth}px ${colors.border}, 0 0 8px ${colors.border}44`
           : 'none',
         opacity: data.status === 'offline' ? 0.55 : 1,
-        // Grow node width when many bottom handles so each stays clickable (~14px slot).
-        minWidth: Math.max(140, clampBottomHandles(data.bottom_handles ?? 1) * 14),
+        // Grow node so each handle stays clickable (~14px slot on each axis).
+        minWidth: Math.max(140, Math.max(topCount, bottomCount) * 14),
+        minHeight: Math.max(50, Math.max(leftCount, rightCount) * 14),
         width: width ? '100%' : undefined,
         height: height ? '100%' : undefined,
       }}
@@ -74,15 +82,16 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
         minWidth={140}
         minHeight={50}
         lineStyle={{ borderColor: 'transparent' }}
-        handleStyle={{ borderColor: colors.border, background: colors.border, width: 16, height: 16 }}
+        handleStyle={{ borderColor: colors.border, background: colors.border, width: 8, height: 8, borderRadius: 2 }}
       />
-      <Handle
-        type="source"
-        position={Position.Top}
-        id="top"
-        style={{ background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
+      <SideHandles
+        data={data}
+        sides={['top', 'left', 'right']}
+        handleBackground={theme.colors.handleBackground}
+        handleBorder={theme.colors.handleBorder}
+        labelColor={theme.colors.nodeSubtextColor}
+        showLabels
       />
-      <Handle type="target" position={Position.Top} id="top-t" style={{ opacity: 0, width: 12, height: 12 }} />
 
       {/* Status dot — absolute to avoid affecting node auto-width */}
       <div
@@ -251,40 +260,14 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
         </>
       )}
 
-      {bottomHandlePositions(data.bottom_handles ?? 1).map((leftPct, idx) => {
-        const sourceId = bottomHandleId(idx)
-        const targetId = `${sourceId}-t`
-        return (
-          <span key={sourceId}>
-            {data.show_port_numbers && (
-              <span
-                className="absolute font-mono leading-none pointer-events-none select-none"
-                style={{
-                  left: `${leftPct}%`,
-                  bottom: 3,
-                  transform: 'translateX(-50%)',
-                  fontSize: 7,
-                  color: theme.colors.nodeSubtextColor,
-                }}
-              >
-                {idx + 1}
-              </span>
-            )}
-            <Handle
-              type="source"
-              position={Position.Bottom}
-              id={sourceId}
-              style={{ left: `${leftPct}%`, background: theme.colors.handleBackground, borderColor: theme.colors.handleBorder }}
-            />
-            <Handle
-              type="target"
-              position={Position.Bottom}
-              id={targetId}
-              style={{ left: `${leftPct}%`, opacity: 0, width: 12, height: 12 }}
-            />
-          </span>
-        )
-      })}
+      <SideHandles
+        data={data}
+        sides={['bottom']}
+        handleBackground={theme.colors.handleBackground}
+        handleBorder={theme.colors.handleBorder}
+        labelColor={theme.colors.nodeSubtextColor}
+        showLabels
+      />
     </div>
   )
 }

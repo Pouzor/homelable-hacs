@@ -9,7 +9,7 @@ let mockZoom = 1
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
-  Position: { Top: 'top', Bottom: 'bottom' },
+  Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
   NodeResizer: () => null,
   useUpdateNodeInternals: () => vi.fn(),
   useViewport: () => ({ zoom: mockZoom }),
@@ -60,14 +60,9 @@ vi.mock('@/utils/propertyIcons', () => ({
   resolvePropertyIcon: (icon: string | null) => icon ? Server : null,
 }))
 
-vi.mock('@/utils/handleUtils', () => ({
-  bottomHandleId: (idx: number) => idx === 0 ? 'bottom' : `bottom-${idx + 1}`,
-  bottomHandlePositions: (count: number) => {
-    const c = typeof count === 'number' && count > 0 ? Math.floor(count) : 1
-    return Array.from({ length: c }, (_, i) => ((i + 1) * 100) / (c + 1))
-  },
-  clampBottomHandles: (n: unknown) => typeof n === 'number' ? n : 1,
-}))
+// handleUtils is pure — use the real implementation so the side-generic API
+// (SIDES, handleId, handlePositions, sideHandleCount, …) stays in sync.
+vi.mock('@/utils/handleUtils', async (importOriginal) => await importOriginal())
 
 beforeEach(() => { mockZoom = 1 })
 
@@ -125,6 +120,14 @@ describe('BaseNode — borderWidth zoom scaling', () => {
     expect((container.firstChild as HTMLElement).style.borderWidth).toBe('1px')
   })
 
+  // Regression: the node root must NOT clip its own bounds, otherwise the outer
+  // half of each connection handle (which sits centred on the edge) becomes
+  // non-interactive and the "magnet" snap area is halved.
+  it('root does not clip overflow (keeps handles grabbable)', () => {
+    const { container } = renderBaseNode({})
+    expect((container.firstChild as HTMLElement).className).not.toContain('overflow-hidden')
+  })
+
   it('boxShadow glow ring uses borderWidth when selected + online at zoom=0.5', () => {
     mockZoom = 0.5
     const node = makeNode({ status: 'online' })
@@ -177,13 +180,21 @@ describe('BaseNode — properties rendering', () => {
   })
 })
 
-describe('BaseNode — port numbers (issue #20)', () => {
-  it('renders a number above each bottom handle when show_port_numbers is on', () => {
+describe('BaseNode — port numbers (issue #20 / #243)', () => {
+  it('renders a number on each connection point when show_port_numbers is on', () => {
+    // bottom=4 → labels 1..4; top defaults to 1 → an extra "1" on top.
     renderBaseNode({ bottom_handles: 4, show_port_numbers: true })
-    expect(screen.getByText('1')).toBeDefined()
+    expect(screen.getAllByText('1')).toHaveLength(2) // top slot 0 + bottom slot 0
     expect(screen.getByText('2')).toBeDefined()
     expect(screen.getByText('3')).toBeDefined()
     expect(screen.getByText('4')).toBeDefined()
+  })
+
+  it('labels left/right connection points too when enabled', () => {
+    // top=1, bottom=1, left=2, right=0 → labels: two "1" (top+bottom) + "2" (left).
+    renderBaseNode({ bottom_handles: 1, left_handles: 2, show_port_numbers: true })
+    expect(screen.getByText('2')).toBeDefined()
+    expect(screen.getAllByText('1')).toHaveLength(3) // top + bottom + left slot 0
   })
 
   it('does not render port numbers when show_port_numbers is off', () => {
@@ -193,8 +204,9 @@ describe('BaseNode — port numbers (issue #20)', () => {
   })
 
   it('numbers match the handle count', () => {
+    // bottom=2 → 1,2; top default 1 adds one more "1"; no "3".
     renderBaseNode({ bottom_handles: 2, show_port_numbers: true })
-    expect(screen.getByText('1')).toBeDefined()
+    expect(screen.getAllByText('1')).toHaveLength(2)
     expect(screen.getByText('2')).toBeDefined()
     expect(screen.queryByText('3')).toBeNull()
   })
