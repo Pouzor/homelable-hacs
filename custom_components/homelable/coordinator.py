@@ -1412,14 +1412,15 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         # Identities already represented anywhere — avoid duplicates.
         # Scan every design's canvas; nodes may be flat (top-level ieee_address)
-        # or nested under `data`. Map ieee -> (design_id, node) so a refresh
-        # saves the right canvas.
-        canvas_by_ieee: dict[str, tuple[str, dict[str, Any]]] = {}
+        # or nested under `data`. Map ieee -> [(design_id, node), ...]: the same
+        # device is legitimately placed on more than one canvas (one node per
+        # design), so a refresh must touch every matching node, not just one.
+        canvas_by_ieee: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         for did, canvas in self._canvases.items():
             for n in canvas.get("nodes", []):
                 ieee = n.get("ieee_address") or n.get("data", {}).get("ieee_address")
                 if ieee:
-                    canvas_by_ieee[ieee] = (did, n)
+                    canvas_by_ieee.setdefault(ieee, []).append((did, n))
         on_canvas = set(canvas_by_ieee)
         already_pending = {
             d.get("data_extras", {}).get("ieee_address")
@@ -1438,19 +1439,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
             if not ieee:
                 skipped += 1
                 continue
-            # Already approved onto a canvas: refresh its property rows
-            # (preserving the user's visibility choices) and skip creating a
-            # pending row, so approved devices stay out of pending/hidden.
-            entry = canvas_by_ieee.get(ieee)
-            if entry is not None:
-                did, node = entry
+            # Already approved onto a canvas: refresh its property rows on
+            # *every* canvas it sits on (preserving the user's visibility
+            # choices) and skip creating a pending row, so approved devices stay
+            # out of pending/hidden.
+            matches = canvas_by_ieee.get(ieee)
+            if matches:
                 props = build_props(
                     ieee, dev.get("vendor"), dev.get("model"), dev.get("lqi")
                 )
-                node["properties"] = zigbee.merge_zigbee_properties(
-                    node.get("properties"), props
-                )
-                dirty_designs.add(did)
+                for did, node in matches:
+                    node["properties"] = zigbee.merge_zigbee_properties(
+                        node.get("properties"), props
+                    )
+                    dirty_designs.add(did)
                 refreshed += 1
                 continue
             if ieee in existing:

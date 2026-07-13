@@ -352,6 +352,59 @@ async def test_import_zigbee_devices_refreshes_approved_canvas_node(
     assert lqi["visible"] is True
 
 
+async def test_import_zigbee_devices_refreshes_all_canvases(
+    coordinator: HomelableCoordinator,
+) -> None:
+    """A device placed on more than one canvas has its props refreshed on
+    every canvas on re-import — not just one (one Node per design is valid)."""
+    await coordinator.import_zigbee_devices(
+        [
+            {
+                "id": "0xR1",
+                "ieee_address": "0xR1",
+                "friendly_name": "Router",
+                "type": "zigbee_router",
+                "device_type": "Router",
+                "model": "E11-N1EA",
+                "vendor": "Sengled",
+                "lqi": 100,
+            }
+        ]
+    )
+    pending = await coordinator.list_pending(source="zigbee")
+    device_id = pending[0]["id"]
+
+    # Approve the same device onto two separate designs.
+    default = (await coordinator.list_designs())[0]["id"]
+    second = (await coordinator.create_design("Second"))["id"]
+    node_a = await coordinator.approve_pending(device_id, {"design_id": default})
+    node_b = await coordinator.approve_pending(device_id, {"design_id": second})
+    assert node_a is not None and node_b is not None
+
+    # Re-import with a fresh LQI: both canvases must be updated.
+    result = await coordinator.import_zigbee_devices(
+        [
+            {
+                "id": "0xR1",
+                "ieee_address": "0xR1",
+                "friendly_name": "Router",
+                "type": "zigbee_router",
+                "device_type": "Router",
+                "model": "E11-N1EA",
+                "vendor": "Sengled",
+                "lqi": 250,
+            }
+        ]
+    )
+    # One device refreshed (counted per device, not per canvas), no new pending.
+    assert result == {"added": 0, "skipped": 0, "refreshed": 1}
+    for design_id in (default, second):
+        canvas = await coordinator.get_canvas(design_id)
+        node = next(n for n in canvas["nodes"] if n["ieee_address"] == "0xR1")
+        lqi = next(p for p in node["properties"] if p["key"] == "LQI")
+        assert lqi["value"] == "250"
+
+
 async def test_import_zigbee_devices_stays_listed_after_node_deleted(
     coordinator: HomelableCoordinator,
 ) -> None:
