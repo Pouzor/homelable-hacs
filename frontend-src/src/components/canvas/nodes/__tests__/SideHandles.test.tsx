@@ -34,6 +34,33 @@ describe('SideHandles', () => {
     expect(target.style.opacity).toBe('0')
   })
 
+  it('drags start from the source handle, not the target magnet (no direction inversion)', () => {
+    // Regression: the target magnet must be drop-only so a drag started on a
+    // connection point anchors at the source node (the node you drag FROM),
+    // otherwise the edge direction — and thus marker_start/marker_end — inverts.
+    const { container } = renderHandles({})
+    // React Flow renders isConnectableStart/End as `connectablestart` /
+    // `connectableend` classes on the handle element.
+    const source = container.querySelector('.react-flow__handle.source') as HTMLElement
+    const target = container.querySelector('.react-flow__handle.target') as HTMLElement
+    // Source can start a connection but not be a drop end.
+    expect(source.classList.contains('connectablestart')).toBe(true)
+    expect(source.classList.contains('connectableend')).toBe(false)
+    // Target magnet is drop-only: it can be an end but never starts a drag.
+    expect(target.classList.contains('connectablestart')).toBe(false)
+    expect(target.classList.contains('connectableend')).toBe(true)
+  })
+
+  it('renders the source handle on top of (after) the target magnet', () => {
+    // DOM order matters: the source must paint over the target so it receives
+    // the pointer-down that starts the connection.
+    const { container } = renderHandles({})
+    const handles = Array.from(container.querySelectorAll('.react-flow__handle'))
+    const firstTargetIdx = handles.findIndex((h) => h.classList.contains('target'))
+    const firstSourceIdx = handles.findIndex((h) => h.classList.contains('source'))
+    expect(firstSourceIdx).toBeGreaterThan(firstTargetIdx)
+  })
+
   it('renders configured per-side counts', () => {
     const { container } = renderHandles({ top_handles: 2, left_handles: 3, right_handles: 1, bottom_handles: 1 })
     expect(container.querySelectorAll('.react-flow__handle.source').length).toBe(7)

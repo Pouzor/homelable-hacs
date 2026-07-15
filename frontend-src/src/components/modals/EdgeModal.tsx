@@ -7,8 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { EDGE_TYPE_LABELS, type EdgeData, type EdgePathStyle, type EdgeType } from '@/types'
+import { EDGE_TYPE_LABELS, type EdgeData, type EdgePathStyle, type EdgeType, type MarkerShape } from '@/types'
 import { EDGE_DEFAULT_COLORS } from '@/utils/edgeColors'
+import { normalizeMarker } from '@/utils/edgeMarkers'
+import { MarkerShapePicker } from './MarkerShapePicker'
 
 const EDGE_TYPES = Object.entries(EDGE_TYPE_LABELS) as [EdgeType, string][]
 
@@ -38,6 +40,8 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
   const [customColor, setCustomColor] = useState<string | undefined>(initial?.custom_color)
   const [pathStyle, setPathStyle] = useState<EdgePathStyle>(initial?.path_style ?? 'bezier')
   const [animation, setAnimation] = useState<AnimMode>(() => toAnimMode(initial?.animated))
+  const [markerStart, setMarkerStart] = useState<MarkerShape>(normalizeMarker(initial?.marker_start))
+  const [markerEnd, setMarkerEnd] = useState<MarkerShape>(normalizeMarker(initial?.marker_end))
 
   const effectiveColor = customColor ?? EDGE_DEFAULT_COLORS[type]
 
@@ -50,6 +54,8 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
       custom_color: customColor,
       path_style: pathStyle,
       animated: animation !== 'none' ? animation : undefined,
+      marker_start: markerStart,
+      marker_end: markerEnd,
     })
     onClose()
   }
@@ -150,6 +156,14 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
                   {mode === 'none' ? 'None' : mode === 'basic' ? 'Basic' : mode === 'snake' ? 'Snake' : 'Flow'}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Endpoints</Label>
+            <div className="flex flex-col gap-1.5">
+              <MarkerShapePicker label="Start" value={markerStart} onChange={setMarkerStart} />
+              <MarkerShapePicker label="End" value={markerEnd} onChange={setMarkerEnd} />
             </div>
           </div>
 

@@ -53,6 +53,20 @@ export function SideHandles({
           const labelStyle: CSSProperties = vertical
             ? { top: `${pct}%`, [side]: 3, transform: 'translateY(-50%)' }
             : { left: `${pct}%`, [side]: 3, transform: 'translateX(-50%)' }
+          // Two overlapping handles per slot:
+          //  - target (drop-only): a large invisible magnet, rendered first so
+          //    it sits *under* the source. `isConnectableStart={false}` so it
+          //    can never *initiate* a drag — otherwise a drag started here would
+          //    be target-anchored and invert the edge direction (the node you
+          //    drag FROM would become the edge target). See #62 follow-up.
+          //  - source (start-only): rendered last so it sits on top and receives
+          //    the pointer-down, anchoring the connection at its node. Kept at the
+          //    default (small) size so the edge stays pinned to the node border —
+          //    RF anchors edges to the handle's *outer* edge, so a large source
+          //    would push the endpoint off the border and leave a visible gap.
+          //    `isConnectableEnd={false}` so a drop resolves onto the target
+          //    magnet beneath (keeping the `-t` targetHandle convention).
+          // Net effect: source = the node you drag FROM, target = where you drop.
           return (
             <span key={sourceId}>
               {showLabels && data.show_port_numbers && (
@@ -64,16 +78,18 @@ export function SideHandles({
                 </span>
               )}
               <Handle
-                type="source"
-                position={POSITION[side]}
-                id={sourceId}
-                style={{ ...offset, background: handleBackground, borderColor: handleBorder }}
-              />
-              <Handle
                 type="target"
                 position={POSITION[side]}
                 id={targetId}
+                isConnectableStart={false}
                 style={{ ...offset, opacity: 0, width: 20, height: 20 }}
+              />
+              <Handle
+                type="source"
+                position={POSITION[side]}
+                id={sourceId}
+                isConnectableEnd={false}
+                style={{ ...offset, background: handleBackground, borderColor: handleBorder }}
               />
             </span>
           )

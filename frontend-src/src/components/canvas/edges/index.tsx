@@ -13,6 +13,7 @@ import type { EdgeData, EdgeType, Waypoint } from '@/types'
 import { useThemeStore } from '@/stores/themeStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { THEMES } from '@/utils/themes'
+import { MARKER_GEOMETRY, normalizeMarker, type NonNoneMarkerShape } from '@/utils/edgeMarkers'
 import { buildWaypointPath, getAddWaypointHandlePosition, getWaypointLabelPosition, snap45, snap45both } from './waypointUtils'
 
 const VLAN_COLORS = ['#00d4ff', '#a855f7', '#39d353', '#ff6e00', '#e3b341', '#f85149']
@@ -20,6 +21,22 @@ const VLAN_COLORS = ['#00d4ff', '#a855f7', '#39d353', '#ff6e00', '#e3b341', '#f8
 function getVlanColor(vlanId?: number): string {
   if (!vlanId) return '#00d4ff'
   return VLAN_COLORS[vlanId % VLAN_COLORS.length]
+}
+
+/** Inner SVG element for an edge <marker>, drawn in a 0..10 viewBox. */
+function markerInnerElement(shape: NonNoneMarkerShape, color: string): React.ReactElement {
+  switch (shape) {
+    case 'arrow':
+      return <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
+    case 'arrow-open':
+      return <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+    case 'circle':
+      return <circle cx={5} cy={5} r={4} fill={color} />
+    case 'diamond':
+      return <path d="M 5 0.5 L 9.5 5 L 5 9.5 L 0.5 5 z" fill={color} />
+    case 'square':
+      return <rect x={1} y={1} width={8} height={8} fill={color} />
+  }
 }
 
 // ── Waypoint drag handle ─────────────────────────────────────────────────────
@@ -365,9 +382,54 @@ export function HomelableEdge({ id, source, target, sourceHandleId, targetHandle
     ? segmentMidpoints(sourceX, sourceY, waypoints, targetX, targetY, pathStyle, sourcePosition)
     : []
 
+  // ── Endpoint markers ───────────────────────────────────────────────────────
+  // Custom inline <marker> defs filled with the live strokeColor so they recolor
+  // reactively (custom_color / vlan / selected). Sized from the stroke width.
+  // Each end picks its own shape (arrow / arrow-open / circle / diamond / square)
+  // independently; 'none' renders no marker.
+  const startShape = normalizeMarker(data?.marker_start)
+  const endShape = normalizeMarker(data?.marker_end)
+  const hasMarkers = startShape !== 'none' || endShape !== 'none'
+  const strokeW = (style.strokeWidth as number) ?? 2
+  const markerSize = 6 + strokeW * 2
+  const startMarkerId = `arrow-start-${id}`
+  const endMarkerId = `arrow-end-${id}`
+
+  const arrowMarker = (markerId: string, shape: NonNoneMarkerShape, orient: string) => {
+    const geo = MARKER_GEOMETRY[shape]
+    return (
+      <marker
+        id={markerId}
+        viewBox="0 0 10 10"
+        refX={geo.refX}
+        refY={5}
+        markerWidth={markerSize}
+        markerHeight={markerSize}
+        markerUnits="userSpaceOnUse"
+        orient={geo.directional ? orient : '0'}
+      >
+        {markerInnerElement(shape, strokeColor)}
+      </marker>
+    )
+  }
+
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={animMode === 'basic' ? { ...style, stroke: 'transparent' } : style} interactionWidth={16} />
+      {hasMarkers && (
+        <defs>
+          {startShape !== 'none' && arrowMarker(startMarkerId, startShape, 'auto-start-reverse')}
+          {endShape !== 'none' && arrowMarker(endMarkerId, endShape, 'auto')}
+        </defs>
+      )}
+
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        style={animMode === 'basic' ? { ...style, stroke: 'transparent' } : style}
+        interactionWidth={16}
+        markerStart={startShape !== 'none' ? `url(#${startMarkerId})` : undefined}
+        markerEnd={endShape !== 'none' ? `url(#${endMarkerId})` : undefined}
+      />
 
       {animMode === 'basic' && (
         <path
