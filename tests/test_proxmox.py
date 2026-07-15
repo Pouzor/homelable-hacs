@@ -266,6 +266,34 @@ async def test_approve_cluster_hosts_creates_cluster_edge(coord) -> None:  # noq
         assert node["right_handles"] >= 1
 
 
+async def test_approve_three_cluster_hosts_chains_distinct_handles(coord) -> None:  # noqa: ANN001
+    # Regression: a 3-host cluster must chain a-b-c, each consecutive pair on a
+    # distinct handle. Approving the MIDDLE host LAST previously fired both its
+    # edges from the same 'right' handle instead of chaining.
+    nodes = [_host("a"), _host("b"), _host("c")]
+    pairs = proxmox.build_proxmox_cluster_links(nodes)
+    await coord.import_proxmox_pending(nodes, [], pairs)
+    pending = await coord.list_pending()
+    ids = {p["ieee_address"]: p["id"] for p in pending}
+
+    # Approve with the middle host (b) LAST.
+    await coord.approve_batch([ids["pve-node-a"], ids["pve-node-c"], ids["pve-node-b"]])
+    canvas = await coord.get_canvas()
+    cluster = [e for e in canvas["edges"] if e.get("type") == "cluster"]
+    # Two chain links (a->b, b->c), not a full mesh.
+    assert len(cluster) == 2
+    assert {(e["source"], e["target"]) for e in cluster} == {
+        ("pve-node-a", "pve-node-b"),
+        ("pve-node-b", "pve-node-c"),
+    }
+    # No two cluster edges share the same node+handle endpoint — the middle host
+    # is a source on its right and a target on its left, never both on 'right'.
+    endpoints = [(e["source"], e["sourceHandle"]) for e in cluster] + [
+        (e["target"], e["targetHandle"]) for e in cluster
+    ]
+    assert len(endpoints) == len(set(endpoints))
+
+
 # ─── Coordinator: config resolution ───────────────────────────────────────────
 
 

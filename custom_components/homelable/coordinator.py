@@ -834,15 +834,18 @@ class HomelableCoordinator(DataUpdateCoordinator):
         canvas (a peer not yet approved is skipped and picked up when it lands):
           - host→guest: the guest carries ``proxmox_parent`` (host ieee) →
             a vertical ``virtual`` edge (bottom → top).
-          - host↔host: a cluster host carries ``cluster_peers`` (host ieees) →
-            horizontal ``cluster`` edges (right → left). Both endpoints get a
+          - host↔host: a cluster host carries directed ``cluster_links``
+            (``{source, target}`` ieees) → horizontal ``cluster`` edges rendered
+            source.right → target.left. Direction is preserved from the import so
+            a middle host chains (target on its left, source on its right) rather
+            than firing both its edges from the same handle. Every endpoint gets a
             left + right handle so the connection points exist.
         Idempotent: an edge is skipped if one already joins the two nodes.
         """
         data = node.get("data") or {}
         parent_ieee = node.get("proxmox_parent") or data.get("proxmox_parent")
-        peers = node.get("cluster_peers") or data.get("cluster_peers") or []
-        if not parent_ieee and not peers:
+        links = node.get("cluster_links") or data.get("cluster_links") or []
+        if not parent_ieee and not links:
             return []
 
         design_id = await self._resolve_design_id(design_id)
@@ -886,19 +889,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 edges.append(edge)
                 created.append(edge)
 
-        for peer_ieee in peers:
-            peer = _by_ieee(peer_ieee)
-            if peer is None or _linked(node["id"], peer["id"]):
+        for link in links:
+            src = _by_ieee(link.get("source"))
+            tgt = _by_ieee(link.get("target"))
+            if src is None or tgt is None or _linked(src["id"], tgt["id"]):
                 continue
-            # Either host can be source or target of a cluster edge, so grant both
-            # a left and right connection point.
-            for host in (node, peer):
+            # Source uses its right handle, target its left — grant both to each
+            # endpoint so the connection points exist regardless of chain position.
+            for host in (src, tgt):
                 host["left_handles"] = max(int(host.get("left_handles") or 0), 1)
                 host["right_handles"] = max(int(host.get("right_handles") or 0), 1)
             edge = {
-                "id": f"e-{node['id']}-{peer['id']}",
-                "source": node["id"],
-                "target": peer["id"],
+                "id": f"e-{src['id']}-{tgt['id']}",
+                "source": src["id"],
+                "target": tgt["id"],
                 "sourceHandle": "right",
                 "targetHandle": "left",
                 "type": "cluster",
@@ -1894,10 +1898,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
         pending = await self._get_pending()
 
         guest_parent = {e["target"]: e["source"] for e in edges}
+        # Directed cluster links: a pair (a, b) is rendered a.right -> b.left, so
+        # direction must survive to approve time. Both endpoints carry the same
+        # link dict; whichever host is approved second materializes the edge.
+        # Using the direction (not a symmetric peer list) keeps a middle host a
+        # target on its LEFT handle and a source on its RIGHT handle — a real
+        # chain instead of both edges leaving the same handle.
         peers_by_ieee: dict[str, list[str]] = {}
+        links_by_ieee: dict[str, list[dict[str, str]]] = {}
         for a, b in cluster_pairs:
             peers_by_ieee.setdefault(a, []).append(b)
             peers_by_ieee.setdefault(b, []).append(a)
+            link = {"source": a, "target": b}
+            links_by_ieee.setdefault(a, []).append(link)
+            links_by_ieee.setdefault(b, []).append(link)
         cluster_members = set(peers_by_ieee)
 
         by_ip, by_ieee = self._canvas_node_index()
@@ -1951,6 +1965,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "model": n.get("model"),
                 "proxmox_parent": guest_parent.get(ieee),
                 "cluster_peers": peers_by_ieee.get(ieee, []),
+                "cluster_links": links_by_ieee.get(ieee, []),
             }
 
             # 1) Already on a canvas — refresh in place, don't duplicate.
@@ -2068,6 +2083,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             de["ieee_address"] = ieee
         de["proxmox_parent"] = extras.get("proxmox_parent") or de.get("proxmox_parent")
         de["cluster_peers"] = extras.get("cluster_peers") or de.get("cluster_peers") or []
+        de["cluster_links"] = extras.get("cluster_links") or de.get("cluster_links") or []
         for key in ("friendly_name", "vendor", "model"):
             if extras.get(key) and not de.get(key):
                 de[key] = extras[key]

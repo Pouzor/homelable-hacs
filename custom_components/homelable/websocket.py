@@ -296,6 +296,7 @@ async def ws_scan_approve(
         node, overrides.get("design_id")
     )
     edges = [auto_edge] if auto_edge else []
+    edges.extend(await coord._create_proxmox_edges(node, overrides.get("design_id")))
     connection.send_result(
         msg["id"],
         {

@@ -18,6 +18,7 @@ import { sourceBuckets, orderedSources, SOURCE_META, type SourceBucket } from '@
 import { buildMacProperty } from '@/utils/macProperty'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
 import { getCenteredPosition } from '@/utils/viewportCenter'
+import { applyAutoEdges, type AutoEdge } from '@/utils/autoEdges'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -93,23 +94,36 @@ function deviceLabel(d: PendingDevice): string {
   return d.friendly_name ?? d.hostname ?? specialServiceName(d) ?? d.ip ?? d.ieee_address ?? 'device'
 }
 
-function injectAutoEdges(edges: { id: string; source: string; target: string }[] | undefined) {
+/** Server auto-edge as returned by approve/bulkApprove (camelCase handles). */
+interface ServerAutoEdge {
+  id: string
+  source: string
+  target: string
+  type?: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  source_handle?: string | null
+  target_handle?: string | null
+}
+
+function injectAutoEdges(edges: ServerAutoEdge[] | undefined) {
   if (!edges || edges.length === 0) return
-  useCanvasStore.setState((state) => ({
-    edges: [
-      ...state.edges,
-      ...edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: 'bottom',
-        targetHandle: 'top-t',
-        type: 'iot',
-        data: { type: 'iot' as const },
-      })),
-    ],
-    hasUnsavedChanges: true,
+  // Honor the server's edge type + handle IDs (iot bottom→top-t for mesh links,
+  // cluster right→left for Proxmox hosts) and bump the referenced nodes' side
+  // handle counts so left/right connection points actually exist — otherwise
+  // React Flow can't resolve the handle and falls back to the top handle.
+  const autoEdges: AutoEdge[] = edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    type: e.type,
+    source_handle: e.source_handle ?? e.sourceHandle,
+    target_handle: e.target_handle ?? e.targetHandle,
   }))
+  useCanvasStore.setState((state) => {
+    const next = applyAutoEdges(state.nodes, state.edges, autoEdges)
+    return { nodes: next.nodes, edges: next.edges, hasUnsavedChanges: true }
+  })
 }
 
 export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending' }: PendingDevicesModalProps) {

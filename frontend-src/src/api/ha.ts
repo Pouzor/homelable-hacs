@@ -118,7 +118,14 @@ export const scanApi = {
     const result = await wsCall<{
       node: { id: string; type: string; data: object }
       node_id: string
-      edges: Array<{ id: string; source: string; target: string }>
+      edges: Array<{
+        id: string
+        source: string
+        target: string
+        type?: string
+        sourceHandle?: string | null
+        targetHandle?: string | null
+      }>
       edges_created: number
     }>('homelable/scan/approve', { device_id: id, overrides: nodeData, design_id: designId ?? null })
     return toAxiosLike(result)
@@ -153,7 +160,14 @@ export const scanApi = {
       nodes: object[]
       device_ids: string[]
       node_ids: string[]
-      edges: Array<{ id: string; source: string; target: string }>
+      edges: Array<{
+        id: string
+        source: string
+        target: string
+        type?: string
+        sourceHandle?: string | null
+        targetHandle?: string | null
+      }>
       edges_created: number
       skipped: string[]
       not_found: string[]
