@@ -20,7 +20,10 @@ export interface PendingDevice {
   suggested_type: string | null
   status: string
   discovery_source: string | null
-  source?: 'scan' | 'zigbee' | null
+  // Every source that has observed this device (e.g. ["arp", "proxmox"]); drives
+  // the inventory source filter + badges. Falls back to [discovery_source].
+  discovery_sources?: string[] | null
+  source?: 'scan' | 'zigbee' | 'zwave' | 'proxmox' | null
   ieee_address?: string | null
   friendly_name?: string | null
   device_subtype?: string | null

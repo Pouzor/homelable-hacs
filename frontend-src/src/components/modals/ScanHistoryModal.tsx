@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, X, Loader2, StopCircle, Clock, ScanLine, Network, RadioTower, Inbox } from 'lucide-react'
+import { RefreshCw, X, Loader2, StopCircle, Clock, ScanLine, Network, RadioTower, Server, Inbox } from 'lucide-react'
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { scanApi } from '@/api/client'
@@ -22,18 +22,19 @@ interface ScanHistoryModalProps {
   onClose: () => void
 }
 
-type KindFilter = 'all' | 'ip' | 'zigbee' | 'zwave'
+type KindFilter = 'all' | 'ip' | 'zigbee' | 'zwave' | 'proxmox'
 type StatusFilter = 'all' | 'running' | 'done' | 'error' | 'cancelled'
 
 /** Normalise a ScanRun.kind into one of the known display kinds. */
-function runKind(kind: string | undefined): 'ip' | 'zigbee' | 'zwave' {
-  return kind === 'zigbee' ? 'zigbee' : kind === 'zwave' ? 'zwave' : 'ip'
+function runKind(kind: string | undefined): 'ip' | 'zigbee' | 'zwave' | 'proxmox' {
+  return kind === 'zigbee' ? 'zigbee' : kind === 'zwave' ? 'zwave' : kind === 'proxmox' ? 'proxmox' : 'ip'
 }
 
 const KIND_META = {
   ip: { label: 'IP', color: '#a855f7' },
   zigbee: { label: 'Zigbee', color: '#00d4ff' },
   zwave: { label: 'Z-Wave', color: '#ff6e00' },
+  proxmox: { label: 'Proxmox', color: '#e57000' },
 } as const
 
 const STATUS_FILTERS: { key: StatusFilter; label: string }[] = [
@@ -49,6 +50,7 @@ const KIND_FILTERS: { key: KindFilter; label: string }[] = [
   { key: 'ip', label: 'IP' },
   { key: 'zigbee', label: 'Zigbee' },
   { key: 'zwave', label: 'Z-Wave' },
+  { key: 'proxmox', label: 'Proxmox' },
 ]
 
 function statusColor(s: string): string {
@@ -102,8 +104,12 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
           toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
         }
         if (prev?.status === 'running' && run.status === 'done') {
-          if (run.kind === 'zigbee' || run.kind === 'zwave') {
-            const label = run.kind === 'zwave' ? 'Z-Wave' : 'Zigbee'
+          if (run.kind === 'proxmox' && run.error) {
+            // A done Proxmox run carrying a non-fatal advisory (e.g. hosts
+            // imported but no guests visible) is a warning, not a success.
+            toast.warning(run.error)
+          } else if (run.kind === 'zigbee' || run.kind === 'zwave' || run.kind === 'proxmox') {
+            const label = run.kind === 'zwave' ? 'Z-Wave' : run.kind === 'proxmox' ? 'Proxmox' : 'Zigbee'
             toast.success(`${label} import done — ${run.devices_found} device${run.devices_found !== 1 ? 's' : ''}`)
           }
           useCanvasStore.getState().notifyScanDeviceFound()
@@ -231,11 +237,15 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
           {filtered.map((r) => {
             const kind = runKind(r.kind)
             const meta = KIND_META[kind]
-            const KindIcon = kind === 'zigbee' ? Network : kind === 'zwave' ? RadioTower : ScanLine
+            const KindIcon = kind === 'zigbee' ? Network : kind === 'zwave' ? RadioTower : kind === 'proxmox' ? Server : ScanLine
+            // A done run carrying a non-fatal advisory renders amber (info),
+            // distinct from a red error.
+            const advisory = r.status === 'done' && !!r.error
+            const dotColor = advisory ? '#e3b341' : statusColor(r.status)
             return (
               <div key={r.id} className="rounded-lg border border-border bg-[#161b22] p-3">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusColor(r.status) }} />
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
                   <span className="font-mono text-sm text-foreground capitalize">{r.status}</span>
                   {r.status === 'running' && <Loader2 size={12} className="animate-spin text-[#e3b341]" />}
                   <span
@@ -286,7 +296,11 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
                 )}
 
                 {r.error && (
-                  <div className="mt-2 text-[11px] text-[#f85149] leading-tight whitespace-pre-wrap break-words rounded bg-[#f85149]/10 px-2 py-1.5">
+                  <div className={`mt-2 text-[11px] leading-tight whitespace-pre-wrap break-words rounded px-2 py-1.5 ${
+                    advisory
+                      ? 'text-[#e3b341] bg-[#e3b341]/10'
+                      : 'text-[#f85149] bg-[#f85149]/10'
+                  }`}>
                     {r.error}
                   </div>
                 )}

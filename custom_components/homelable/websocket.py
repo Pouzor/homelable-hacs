@@ -8,7 +8,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from . import scanner
+from . import proxmox, scanner
 from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .zigbee import ZigbeeMqttNotReadyError
 from .zwave import ZwaveMqttNotReadyError
@@ -44,6 +44,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_zigbee_import)
     websocket_api.async_register_command(hass, ws_zwave_devices)
     websocket_api.async_register_command(hass, ws_zwave_import)
+    websocket_api.async_register_command(hass, ws_proxmox_get_config)
+    websocket_api.async_register_command(hass, ws_proxmox_test_connection)
+    websocket_api.async_register_command(hass, ws_proxmox_import)
+    websocket_api.async_register_command(hass, ws_proxmox_import_pending)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -669,4 +673,151 @@ async def ws_zwave_import(
         _send_not_setup(connection, msg["id"])
         return
     result = await coord.trigger_zwave_import()
+    connection.send_result(msg["id"], result)
+
+
+# ─── Proxmox VE ───────────────────────────────────────────────────────────────
+
+# Connection params are all optional on the wire: a blank value falls back to
+# the integration-stored config (host/port/tls) and credential (token), so the
+# panel never has to hold the token to run an import.
+_PROXMOX_CONN_SCHEMA = {
+    vol.Optional("host"): vol.Any(str, None),
+    vol.Optional("port"): vol.Any(int, None),
+    vol.Optional("token_id"): vol.Any(str, None),
+    vol.Optional("token_secret"): vol.Any(str, None),
+    vol.Optional("verify_tls"): vol.Any(bool, None),
+}
+
+
+def _proxmox_request(coord, msg: dict[str, Any]) -> dict[str, Any]:
+    """Resolve request connection params over the stored config."""
+    return coord.resolve_proxmox_request(
+        host=msg.get("host"),
+        port=msg.get("port"),
+        token_id=msg.get("token_id"),
+        token_secret=msg.get("token_secret"),
+        verify_tls=msg.get("verify_tls"),
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/proxmox/get_config"}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_proxmox_get_config(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return non-secret Proxmox config (host/port/tls/sync + token_configured)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    connection.send_result(msg["id"], coord.get_proxmox_config())
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/proxmox/test_connection", **_PROXMOX_CONN_SCHEMA}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_proxmox_test_connection(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Validate host reachability + token before importing."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        req = _proxmox_request(coord, msg)
+    except ValueError as exc:
+        connection.send_error(msg["id"], "not_configured", str(exc))
+        return
+    connected, message = await proxmox.test_proxmox_connection(
+        hass,
+        req["host"],
+        req["port"],
+        req["token_id"],
+        req["token_secret"],
+        req["verify_tls"],
+    )
+    connection.send_result(
+        msg["id"], {"connected": connected, "message": message}
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/proxmox/import", **_PROXMOX_CONN_SCHEMA}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_proxmox_import(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Fetch the inventory and return nodes + edges + cluster pairs for a direct
+    canvas drop (the panel injects them client-side)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        req = _proxmox_request(coord, msg)
+    except ValueError as exc:
+        connection.send_error(msg["id"], "not_configured", str(exc))
+        return
+    try:
+        nodes, edges = await proxmox.fetch_proxmox_inventory(
+            hass,
+            req["host"],
+            req["port"],
+            req["token_id"],
+            req["token_secret"],
+            req["verify_tls"],
+        )
+    except proxmox.ProxmoxError as exc:
+        connection.send_error(msg["id"], "proxmox_error", str(exc))
+        return
+    except ValueError as exc:
+        connection.send_error(msg["id"], "bad_response", str(exc))
+        return
+    cluster_pairs = proxmox.build_proxmox_cluster_links(nodes)
+    connection.send_result(
+        msg["id"],
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "cluster_pairs": [list(p) for p in cluster_pairs],
+            "device_count": len(nodes),
+            "advisory": proxmox.guest_visibility_advisory(nodes),
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/proxmox/import_pending", **_PROXMOX_CONN_SCHEMA}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_proxmox_import_pending(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Kick off a background Proxmox import into pending (kind="proxmox");
+    surfaces under Scan History with a running → done transition."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        result = await coord.trigger_proxmox_import(
+            host=msg.get("host"),
+            port=msg.get("port"),
+            token_id=msg.get("token_id"),
+            token_secret=msg.get("token_secret"),
+            verify_tls=msg.get("verify_tls"),
+        )
+    except ValueError as exc:
+        connection.send_error(msg["id"], "not_configured", str(exc))
+        return
     connection.send_result(msg["id"], result)

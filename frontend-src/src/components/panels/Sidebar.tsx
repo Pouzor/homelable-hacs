@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -15,6 +15,12 @@ import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
 import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
+import { ProxmoxImportModal } from '@/components/proxmox/ProxmoxImportModal'
+import { buildProxmoxClusterEdges } from '@/components/proxmox/clusterEdges'
+import type { ProxmoxNode, ProxmoxEdge } from '@/components/proxmox/types'
+import { getCenteredPosition } from '@/utils/viewportCenter'
+import type { NodeData } from '@/types'
+import type { Node, Connection } from '@xyflow/react'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -45,6 +51,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
   const [zigbeeOpen, setZigbeeOpen] = useState(false)
   const [zwaveOpen, setZwaveOpen] = useState(false)
+  const [proxmoxOpen, setProxmoxOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
   const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
   const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
@@ -53,7 +60,66 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   const collapsed = forceView ? false : _collapsed
   const activeView = forceView ?? _activeView
 
-  const { nodes, hasUnsavedChanges, hideIp, toggleHideIp } = useCanvasStore()
+  const { nodes, hasUnsavedChanges, hideIp, toggleHideIp, addNode, onConnect, snapshotHistory, markUnsaved } = useCanvasStore()
+
+  // Direct "Add to Canvas" for a Proxmox import: drop the selected hosts/guests
+  // as typed nodes and wire host→guest 'virtual' + host↔host 'cluster' edges.
+  const handleProxmoxAddToCanvas = useCallback((pmNodes: ProxmoxNode[], pmEdges: ProxmoxEdge[]) => {
+    snapshotHistory()
+    const COLS = 4
+    const SPACING_X = 190
+    const SPACING_Y = 110
+    const cols = Math.min(COLS, pmNodes.length)
+    const rows = Math.ceil(pmNodes.length / COLS)
+    const origin = getCenteredPosition(cols * SPACING_X, rows * SPACING_Y)
+    // Multiple hosts from one import = a cluster → chain them via left/right
+    // 'cluster' edges. Those endpoints need one left + one right handle each
+    // (both default to 0), so grant them to the host nodes up front.
+    const clusterEdges = buildProxmoxClusterEdges(pmNodes)
+    const cluster = clusterEdges.length > 0
+    pmNodes.forEach((pn, i) => {
+      const col = i % COLS
+      const row = Math.floor(i / COLS)
+      const position = { x: origin.x + col * SPACING_X, y: origin.y + row * SPACING_Y }
+      const isClusterHost = cluster && pn.type === 'proxmox'
+      const newNode: Node<NodeData> = {
+        id: pn.id,
+        type: pn.type,
+        position,
+        data: {
+          label: pn.label,
+          type: pn.type as NodeData['type'],
+          status: (pn.status === 'online' ? 'online' : 'unknown') as NodeData['status'],
+          services: [],
+          ...(pn.ip ? { ip: pn.ip } : {}),
+          ...(pn.hostname ? { hostname: pn.hostname } : {}),
+          ...(isClusterHost ? { left_handles: 1, right_handles: 1 } : {}),
+        },
+      }
+      addNode(newNode)
+    })
+    // Host → guest links render as 'virtual' edges (VM/LXC ↔ host).
+    pmEdges.forEach((pe) => {
+      onConnect({
+        source: pe.source,
+        sourceHandle: 'bottom',
+        target: pe.target,
+        targetHandle: 'top-t',
+        type: 'virtual',
+      } as unknown as Connection)
+    })
+    // Host ↔ host links render as 'cluster' edges (left → right chain).
+    clusterEdges.forEach((ce) => {
+      onConnect({
+        source: ce.source,
+        sourceHandle: ce.sourceHandle,
+        target: ce.target,
+        targetHandle: ce.targetHandle,
+        type: 'cluster',
+      } as unknown as Connection)
+    })
+    markUnsaved()
+  }, [addNode, onConnect, snapshotHistory, markUnsaved])
   const { designs, activeDesignId, setActiveDesign, addDesign, updateDesign, removeDesign } = useDesignStore()
   const [designSwitcherOpen, setDesignSwitcherOpen] = useState(false)
   const [designModal, setDesignModal] = useState<{ mode: 'create' | 'edit'; design?: Design } | null>(null)
@@ -241,6 +307,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
         <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
         <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
+        {!STANDALONE && <SidebarItem icon={Server} label="Import Proxmox" collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
         <SidebarItem
           icon={hideIp ? EyeOff : Eye}
           label={hideIp ? 'Show IPs' : 'Hide IPs'}
@@ -273,6 +340,15 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         open={zwaveOpen}
         onClose={() => setZwaveOpen(false)}
         onImported={() => {
+          setScanHistoryOpen(true)
+        }}
+      />
+      <ProxmoxImportModal
+        open={proxmoxOpen}
+        onClose={() => setProxmoxOpen(false)}
+        onAddToCanvas={handleProxmoxAddToCanvas}
+        onPendingImported={() => {
+          // Background import — surface it under Scan History (running → done).
           setScanHistoryOpen(true)
         }}
       />
