@@ -758,7 +758,7 @@ function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRe
                 key={`${s.port}-${s.protocol}-${i}`}
                 className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
                 style={{ background: `${color}22`, color }}
-                title={`${s.service_name} (${s.protocol}/${s.port})`}
+                title={`${s.service_name ?? ''} (${s.protocol}/${s.port})`}
               >
                 {s.service_name}
               </span>

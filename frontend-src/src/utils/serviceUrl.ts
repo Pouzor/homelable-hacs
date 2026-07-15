@@ -88,7 +88,7 @@ export function getServiceUrl(svc: ServiceInfo, host?: string): string | null {
   if (effectivePort === 22) return null // SSH — no browser
   if (effectivePort != null && NON_HTTP_PORTS.has(effectivePort)) return null
 
-  const name = svc.service_name.toLowerCase()
+  const name = svc.service_name?.toLowerCase() ?? ''
   const protocol = parts.protocol ?? (
     name.includes('https') || name.includes('ssl') || name.includes('tls') ||
     effectivePort === 443 || effectivePort === 8443

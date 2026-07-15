@@ -18,6 +18,11 @@ describe('getServiceUrl', () => {
     expect(getServiceUrl(svc(22, 'tcp', 'ssh'), '192.168.1.1')).toBeNull()
   })
 
+  it('does not crash when service_name is null', () => {
+    const s = { port: 80, protocol: 'tcp', service_name: null } as unknown as ServiceInfo
+    expect(getServiceUrl(s, '192.168.1.10')).toBe('http://192.168.1.10:80')
+  })
+
   it('returns null for UDP services', () => {
     expect(getServiceUrl(svc(53, 'udp', 'dns'), '192.168.1.1')).toBeNull()
   })

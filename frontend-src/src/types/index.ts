@@ -75,7 +75,7 @@ export type CheckMethod = 'ping' | 'http' | 'https' | 'tcp' | 'ssh' | 'prometheu
 export interface ServiceInfo {
   port?: number
   protocol: 'tcp' | 'udp'
-  service_name: string
+  service_name: string | null
   path?: string
   icon?: string
   category?: string
