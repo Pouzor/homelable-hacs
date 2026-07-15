@@ -29,6 +29,13 @@ Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable
 - **Zigbee2MQTT import**: fetch your Zigbee mesh through HA's MQTT integration
   and add coordinator / routers / end devices to the canvas. No extra broker
   config — uses the broker HA already talks to.
+- **Proxmox VE import**: read hosts, VMs, and LXC containers from the Proxmox
+  REST API with a read-only API token, dropped onto the canvas as typed nodes
+  with run state and hardware specs (vCPU / RAM / disk). Guests link to their
+  host, cluster hosts chain together, and a device also found by a network scan
+  is merged (by MAC) into a single inventory row instead of duplicating. Optional
+  auto-sync re-imports on a schedule. Configure the token in the integration
+  options; a read-only `PVEAuditor` role at path `/` is enough.
 - **Multiple canvases** (soon).
 
 ---

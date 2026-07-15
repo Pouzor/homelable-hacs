@@ -178,7 +178,9 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
     assert len(pending) == 1
     assert pending[0]["ip"] == "10.0.0.7"
     assert pending[0]["status"] == "pending"
-    assert pending[0]["mac"] == "AA:BB:CC:DD:EE:FF"
+    # MAC is canonicalized (lowercase, ':'-separated) on write so cross-source
+    # dedup can match an ARP scan against a Proxmox import by a plain ==.
+    assert pending[0]["mac"] == "aa:bb:cc:dd:ee:ff"
     assert pending[0]["services"] == [{"port": 22, "name": "ssh"}]
 
     discovered = [e for e in captured_events if e.get("event") == "device_discovered"]
@@ -549,7 +551,7 @@ async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  #
 
     devices = await coord.list_pending()
     assert len(devices) == 1
-    assert devices[0]["mac"] == "AA:BB:CC:11:22:33"
+    assert devices[0]["mac"] == "aa:bb:cc:11:22:33"  # canonicalized on write
     assert devices[0]["hostname"] == "now-known.lan"
 
 

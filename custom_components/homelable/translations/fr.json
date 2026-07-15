@@ -30,7 +30,14 @@
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",
           "zwave_gateway": "Nom de la passerelle Z-Wave JS UI",
           "service_check_enabled": "Activer la vérification d'état par service",
-          "service_check_interval": "Intervalle de vérification des services (secondes)"
+          "service_check_interval": "Intervalle de vérification des services (secondes)",
+          "proxmox_host": "Hôte ou IP Proxmox VE",
+          "proxmox_port": "Port de l'API Proxmox",
+          "proxmox_token_id": "ID du jeton d'API Proxmox (user@realm!nom)",
+          "proxmox_token_secret": "Secret du jeton d'API Proxmox (laisser vide pour conserver)",
+          "proxmox_verify_tls": "Vérifier le certificat TLS de Proxmox",
+          "proxmox_sync_enabled": "Activer la synchronisation automatique Proxmox",
+          "proxmox_sync_interval": "Intervalle de synchronisation automatique Proxmox (secondes)"
         }
       }
     }

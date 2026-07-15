@@ -118,7 +118,14 @@ export const scanApi = {
     const result = await wsCall<{
       node: { id: string; type: string; data: object }
       node_id: string
-      edges: Array<{ id: string; source: string; target: string }>
+      edges: Array<{
+        id: string
+        source: string
+        target: string
+        type?: string
+        sourceHandle?: string | null
+        targetHandle?: string | null
+      }>
       edges_created: number
     }>('homelable/scan/approve', { device_id: id, overrides: nodeData, design_id: designId ?? null })
     return toAxiosLike(result)
@@ -153,7 +160,14 @@ export const scanApi = {
       nodes: object[]
       device_ids: string[]
       node_ids: string[]
-      edges: Array<{ id: string; source: string; target: string }>
+      edges: Array<{
+        id: string
+        source: string
+        target: string
+        type?: string
+        sourceHandle?: string | null
+        targetHandle?: string | null
+      }>
       edges_created: number
       skipped: string[]
       not_found: string[]
@@ -231,6 +245,72 @@ export const zwaveApi = {
    *  progress/completion is polled via Scan History. */
   startImport: async () => {
     const result = await wsCall<ZwaveImportResult>('homelable/zwave/import')
+    return toAxiosLike(result)
+  },
+}
+
+// ─── Proxmox VE ─────────────────────────────────────────────────────────────
+
+import type {
+  ProxmoxEdge,
+  ProxmoxNode,
+} from '@/components/proxmox/types'
+
+/** Connection params. A blank token falls back to the token stored in the HA
+ *  integration options — the panel never has to hold the secret. */
+export interface ProxmoxConnection {
+  host: string
+  port: number
+  token_id?: string
+  token_secret?: string
+  verify_tls: boolean
+}
+
+export interface ProxmoxImportNetworkResult {
+  nodes: ProxmoxNode[]
+  edges: ProxmoxEdge[]
+  cluster_pairs: [string, string][]
+  device_count: number
+  advisory: string | null
+}
+
+export interface ProxmoxConfig {
+  host: string
+  port: number
+  verify_tls: boolean
+  sync_enabled: boolean
+  sync_interval: number
+  token_configured: boolean
+}
+
+export const proxmoxApi = {
+  /** Non-secret config (host/port/tls/sync + whether a token is configured). */
+  getConfig: async () => {
+    const result = await wsCall<ProxmoxConfig>('homelable/proxmox/get_config')
+    return toAxiosLike(result)
+  },
+  /** Reachability + auth probe. May reject with WS error `not_configured`. */
+  testConnection: async (payload: ProxmoxConnection) => {
+    const result = await wsCall<{ connected: boolean; message: string }>(
+      'homelable/proxmox/test_connection',
+      payload as unknown as Record<string, unknown>,
+    )
+    return toAxiosLike(result)
+  },
+  /** Fetch the inventory for a direct canvas drop (nodes + edges + clusters). */
+  importNetwork: async (payload: ProxmoxConnection) => {
+    const result = await wsCall<ProxmoxImportNetworkResult>(
+      'homelable/proxmox/import',
+      payload as unknown as Record<string, unknown>,
+    )
+    return toAxiosLike(result)
+  },
+  /** Kick off a background import into pending; poll Scan History for progress. */
+  importToPending: async (payload: ProxmoxConnection) => {
+    const result = await wsCall<{ run_id: string; status: string; devices_found: number }>(
+      'homelable/proxmox/import_pending',
+      payload as unknown as Record<string, unknown>,
+    )
     return toAxiosLike(result)
   },
 }

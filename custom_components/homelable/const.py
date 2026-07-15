@@ -33,6 +33,29 @@ CONF_ZWAVE_GATEWAY = "zwave_gateway"
 CONF_SERVICE_CHECK_ENABLED = "service_check_enabled"
 CONF_SERVICE_CHECK_INTERVAL = "service_check_interval"
 
+# Proxmox VE import. Token is a real credential, stored in the config entry
+# options like any HA integration credential; it is never returned by any WS
+# command (only `token_configured` is surfaced). Non-secret connection + auto-
+# sync config lives alongside it in options.
+CONF_PROXMOX_HOST = "proxmox_host"
+CONF_PROXMOX_PORT = "proxmox_port"
+CONF_PROXMOX_TOKEN_ID = "proxmox_token_id"
+CONF_PROXMOX_TOKEN_SECRET = "proxmox_token_secret"
+CONF_PROXMOX_VERIFY_TLS = "proxmox_verify_tls"
+CONF_PROXMOX_SYNC_ENABLED = "proxmox_sync_enabled"
+CONF_PROXMOX_SYNC_INTERVAL = "proxmox_sync_interval"
+
+DEFAULT_PROXMOX_PORT = 8006
+DEFAULT_PROXMOX_VERIFY_TLS = True
+DEFAULT_PROXMOX_SYNC_ENABLED = False
+DEFAULT_PROXMOX_SYNC_INTERVAL = 3600  # seconds (1h)
+MIN_PROXMOX_SYNC_INTERVAL = 300  # seconds (5 min)
+
+# Discovery-source tags for the two Proxmox link shapes. Host→guest links render
+# as 'virtual' edges; host↔host cluster links render as 'cluster' edges.
+PROXMOX_SOURCE = "proxmox"
+PROXMOX_CLUSTER_SOURCE = "proxmox_cluster"
+
 DEFAULT_SCAN_RANGES = ["192.168.1.0/24"]
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
 DEFAULT_STATUS_INTERVAL = 60   # seconds

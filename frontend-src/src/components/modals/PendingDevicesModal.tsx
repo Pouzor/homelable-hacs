@@ -14,9 +14,13 @@ import { PendingDeviceModal, type PendingDevice } from '@/components/modals/Pend
 import type { NodeType, ServiceInfo } from '@/types'
 import { buildZigbeeProperties, isZigbeeType } from '@/utils/zigbeeProperties'
 import { buildZwaveProperties, isZwaveType } from '@/utils/zwaveProperties'
+import { sourceBuckets, orderedSources, SOURCE_META, type SourceBucket } from '@/utils/pendingSources'
 import { buildMacProperty } from '@/utils/macProperty'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
 import { getCenteredPosition } from '@/utils/viewportCenter'
+import { applyAutoEdges, type AutoEdge } from '@/utils/autoEdges'
+
+const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 interface PendingDevicesModalProps {
   open: boolean
@@ -73,14 +77,8 @@ const TYPE_ICONS: Record<string, React.ElementType> = {
   generic: Circle,
 }
 
-type SourceFilter = 'all' | 'ip' | 'zigbee' | 'zwave'
+type SourceFilter = 'all' | SourceBucket
 type StatusFilter = 'pending' | 'hidden'
-
-function inferSource(d: PendingDevice): 'zigbee' | 'zwave' | 'ip' {
-  if (d.source === 'zwave' || d.discovery_source === 'zwavejs2mqtt') return 'zwave'
-  if (d.source === 'zigbee' || d.discovery_source === 'zigbee2mqtt' || d.ieee_address) return 'zigbee'
-  return 'ip'
-}
 
 const COMMON_PORTS = new Set([22, 80, 443])
 
@@ -96,23 +94,36 @@ function deviceLabel(d: PendingDevice): string {
   return d.friendly_name ?? d.hostname ?? specialServiceName(d) ?? d.ip ?? d.ieee_address ?? 'device'
 }
 
-function injectAutoEdges(edges: { id: string; source: string; target: string }[] | undefined) {
+/** Server auto-edge as returned by approve/bulkApprove (camelCase handles). */
+interface ServerAutoEdge {
+  id: string
+  source: string
+  target: string
+  type?: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  source_handle?: string | null
+  target_handle?: string | null
+}
+
+function injectAutoEdges(edges: ServerAutoEdge[] | undefined) {
   if (!edges || edges.length === 0) return
-  useCanvasStore.setState((state) => ({
-    edges: [
-      ...state.edges,
-      ...edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: 'bottom',
-        targetHandle: 'top-t',
-        type: 'iot',
-        data: { type: 'iot' as const },
-      })),
-    ],
-    hasUnsavedChanges: true,
+  // Honor the server's edge type + handle IDs (iot bottom→top-t for mesh links,
+  // cluster right→left for Proxmox hosts) and bump the referenced nodes' side
+  // handle counts so left/right connection points actually exist — otherwise
+  // React Flow can't resolve the handle and falls back to the top handle.
+  const autoEdges: AutoEdge[] = edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    type: e.type,
+    source_handle: e.source_handle ?? e.sourceHandle,
+    target_handle: e.target_handle ?? e.targetHandle,
   }))
+  useCanvasStore.setState((state) => {
+    const next = applyAutoEdges(state.nodes, state.edges, autoEdges)
+    return { nodes: next.nodes, edges: next.edges, hasUnsavedChanges: true }
+  })
 }
 
 export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending' }: PendingDevicesModalProps) {
@@ -167,7 +178,9 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return devices.filter((d) => {
-      if (sourceFilter !== 'all' && inferSource(d) !== sourceFilter) return false
+      // A device merged across sources (e.g. IP scan + Proxmox) matches every
+      // filter for a source that has seen it.
+      if (sourceFilter !== 'all' && !sourceBuckets(d).has(sourceFilter)) return false
       if (typeFilter !== 'all' && d.suggested_type !== typeFilter) return false
       // Inventory-only: optionally hide devices already placed on a canvas.
       if (statusFilter === 'pending' && !showOnCanvas && (d.canvas_count ?? 0) > 0) return false
@@ -468,6 +481,14 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
               >
                 Z-Wave
               </button>
+              {!STANDALONE && (
+                <button
+                  onClick={() => setSourceFilter('proxmox')}
+                  className={`px-2.5 py-1.5 transition-colors border-l border-border ${sourceFilter === 'proxmox' ? 'bg-[#e57000]/20 text-[#e57000]' : 'bg-[#0d1117] text-muted-foreground hover:text-foreground'}`}
+                >
+                  Proxmox
+                </button>
+              )}
             </div>
             <select
               value={typeFilter}
@@ -621,7 +642,6 @@ interface DeviceCardProps {
 }
 
 function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRef }: DeviceCardProps) {
-  const source = inferSource(device)
   const roleType = (device.suggested_type ?? 'generic') as NodeType
   const Icon = TYPE_ICONS[roleType] ?? Circle
   const activeTheme = useThemeStore((s) => s.activeTheme)
@@ -629,11 +649,9 @@ function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRe
   // (from the active theme / style section), instead of a flat grey.
   const roleColor = resolveNodeColors({ type: roleType, custom_colors: undefined }, activeTheme).border
   const label = deviceLabel(device)
-  const sourceColor = source === 'zigbee' ? '#00d4ff' : source === 'zwave' ? '#ff6e00' : '#a855f7'
-  const sourceLabel =
-    source === 'zigbee' ? 'ZIGBEE'
-    : source === 'zwave' ? 'Z-WAVE'
-    : (device.discovery_source ?? 'IP').toUpperCase()
+  // A device may carry more than one source (e.g. IP scan + Proxmox); render one
+  // badge per source so the merge is visible.
+  const sourceBadges = orderedSources(device)
   const services = device.services ?? []
   const visibleServices = services.slice(0, 4)
   const moreServices = services.length - visibleServices.length
@@ -696,12 +714,15 @@ function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRe
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-foreground break-all leading-snug">{label}</div>
           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-            <span
-              className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
-              style={{ background: `${sourceColor}22`, color: sourceColor }}
-            >
-              {sourceLabel}
-            </span>
+            {sourceBadges.map((bucket) => (
+              <span
+                key={bucket}
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
+                style={{ background: `${SOURCE_META[bucket].color}22`, color: SOURCE_META[bucket].color }}
+              >
+                {SOURCE_META[bucket].label}
+              </span>
+            ))}
             {device.suggested_type && (
               <span
                 className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
