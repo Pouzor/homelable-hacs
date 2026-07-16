@@ -20,6 +20,12 @@ export interface Hass {
   language?: string
   themes?: { darkMode: boolean }
   user?: { id: string; name: string; is_admin: boolean }
+  // HA auth object. Used for authenticated HTTP calls (media upload) that can't
+  // go over the WS channel — `accessToken` is the current bearer token.
+  auth?: {
+    accessToken?: string
+    data?: { access_token?: string }
+  }
 }
 
 let _hass: Hass | null = null

@@ -9,6 +9,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN, PLATFORMS
 from .coordinator import HomelableCoordinator
+from .media import async_register_media
 from .panel import async_register_panel, async_unregister_panel
 from .websocket import async_register_websocket_commands
 
@@ -32,6 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async_register_websocket_commands(hass)
     await async_register_panel(hass)
+    await async_register_media(hass)
 
     if PLATFORMS:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

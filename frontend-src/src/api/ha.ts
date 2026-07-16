@@ -7,7 +7,7 @@
  * REST/CRUD calls that don't have an HA equivalent are stubbed to throw a
  * clear error — these features need WS commands added to the integration.
  */
-import { wsCall, wsSubscribe } from '@/lib/hass'
+import { wsCall, wsSubscribe, getHass } from '@/lib/hass'
 
 // ─── Wire types ──────────────────────────────────────────────────────────────
 
@@ -84,6 +84,32 @@ export const designsApi = {
       design_id: id,
     })
     return toAxiosLike(result)
+  },
+}
+
+// ─── Media (floor-plan images) ────────────────────────────────────────────────
+
+export const mediaApi = {
+  /**
+   * Upload an image over HTTP (multipart) — too large for the 4 MB WS frame
+   * limit. Authenticated with the HA access token; returns the served URL
+   * (e.g. /homelable_media/<uuid>.png).
+   */
+  upload: async (file: File): Promise<{ url: string; filename: string }> => {
+    const hass = getHass()
+    const token = hass.auth?.accessToken ?? hass.auth?.data?.access_token
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/homelable/media/upload', {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    if (!res.ok) throw new Error(`media upload failed: ${res.status}`)
+    return res.json()
+  },
+  delete: async (filename: string): Promise<void> => {
+    await wsCall('homelable/media/delete', { filename })
   },
 }
 

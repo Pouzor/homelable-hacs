@@ -90,3 +90,12 @@ PANEL_URL = "/homelable_files"
 PANEL_TITLE = "Homelable"
 PANEL_ICON = "mdi:lan"
 PANEL_NAME = "homelable-panel"
+
+# Media (floor-plan images and future raw image uploads) live on disk under the
+# HA config dir, served via a public static path. Filenames are server-generated
+# UUIDs (unguessable), so GET is public like the panel bundle; upload/delete
+# require an authenticated request. Guards against re-registering the view.
+MEDIA_URL = "/homelable_media"
+MEDIA_DIR = f"{DOMAIN}/media"  # relative to hass.config.path(...)
+MEDIA_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+MEDIA_REGISTERED_KEY = f"{DOMAIN}_media_registered"

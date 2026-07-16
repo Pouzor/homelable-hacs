@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import proxmox, scanner
 from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
+from .media import delete_media
 from .zigbee import ZigbeeMqttNotReadyError
 from .zwave import ZwaveMqttNotReadyError
 
@@ -24,6 +25,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_designs_copy)
     websocket_api.async_register_command(hass, ws_designs_update)
     websocket_api.async_register_command(hass, ws_designs_delete)
+    websocket_api.async_register_command(hass, ws_media_delete)
     websocket_api.async_register_command(hass, ws_scan_start)
     websocket_api.async_register_command(hass, ws_scan_cancel)
     websocket_api.async_register_command(hass, ws_scan_pending)
@@ -224,6 +226,24 @@ async def ws_designs_delete(
         )
         return
     connection.send_result(msg["id"], {"ok": True})
+
+
+# ─── Media ────────────────────────────────────────────────────────────────────
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/media/delete",
+        vol.Required("filename"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_media_delete(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Delete an uploaded media file (e.g. a replaced floor plan)."""
+    removed = await hass.async_add_executor_job(delete_media, hass, msg["filename"])
+    connection.send_result(msg["id"], {"ok": removed})
 
 
 # ─── Scan ────────────────────────────────────────────────────────────────────
