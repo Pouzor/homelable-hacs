@@ -176,7 +176,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
                     <span
                       className="font-medium truncate"
                       style={{ minWidth: 0, color: svcOffline ? '#f85149' : undefined }}
-                      title={svc.service_name}
+                      title={svc.service_name ?? undefined}
                     >
                       {svc.service_name}
                     </span>

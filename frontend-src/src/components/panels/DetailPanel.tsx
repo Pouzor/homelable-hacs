@@ -126,7 +126,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
   const handleStartEdit = (index: number) => {
     const svc = services[index]
     if (!svc) return
-    setEditSvc({ port: svc.port != null ? String(svc.port) : '', protocol: svc.protocol, service_name: svc.service_name, path: svc.path ?? '' })
+    setEditSvc({ port: svc.port != null ? String(svc.port) : '', protocol: svc.protocol, service_name: svc.service_name ?? '', path: svc.path ?? '' })
     setEditingFor({ nodeId: node.id, index })
     setAddingForNode(null)
   }
@@ -814,7 +814,7 @@ function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInf
             rel="noopener noreferrer"
             className="font-medium truncate min-w-0 flex-1"
             style={{ color }}
-            title={svc.service_name}
+            title={svc.service_name ?? undefined}
             onClick={e => e.stopPropagation()}
           >
             {svc.service_name}
@@ -823,7 +823,7 @@ function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInf
           <span
             className="font-medium truncate min-w-0 flex-1"
             style={{ color }}
-            title={svc.service_name}
+            title={svc.service_name ?? undefined}
           >
             {svc.service_name}
           </span>
