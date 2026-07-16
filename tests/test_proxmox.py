@@ -294,6 +294,43 @@ async def test_approve_three_cluster_hosts_chains_distinct_handles(coord) -> Non
     assert len(endpoints) == len(set(endpoints))
 
 
+async def test_approve_same_hosts_onto_second_design_still_draws_edges(coord) -> None:  # noqa: ANN001
+    # Regression (port of homelable #254): approving the same mesh/cluster
+    # devices onto a SECOND canvas must also draw their edges. In the standalone
+    # repo a shared pending_device_link row was consumed by the first approval,
+    # so later approvals found no topology. HACS carries topology on each node's
+    # own data and resolves against the target design's canvas, so a re-approve
+    # onto another design must resolve independently. This guards that property.
+    second = await coord.create_design("Second")
+    default = (await coord.list_designs())[0]["id"]
+    nodes = [_host("a"), _host("b")]
+    pairs = proxmox.build_proxmox_cluster_links(nodes)
+    await coord.import_proxmox_pending(nodes, [], pairs)
+    pending = await coord.list_pending()
+    ids = {p["ieee_address"]: p["id"] for p in pending}
+
+    first = await coord.approve_batch(
+        [ids["pve-node-a"], ids["pve-node-b"]], {"design_id": default}
+    )
+    # Same two devices approved onto the second canvas.
+    dupe = await coord.approve_batch(
+        [ids["pve-node-a"], ids["pve-node-b"]], {"design_id": second["id"]}
+    )
+
+    # Both approvals place the nodes AND draw the cluster edge — the second is
+    # not starved of topology by the first.
+    assert first["approved"] == 2
+    assert dupe["approved"] == 2
+    for did in (default, second["id"]):
+        canvas = await coord.get_canvas(did)
+        cluster = [e for e in canvas["edges"] if e.get("type") == "cluster"]
+        assert len(cluster) == 1
+        # The edge joins THAT canvas's own nodes, never another design's.
+        node_ids = {n["id"] for n in canvas["nodes"]}
+        assert cluster[0]["source"] in node_ids
+        assert cluster[0]["target"] in node_ids
+
+
 # ─── Coordinator: config resolution ───────────────────────────────────────────
 
 
