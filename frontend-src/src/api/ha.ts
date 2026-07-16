@@ -65,6 +65,13 @@ export const designsApi = {
     const result = await wsCall<Design>('homelable/designs/create', data)
     return toAxiosLike(result)
   },
+  copy: async (sourceId: string, data: { name: string; icon?: string }) => {
+    const result = await wsCall<Design>('homelable/designs/copy', {
+      source_id: sourceId,
+      ...data,
+    })
+    return toAxiosLike(result)
+  },
   update: async (id: string, data: { name?: string; icon?: string }) => {
     const result = await wsCall<Design>('homelable/designs/update', {
       design_id: id,

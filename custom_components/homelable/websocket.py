@@ -21,6 +21,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_canvas)
     websocket_api.async_register_command(hass, ws_designs_list)
     websocket_api.async_register_command(hass, ws_designs_create)
+    websocket_api.async_register_command(hass, ws_designs_copy)
     websocket_api.async_register_command(hass, ws_designs_update)
     websocket_api.async_register_command(hass, ws_designs_delete)
     websocket_api.async_register_command(hass, ws_scan_start)
@@ -145,6 +146,30 @@ async def ws_designs_create(
     design = await coord.create_design(
         msg["name"], msg["icon"], msg["design_type"]
     )
+    connection.send_result(msg["id"], design)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/designs/copy",
+        vol.Required("source_id"): str,
+        vol.Required("name"): str,
+        vol.Optional("icon", default="dashboard"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_designs_copy(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    design = await coord.copy_design(msg["source_id"], msg["name"], msg["icon"])
+    if design is None:
+        connection.send_error(msg["id"], "not_found", "Source design not found")
+        return
     connection.send_result(msg["id"], design)
 
 

@@ -128,7 +128,11 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
     if (!designModal) return
     try {
       if (designModal.mode === 'create') {
-        const res = await designsApi.create({ name: data.name, icon: data.icon })
+        // Copy from an existing canvas (nodes, edges, viewport) when a source is
+        // picked; otherwise start blank.
+        const res = data.sourceId
+          ? await designsApi.copy(data.sourceId, { name: data.name, icon: data.icon })
+          : await designsApi.create({ name: data.name, icon: data.icon })
         addDesign(res.data)
       } else if (designModal.design) {
         const res = await designsApi.update(designModal.design.id, { name: data.name, icon: data.icon })
@@ -373,6 +377,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
           : undefined}
         title={designModal?.mode === 'edit' ? 'Edit Canvas' : 'New Canvas'}
         submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
+        sourceDesigns={designModal?.mode === 'create' ? designs : []}
       />
     </aside>
   )

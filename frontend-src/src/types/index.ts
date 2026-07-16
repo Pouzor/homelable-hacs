@@ -8,6 +8,10 @@ export interface Design {
   icon?: string | null
   created_at: string
   updated_at: string
+  /** Populated by the design list endpoint for the "copy from existing" picker. */
+  node_count?: number | null
+  group_count?: number | null
+  text_count?: number | null
 }
 
 export type NodeType =
