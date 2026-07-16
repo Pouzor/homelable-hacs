@@ -201,17 +201,13 @@ async def test_copy_duplicates_nodes_edges_and_remaps_ids(coord) -> None:  # noq
 
 async def test_copy_remaps_parent_child_nesting(coord) -> None:  # noqa: ANN001
     source = await coord.create_design("Nested")
+    # Stored nodes are flat: nesting lives in a top-level ``parent_id`` (the shape
+    # serializeNode writes), not a React Flow ``parentId``/nested ``data``.
     await coord.save_canvas(
         {
             "nodes": [
-                {"id": "p", "type": "proxmox", "data": {"label": "P"}},
-                {
-                    "id": "c",
-                    "type": "vm",
-                    "parentId": "p",
-                    "extent": "parent",
-                    "data": {"label": "C", "parent_id": "p"},
-                },
+                {"id": "g", "type": "groupRect", "label": "G"},
+                {"id": "c", "type": "server", "label": "C", "parent_id": "g"},
             ],
             "edges": [],
             "viewport": {},
@@ -222,11 +218,28 @@ async def test_copy_remaps_parent_child_nesting(coord) -> None:  # noqa: ANN001
     copy_design = await coord.copy_design(source["id"], "Copy")
     assert copy_design is not None
     canvas = await coord.get_canvas(copy_design["id"])
-    by_label = {n["data"]["label"]: n for n in canvas["nodes"]}
-    # Child nesting points at the COPIED parent, not the original.
-    assert by_label["C"]["parentId"] == by_label["P"]["id"]
-    assert by_label["C"]["parentId"] != "p"
-    assert by_label["C"]["data"]["parent_id"] == by_label["P"]["id"]
+    by_label = {n["label"]: n for n in canvas["nodes"]}
+    # Child nesting points at the COPIED group, not the original one.
+    assert by_label["C"]["parent_id"] == by_label["G"]["id"]
+    assert by_label["C"]["parent_id"] != "g"
+
+
+async def test_copy_drops_dangling_parent_id(coord) -> None:  # noqa: ANN001
+    source = await coord.create_design("Dangling")
+    # parent_id references a node that isn't in this canvas — must not survive the
+    # copy as a stale pointer (it would render the child at an unresolved spot).
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "c", "type": "server", "label": "C", "parent_id": "ghost"}],
+            "edges": [],
+            "viewport": {},
+        },
+        source["id"],
+    )
+    copy_design = await coord.copy_design(source["id"], "Copy")
+    assert copy_design is not None
+    canvas = await coord.get_canvas(copy_design["id"])
+    assert canvas["nodes"][0]["parent_id"] is None
 
 
 async def test_copy_leaves_source_untouched(coord) -> None:  # noqa: ANN001

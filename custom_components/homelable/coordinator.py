@@ -487,19 +487,17 @@ class HomelableCoordinator(DataUpdateCoordinator):
             nn = copy.deepcopy(n)
             if nn.get("id") in id_map:
                 nn["id"] = id_map[nn["id"]]
-            # Re-point React Flow nesting (parentId) inside the copy; drop it when
-            # the parent node isn't part of this canvas.
-            parent = nn.get("parentId")
+            # Stored nodes carry nesting as a top-level ``parent_id`` (group rect
+            # membership and container/wireless parenting alike). Re-point it at the
+            # copied parent; when it references a node outside this canvas (dangling)
+            # drop it so React Flow doesn't render the child at an unresolved
+            # position. Every same-canvas parent — including a zigbee coordinator
+            # whose id is its ieee — is in ``id_map``.
+            parent = nn.get("parent_id")
             if parent in id_map:
-                nn["parentId"] = id_map[parent]
-            elif "parentId" in nn:
-                nn.pop("parentId", None)
-                nn.pop("extent", None)
-            # Mirror onto data.parent_id, but only when it references a copied node
-            # id (it also carries ieee addresses for wireless nodes — leave those).
-            data = nn.get("data")
-            if isinstance(data, dict) and data.get("parent_id") in id_map:
-                data["parent_id"] = id_map[data["parent_id"]]
+                nn["parent_id"] = id_map[parent]
+            elif parent is not None:
+                nn["parent_id"] = None
             new_nodes.append(nn)
 
         new_edges: list[dict[str, Any]] = []
