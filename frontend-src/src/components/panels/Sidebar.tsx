@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2, Map } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -181,6 +181,13 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floorMapEditNonce])
 
+  // "Add Floorplan" opens the active canvas's edit modal, where the floor plan
+  // section lives (it's gated to the active design — see isActiveEdit).
+  const openFloorPlan = useCallback(() => {
+    const active = designs.find((d) => d.id === activeDesignId)
+    if (active) openDesignModal({ mode: 'edit', design: active })
+  }, [designs, activeDesignId, openDesignModal])
+
   const handleDesignDelete = useCallback(async (d: Design) => {
     if (designs.length <= 1) { toast.error('Cannot delete the only canvas'); return }
     if (!window.confirm(`Delete canvas "${d.name}"? Its nodes and links will be removed.`)) return
@@ -349,6 +356,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
         <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
         {!STANDALONE && <SidebarItem icon={Server} label="Import Proxmox" collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
+        {!STANDALONE && <SidebarItem icon={Map} label="Add Floorplan" collapsed={collapsed} onClick={openFloorPlan} />}
         <SidebarItem
           icon={hideIp ? EyeOff : Eye}
           label={hideIp ? 'Show IPs' : 'Hide IPs'}
