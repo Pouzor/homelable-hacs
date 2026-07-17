@@ -8,6 +8,10 @@ export interface Design {
   icon?: string | null
   created_at: string
   updated_at: string
+  /** Populated by the design list endpoint for the "copy from existing" picker. */
+  node_count?: number | null
+  group_count?: number | null
+  text_count?: number | null
 }
 
 export type NodeType =
@@ -282,4 +286,19 @@ export interface EdgeTypeStyle {
 export interface CustomStyleDef {
   nodes: Partial<Record<NodeType, NodeTypeStyle>>
   edges: Partial<Record<EdgeType, EdgeTypeStyle>>
+}
+
+export interface FloorMapConfig {
+  /**
+   * Server URL of the uploaded image (e.g. /homelable_media/<uuid>.png).
+   * Legacy canvases may still hold a base64 `data:` URL — both render in <img>.
+   */
+  imageData: string
+  posX: number
+  posY: number
+  width: number
+  height: number
+  opacity: number
+  locked: boolean
+  enabled: boolean
 }

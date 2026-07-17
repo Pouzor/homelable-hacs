@@ -431,10 +431,98 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return design_id
         return self._designs[0]["id"] if self._designs else None
 
+    # Node.type values that are canvas annotations rather than real devices.
+    # Kept in sync with the frontend (Sidebar counts, canvasSerializer types).
+    _GROUP_TYPE = "groupRect"
+    _TEXT_TYPE = "text"
+
+    def _design_counts(self, design_id: str) -> dict[str, int]:
+        """node / group / text counts for a design's canvas (feeds the copy picker)."""
+        counts = {"node_count": 0, "group_count": 0, "text_count": 0}
+        canvas = (self._canvases or {}).get(design_id) or {}
+        for n in canvas.get("nodes", []):
+            node_type = n.get("type") or (n.get("data") or {}).get("type") or ""
+            if node_type == self._GROUP_TYPE:
+                counts["group_count"] += 1
+            elif node_type == self._TEXT_TYPE:
+                counts["text_count"] += 1
+            else:
+                counts["node_count"] += 1
+        return counts
+
     async def list_designs(self) -> list[dict[str, Any]]:
         await self._ensure_loaded()
         assert self._designs is not None
-        return self._designs
+        # Attach per-design counts transiently so the "copy from existing" picker
+        # can show what each canvas holds. Never persisted into the designs Store.
+        return [{**d, **self._design_counts(d["id"])} for d in self._designs]
+
+    async def copy_design(
+        self,
+        source_id: str,
+        name: str,
+        icon: str = DEFAULT_DESIGN_ICON,
+    ) -> dict[str, Any] | None:
+        """Create a new design that deep-copies the source's canvas.
+
+        Node ids are unique across designs, so every copied node gets a fresh id;
+        edges and parent/nesting links are re-pointed at the copy. Viewport, custom
+        style and any floor-plan config (carried on the canvas) are cloned as-is.
+        Returns the new design, or ``None`` when the source design is missing.
+        """
+        await self._ensure_loaded()
+        assert self._designs is not None and self._canvases is not None
+        source = next((d for d in self._designs if d["id"] == source_id), None)
+        if source is None:
+            return None
+
+        src_canvas = self._canvases.get(source_id) or copy.deepcopy(_EMPTY_CANVAS)
+        design = self._new_design(name, icon, source.get("design_type", DEFAULT_DESIGN_TYPE))
+
+        # Fresh id per source node so edges and parent links can be re-pointed.
+        id_map = {n["id"]: uuid.uuid4().hex for n in src_canvas.get("nodes", []) if n.get("id")}
+
+        new_nodes: list[dict[str, Any]] = []
+        for n in src_canvas.get("nodes", []):
+            nn = copy.deepcopy(n)
+            if nn.get("id") in id_map:
+                nn["id"] = id_map[nn["id"]]
+            # Stored nodes carry nesting as a top-level ``parent_id`` (group rect
+            # membership and container/wireless parenting alike). Re-point it at the
+            # copied parent; when it references a node outside this canvas (dangling)
+            # drop it so React Flow doesn't render the child at an unresolved
+            # position. Every same-canvas parent — including a zigbee coordinator
+            # whose id is its ieee — is in ``id_map``.
+            parent = nn.get("parent_id")
+            if parent in id_map:
+                nn["parent_id"] = id_map[parent]
+            elif parent is not None:
+                nn["parent_id"] = None
+            new_nodes.append(nn)
+
+        new_edges: list[dict[str, Any]] = []
+        for e in src_canvas.get("edges", []):
+            src, tgt = e.get("source"), e.get("target")
+            # Skip edges whose endpoints aren't part of this canvas (dangling).
+            if src not in id_map or tgt not in id_map:
+                continue
+            ne = copy.deepcopy(e)
+            ne["id"] = uuid.uuid4().hex
+            ne["source"] = id_map[src]
+            ne["target"] = id_map[tgt]
+            new_edges.append(ne)
+
+        # Clone the canvas wholesale (keeps viewport, customStyle, floor plan) then
+        # swap in the remapped nodes/edges.
+        new_canvas = copy.deepcopy(src_canvas)
+        new_canvas["nodes"] = new_nodes
+        new_canvas["edges"] = new_edges
+
+        self._designs.append(design)
+        self._canvases[design["id"]] = new_canvas
+        await self._save_designs()
+        await self._save_canvases()
+        return design
 
     async def create_design(
         self,

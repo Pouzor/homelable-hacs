@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Sidebar } from '../Sidebar'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
 import type { Node } from '@xyflow/react'
-import type { NodeData } from '@/types'
+import type { Design, NodeData } from '@/types'
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,19 @@ describe('Sidebar', () => {
     expect(screen.getByText('Add Node')).toBeInTheDocument()
     expect(screen.getByText('Save Canvas')).toBeInTheDocument()
     expect(screen.getByText('Scan Network')).toBeInTheDocument()
+  })
+
+  it('opens the active canvas Edit modal with the floor plan section on Add Floorplan', () => {
+    const active: Design = {
+      id: 'd1', name: 'Home', icon: 'dashboard', design_type: 'network',
+      created_at: '', updated_at: '',
+    }
+    useDesignStore.setState({ designs: [active], activeDesignId: 'd1' })
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Add Floorplan'))
+    expect(screen.getByText('Edit Canvas')).toBeInTheDocument()
+    expect(screen.getByText('Floor Plan')).toBeInTheDocument()
+    useDesignStore.setState({ designs: [], activeDesignId: null })
   })
 
   it('calls onSave with no arguments when Save Canvas is clicked', () => {

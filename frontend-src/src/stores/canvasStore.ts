@@ -8,7 +8,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
 } from '@xyflow/react'
-import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus } from '@/types'
+import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus, FloorMapConfig } from '@/types'
 import { generateUUID } from '@/utils/uuid'
 import { normalizeHandle, removedHandleIds, handleCountField, sideDefault, handleId, SIDES } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
@@ -28,6 +28,14 @@ interface CanvasState {
   scanEventTs: number
   // Live per-service status overlay (not persisted), keyed via serviceStatusKey.
   serviceStatuses: Record<string, ServiceStatus>
+
+  floorMap: FloorMapConfig | null
+  setFloorMap: (config: FloorMapConfig | null) => void
+  updateFloorMap: (patch: Partial<FloorMapConfig>) => void
+  // Bumped when the user double-clicks the floor plan on the canvas, asking the
+  // Sidebar to open the active canvas's edit modal (floor plan section).
+  floorMapEditNonce: number
+  requestFloorMapEdit: () => void
 
   // History
   past: HistoryEntry[]
@@ -88,6 +96,8 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   hideIp: false,
   scanEventTs: 0,
   serviceStatuses: {},
+  floorMap: null,
+  floorMapEditNonce: 0,
   fitViewPending: false,
 
   past: [],
@@ -653,6 +663,16 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     }),
 
   toggleHideIp: () => set((s) => ({ hideIp: !s.hideIp })),
+
+  setFloorMap: (config) => set({ floorMap: config, hasUnsavedChanges: true }),
+
+  updateFloorMap: (patch) =>
+    set((state) => ({
+      floorMap: state.floorMap ? { ...state.floorMap, ...patch } : null,
+      hasUnsavedChanges: true,
+    })),
+
+  requestFloorMapEdit: () => set((s) => ({ floorMapEditNonce: s.floorMapEditNonce + 1 })),
 
   loadCanvas: (nodes, edges) => {
     // React Flow requires parents before children in the array
