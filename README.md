@@ -1,42 +1,50 @@
-# Homelable for Home Assistant
+<h1 align="center"><img src="docs/logo/icon-inline.svg" alt="Homelable" width="58" align="middle" />&nbsp;Homelable for Home Assistant</h1>
 
+<p align="center">
+  <strong>Visualize &amp; monitor your homelab network as an interactive topology inside Home Assistant</strong>
+</p>
 
-Visualize and monitor your homelab network as an interactive topology — inside
-Home Assistant.
+<p align="center">
+  <a href="https://hacs.xyz/"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5.svg" alt="HACS Custom" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/releases/latest"><img src="https://img.shields.io/github/v/release/Pouzor/homelable-hacs" alt="Latest release" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/actions/workflows/validate.yml"><img src="https://img.shields.io/github/actions/workflow/status/Pouzor/homelable-hacs/validate.yml?branch=main&amp;label=validate" alt="Validate status" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/issues"><img src="https://img.shields.io/github/issues/Pouzor/homelable-hacs" alt="Issues" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/stargazers"><img src="https://img.shields.io/github/stars/Pouzor/homelable-hacs?style=social" alt="Stars" /></a>
+  <a href="https://github.com/Pouzor/homelable-hacs/network/members"><img src="https://img.shields.io/github/forks/Pouzor/homelable-hacs?style=social" alt="Forks" /></a>
+</p>
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+<p align="center">
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#scanner-privileges">Scanner Privileges</a> ·
+  <a href="#roadmap">Roadmap</a>
+</p>
+
+## About
 
 This is the Home Assistant integration for
 [Homelable](https://github.com/Pouzor/homelable), packaged as a custom
-repository for [HACS](https://hacs.xyz/). 
+repository for [HACS](https://hacs.xyz/).
 
-Need the standalone (Docker / LXC /
-Web) version instead? See [Pouzor/homelable](https://github.com/Pouzor/homelable).
+Visualize and monitor your homelab network as an interactive topology, right
+inside Home Assistant: pan/zoom/drag a full Lovelace panel, discover devices
+with a pure-Python scanner (no nmap, no root), watch live status, and import
+your Zigbee, Z-Wave, and Proxmox inventories.
+
+Need the standalone (Docker / LXC / Web) version instead? See
+[Pouzor/homelable](https://github.com/Pouzor/homelable).
 
 ---
 
 ## Features
 
-- **Interactive topology** as a full Lovelace panel — pan, zoom, drag, group.
-- **Network discovery** — pure-Python ping sweep + ARP cache + TCP service
-  detection + mDNS / zeroconf. No nmap, no external binaries, works without root.
-- **Live status checks** via ping, HTTP(S), TCP, SSH, Prometheus, or health endpoint.
-- **Rich modeling**: 20 device node types (ISP, router, firewall, switch, server,
-  Proxmox, VM, LXC, NAS, IoT, access point, camera, printer, computer, laptop,
-  mobile, CPL/powerline, Docker host, Docker container, generic) plus 3 Zigbee
-  types, and 7 edge types (ethernet, Wi-Fi, IoT, VLAN, virtual, cluster, fibre).
-- **Zigbee2MQTT import**: fetch your Zigbee mesh through HA's MQTT integration
-  and add coordinator / routers / end devices to the canvas. No extra broker
-  config — uses the broker HA already talks to.
-- **Proxmox VE import**: read hosts, VMs, and LXC containers from the Proxmox
-  REST API with a read-only API token, dropped onto the canvas as typed nodes
-  with run state and hardware specs (vCPU / RAM / disk). Guests link to their
-  host, cluster hosts chain together, and a device also found by a network scan
-  is merged (by MAC) into a single inventory row instead of duplicating. Optional
-  auto-sync re-imports on a schedule. Configure the token in the integration
-  options; a read-only `PVEAuditor` role at path `/` is enough.
-- **Multiple canvases** (soon).
+From a **network scanner**  and **Zigbee / Z-Wave / Proxmox** imports to **live status monitoring**, floor plans, multiple canvases and PNG/SVG export, Homelable maps and watches your whole homelab inside Home Assistant.
+
+Every feature, with how to turn it on and use it, is described in **[FEATURES.md](./FEATURES.md)**.
 
 ---
 
