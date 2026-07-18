@@ -65,6 +65,7 @@ const DEVICE_ZWAVE = {
 const baseProps = { open: true, onClose: vi.fn() }
 const mockPending = vi.mocked(scanApi.pending)
 const mockHidden = vi.mocked(scanApi.hidden)
+const mockBulkApprove = vi.mocked(scanApi.bulkApprove)
 
 describe('PendingDevicesModal — Device Inventory', () => {
   beforeEach(() => {
@@ -182,5 +183,35 @@ describe('PendingDevicesModal — Device Inventory', () => {
     render(<PendingDevicesModal {...baseProps} />)
     await waitFor(() => expect(screen.getByTestId('pending-card-dev-z')).toBeInTheDocument())
     expect(screen.getByText('Z-WAVE')).toBeInTheDocument()
+  })
+
+  it('keeps approved devices listed after bulk approve (reloads, not strips)', async () => {
+    // After approve, pending() still returns the rows (now on-canvas w/ badge),
+    // so stripping them locally made the inventory go blank until reopen.
+    mockPending
+      .mockResolvedValueOnce({ data: [DEVICE_IP, DEVICE_NOSVC] } as never)
+      .mockResolvedValue({ data: [
+        { ...DEVICE_IP, canvas_count: 1 },
+        { ...DEVICE_NOSVC, canvas_count: 1 },
+      ] } as never)
+    mockBulkApprove.mockResolvedValue({ data: {
+      approved: 2,
+      device_ids: ['dev-a', 'dev-b'],
+      node_ids: ['n-a', 'n-b'],
+      edges: [],
+      edges_created: 0,
+    } } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Select mode' }))
+    fireEvent.click(screen.getByTestId('pending-card-dev-a'))
+    fireEvent.click(screen.getByTestId('pending-card-dev-b'))
+    fireEvent.click(screen.getByRole('button', { name: /Approve \(2\)/ }))
+    await waitFor(() => expect(mockBulkApprove).toHaveBeenCalled())
+    // Reloaded (initial + post-approve), so rows stay visible with a fresh
+    // canvas_count instead of the list going empty.
+    await waitFor(() => expect(mockPending).toHaveBeenCalledTimes(2))
+    expect(screen.getByTestId('pending-card-dev-a')).toBeInTheDocument()
+    expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument()
   })
 })
