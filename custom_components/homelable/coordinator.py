@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Homelable."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import uuid
@@ -206,10 +207,17 @@ class HomelableCoordinator(DataUpdateCoordinator):
             self.get_scan_ranges()
         )
         results: dict[str, dict[str, Any]] = {}
+        # Build the checks first, then run them all concurrently. Sequential
+        # awaits let a handful of offline hosts stack their timeouts and blow
+        # past HA's 60s setup deadline (issue #51 → CancelledError at startup).
+        node_ids: list[str] = []
+        tasks: list[Any] = []
         for node in self._all_canvas_nodes():
             node_id = node.get("id")
             if not node_id or node_id in results:
                 continue
+            # Reserve the entry now so a node id appears once even if it recurs.
+            results[node_id] = {}
             # The frontend serializes nodes flat (top-level ip/hostname/...);
             # legacy/test data may put them under `data`. Read both.
             data = node.get("data") or {}
@@ -226,16 +234,24 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 or data.get("hostname")
             )
             ip = node.get("ip") or data.get("ip")
-            try:
-                results[node_id] = await status_checker.check_node(
+            node_ids.append(node_id)
+            tasks.append(
+                status_checker.check_node(
                     check, target, ip, allowed_networks=allowed_networks
                 )
-            except Exception as exc:
-                _LOGGER.debug("Status check error for %s: %s", node_id, exc)
-                results[node_id] = {
-                    "status": "unknown",
-                    "response_time_ms": None,
-                }
+            )
+
+        if tasks:
+            checked = await asyncio.gather(*tasks, return_exceptions=True)
+            for node_id, res in zip(node_ids, checked, strict=True):
+                if isinstance(res, Exception):
+                    _LOGGER.debug("Status check error for %s: %s", node_id, res)
+                    results[node_id] = {
+                        "status": "unknown",
+                        "response_time_ms": None,
+                    }
+                else:
+                    results[node_id] = res
 
         # Persist last_seen on every node a check just found up (handles nodes
         # copied across designs — matched by id, not the de-duped loop above).

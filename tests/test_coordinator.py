@@ -517,6 +517,76 @@ async def test_async_update_data_runs_status_check_per_node(coord) -> None:  # n
 
 
 @pytest.mark.asyncio
+async def test_async_update_data_runs_checks_concurrently(coord) -> None:  # noqa: ANN001
+    """Regression for #51: node checks must run in parallel, not serially.
+
+    Each fake check blocks until every check has started. A sequential loop
+    would deadlock (later checks never start), tripping the timeout below.
+    """
+    import asyncio
+
+    nodes = [
+        {"id": f"n{i}", "type": "server", "position": {"x": 0, "y": 0},
+         "data": {"ip": f"10.0.0.{i}", "check_method": "ping"}}
+        for i in range(5)
+    ]
+    await coord.save_canvas(
+        {"nodes": nodes, "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
+    )
+
+    started = 0
+    all_started = asyncio.Event()
+
+    async def _fake_check(method, target, ip, **_kw):
+        nonlocal started
+        started += 1
+        if started == len(nodes):
+            all_started.set()
+        await all_started.wait()
+        return {"status": "online", "response_time_ms": 5}
+
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        _fake_check,
+    ):
+        result = await asyncio.wait_for(coord._async_update_data(), timeout=5)
+
+    assert len(result) == len(nodes)
+    assert all(r["status"] == "online" for r in result.values())
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_isolates_check_exceptions(coord) -> None:  # noqa: ANN001
+    """A single failing check must not sink the rest of the batch (#51)."""
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {"id": "ok", "type": "server", "position": {"x": 0, "y": 0},
+                 "data": {"ip": "10.0.0.1", "check_method": "ping"}},
+                {"id": "boom", "type": "server", "position": {"x": 0, "y": 0},
+                 "data": {"ip": "10.0.0.2", "check_method": "ping"}},
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+
+    async def _fake_check(method, target, ip, **_kw):
+        if ip == "10.0.0.2":
+            raise RuntimeError("ping blew up")
+        return {"status": "online", "response_time_ms": 5}
+
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        _fake_check,
+    ):
+        result = await coord._async_update_data()
+
+    assert result["ok"]["status"] == "online"
+    assert result["boom"]["status"] == "unknown"
+
+
+@pytest.mark.asyncio
 async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  # noqa: ANN001
     pending = await coord._get_pending()
     pending["devices"].append(
