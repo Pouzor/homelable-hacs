@@ -290,11 +290,14 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       hostname: device.hostname ?? undefined,
       status: wireless ? 'online' : 'unknown',
       services: (device.services ?? []) as ServiceInfo[],
+      // Non-wireless devices keep the hidden rows the backend already put on
+      // the pending device (e.g. Proxmox VMID/CPU/RAM/Disk/Kind/Source) and add
+      // MAC — rebuilding from scratch would drop the Proxmox specs.
       properties: zwave
         ? buildZwaveProperties(device)
         : isZigbeeType(type)
           ? buildZigbeeProperties(device)
-          : buildMacProperty(device.mac),
+          : [...(device.properties ?? []), ...buildMacProperty(device.mac)],
     }
     try {
       const res = await scanApi.approve(device.id, { ...nodeData, force }, activeDesignId)
@@ -388,11 +391,12 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
             hostname: d.hostname ?? undefined,
             status: wireless ? ('online' as const) : ('unknown' as const),
             services: (d.services ?? []) as ServiceInfo[],
+            // Keep the backend's hidden rows (Proxmox specs) and add MAC.
             properties: zwave
               ? buildZwaveProperties(d)
               : isZigbeeType(type)
                 ? buildZigbeeProperties(d)
-                : buildMacProperty(d.mac),
+                : [...(d.properties ?? []), ...buildMacProperty(d.mac)],
           },
         })
       })

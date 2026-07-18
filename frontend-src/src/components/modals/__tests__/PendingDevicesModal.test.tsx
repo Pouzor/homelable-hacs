@@ -4,9 +4,12 @@ import { PendingDevicesModal } from '../PendingDevicesModal'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), message: vi.fn(), info: vi.fn() } }))
 
-const { mockSetSelectedNode } = vi.hoisted(() => ({ mockSetSelectedNode: vi.fn() }))
+const { mockSetSelectedNode, mockAddNode } = vi.hoisted(() => ({
+  mockSetSelectedNode: vi.fn(),
+  mockAddNode: vi.fn(),
+}))
 vi.mock('@/stores/canvasStore', () => {
-  const state = { addNode: vi.fn(), scanEventTs: 0, setSelectedNode: mockSetSelectedNode }
+  const state = { addNode: mockAddNode, scanEventTs: 0, setSelectedNode: mockSetSelectedNode }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const useCanvasStore: any = (sel?: any) => (sel ? sel(state) : state)
   useCanvasStore.setState = vi.fn()
@@ -304,5 +307,53 @@ describe('PendingDevicesModal — duplicate approve prompt', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Go to existing node/ }))
     expect(mockSetSelectedNode).toHaveBeenCalledWith('n-existing')
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('PendingDevicesModal — preserves backend node properties (Proxmox)', () => {
+  // A Proxmox guest carries hidden spec rows on the pending device; approve must
+  // put them on the canvas node, not rebuild from scratch (which dropped them).
+  const PROXMOX_DEVICE = {
+    id: 'dev-px', ip: '192.168.1.112', mac: 'bc:24:11:4f:12:81', hostname: 'glpi',
+    os: null, services: [], suggested_type: 'server', status: 'pending',
+    discovery_source: 'proxmox', discovery_sources: ['proxmox'], source: 'proxmox',
+    discovered_at: '2020-01-01T00:00:00Z',
+    properties: [
+      { key: 'VMID', value: '102', icon: null, visible: false },
+      { key: 'Kind', value: 'LXC', icon: null, visible: false },
+      { key: 'Source', value: 'Proxmox VE', icon: null, visible: false },
+    ],
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPending.mockResolvedValue({ data: [PROXMOX_DEVICE] } as never)
+    mockHidden.mockResolvedValue({ data: [] } as never)
+  })
+
+  it('single approve carries the Proxmox spec rows onto the node', async () => {
+    mockApprove.mockResolvedValue({ data: { node_id: 'n-px', edges: [], edges_created: 0 } } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-px')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('pending-card-dev-px'))
+    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }))
+    await waitFor(() => expect(mockAddNode).toHaveBeenCalled())
+    const keys = (mockAddNode.mock.calls[0][0].data.properties as { key: string }[]).map((p) => p.key)
+    expect(keys).toEqual(expect.arrayContaining(['VMID', 'Kind', 'Source']))
+  })
+
+  it('bulk approve carries the Proxmox spec rows onto each node', async () => {
+    mockBulkApprove.mockResolvedValue({ data: {
+      approved: 1, device_ids: ['dev-px'], node_ids: ['n-px'],
+      edges: [], edges_created: 0, skipped: [], skipped_devices: [],
+    } } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-dev-px')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Select mode' }))
+    fireEvent.click(screen.getByTestId('pending-card-dev-px'))
+    fireEvent.click(screen.getByRole('button', { name: /Approve \(1\)/ }))
+    await waitFor(() => expect(mockAddNode).toHaveBeenCalled())
+    const keys = (mockAddNode.mock.calls[0][0].data.properties as { key: string }[]).map((p) => p.key)
+    expect(keys).toEqual(expect.arrayContaining(['VMID', 'Kind', 'Source']))
   })
 })
