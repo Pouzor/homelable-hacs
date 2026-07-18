@@ -4,7 +4,7 @@ import {
   Search, RefreshCw, X, CheckCircle2, EyeOff, Trash2, Loader2, ServerCog,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { scanApi } from '@/api/ha'
+import { scanApi, type DuplicateNodeConflict } from '@/api/ha'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -141,8 +141,12 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   // Optionally restrict to devices that have at least one detected service.
   const [withServicesOnly, setWithServicesOnly] = useState(false)
   const { addNode, scanEventTs } = useCanvasStore()
+  const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
   const activeDesignId = useDesignStore((s) => s.activeDesignId)
   const highlightRef = useRef<HTMLButtonElement>(null)
+  // Set when a single approve is refused because the same host is already on
+  // this design — the user decides: link to the existing node or duplicate.
+  const [dupPrompt, setDupPrompt] = useState<{ device: PendingDevice; conflict: DuplicateNodeConflict } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -270,28 +274,41 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
     }
   }
 
-  const handleApprove = async (device: PendingDevice) => {
+  // force=true is sent only after the user confirms they want a duplicate node
+  // on this design (the backend otherwise returns a `duplicate` conflict so we
+  // can ask instead of silently doubling the card).
+  const approveDevice = async (device: PendingDevice, force = false) => {
+    const fallbackLabel = deviceLabel(device)
+    const type = (device.suggested_type ?? 'generic') as NodeType
+    const zwave = isZwaveType(type)
+    const wireless = isZigbeeType(type) || zwave
+    const nodeData = {
+      label: fallbackLabel,
+      type,
+      ip: device.ip ?? undefined,
+      mac: device.mac ?? undefined,
+      hostname: device.hostname ?? undefined,
+      status: wireless ? 'online' : 'unknown',
+      services: (device.services ?? []) as ServiceInfo[],
+      properties: zwave
+        ? buildZwaveProperties(device)
+        : isZigbeeType(type)
+          ? buildZigbeeProperties(device)
+          : buildMacProperty(device.mac),
+    }
     try {
-      const fallbackLabel = deviceLabel(device)
-      const type = (device.suggested_type ?? 'generic') as NodeType
-      const zwave = isZwaveType(type)
-      const wireless = isZigbeeType(type) || zwave
-      const nodeData = {
-        label: fallbackLabel,
-        type,
-        ip: device.ip ?? undefined,
-        mac: device.mac ?? undefined,
-        hostname: device.hostname ?? undefined,
-        status: wireless ? 'online' : 'unknown',
-        services: (device.services ?? []) as ServiceInfo[],
-        properties: zwave
-          ? buildZwaveProperties(device)
-          : isZigbeeType(type)
-            ? buildZigbeeProperties(device)
-            : buildMacProperty(device.mac),
+      const res = await scanApi.approve(device.id, { ...nodeData, force }, activeDesignId)
+      // Same host already on this design: ask before creating a second card
+      // (only on the first, non-forced attempt).
+      if (res.data.duplicate && !force) {
+        // Close the device-detail modal first so the prompt isn't trapped
+        // behind another open dialog.
+        setSelected(null)
+        setDupPrompt({ device, conflict: res.data.duplicate })
+        return
       }
-      const res = await scanApi.approve(device.id, nodeData, activeDesignId)
       const nodeId = res.data.node_id
+      if (!nodeId) { toast.error('Failed to approve device'); return }
       addNode({
         id: nodeId,
         type: nodeData.type,
@@ -299,15 +316,26 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
         data: { ...nodeData, status: wireless ? ('online' as const) : ('unknown' as const) },
       })
       injectAutoEdges(res.data.edges)
-      const extra = res.data.edges_created > 0 ? ` (+${res.data.edges_created} link${res.data.edges_created !== 1 ? 's' : ''})` : ''
+      const created = res.data.edges_created ?? 0
+      const extra = created > 0 ? ` (+${created} link${created !== 1 ? 's' : ''})` : ''
       toast.success(`Approved ${nodeData.label}${extra}`)
       // Keep the row (now on-canvas, shown with an "In N canvas" badge); reload
       // for a fresh canvas_count rather than dropping it until reopen.
       setSelected(null)
+      setDupPrompt(null)
       await load()
     } catch {
       toast.error('Failed to approve device')
     }
+  }
+
+  const handleApprove = (device: PendingDevice) => approveDevice(device, false)
+
+  const goToExistingNode = (nodeId: string) => {
+    setSelectedNode(nodeId)
+    setDupPrompt(null)
+    setSelected(null)
+    onClose()
   }
 
   const handleHide = async (device: PendingDevice) => {
@@ -376,6 +404,17 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       await load()
       const linkExtra = res.data.edges_created > 0 ? ` (+${res.data.edges_created} link${res.data.edges_created !== 1 ? 's' : ''})` : ''
       toast.success(`Approved ${res.data.approved} device${res.data.approved !== 1 ? 's' : ''}${linkExtra}`)
+      // Bulk can't prompt per-device, so report the ones already on this canvas
+      // (skipped as duplicates) instead of silently dropping them.
+      const dupes = res.data.skipped_devices ?? []
+      if (dupes.length > 0) {
+        const names = dupes.slice(0, 3).map((d) => d.label).join(', ')
+        const more = dupes.length > 3 ? ` +${dupes.length - 3} more` : ''
+        toast.info(
+          `${dupes.length} already on this canvas, skipped: ${names}${more}`,
+          { description: 'Matched an existing node by IP/MAC/IEEE on this design.' },
+        )
+      }
     } catch {
       toast.error('Failed to bulk approve devices')
     }
@@ -621,6 +660,61 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
                   Restore ({selectedIds.size})
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Duplicate confirmation: the host is already on this design. Ask
+              before creating a second card — never silently drop or duplicate.
+              Rendered INSIDE the inventory DialogContent on purpose: an open
+              dialog marks outside content inert/aria-hidden, so a sibling
+              overlay would be unclickable. Keeping it in the dialog's own
+              subtree avoids that. */}
+          {dupPrompt && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Device already on this canvas"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+              onClick={() => setDupPrompt(null)}
+            >
+              <div
+                className="w-full max-w-md rounded-lg border border-border bg-[#161b22] p-5 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="text-base font-semibold text-foreground mb-3">Device already on this canvas</h2>
+                <div className="text-sm text-muted-foreground space-y-3">
+                  <p>
+                    <span className="text-foreground font-medium break-all">{deviceLabel(dupPrompt.device)}</span>{' '}
+                    matches a node already on this design
+                    {' '}(<span className="uppercase text-[11px] font-mono">{dupPrompt.conflict.match}</span>{' '}
+                    <span className="font-mono text-foreground">{dupPrompt.conflict.value}</span>)
+                    {dupPrompt.conflict.existing_label ? (
+                      <>: <span className="text-foreground font-medium break-all">{dupPrompt.conflict.existing_label}</span></>
+                    ) : null}.
+                  </p>
+                  <p>Add it again anyway, or jump to the existing node?</p>
+                  <div className="flex flex-wrap justify-end gap-2 pt-1">
+                    <button
+                      onClick={() => setDupPrompt(null)}
+                      className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => goToExistingNode(dupPrompt.conflict.existing_node_id)}
+                      className="text-xs px-3 py-1.5 rounded bg-[#00d4ff]/20 text-[#00d4ff] hover:bg-[#00d4ff]/30 font-medium transition-colors"
+                    >
+                      Go to existing node
+                    </button>
+                    <button
+                      onClick={() => approveDevice(dupPrompt.device, true)}
+                      className="text-xs px-3 py-1.5 rounded bg-[#e3b341]/20 text-[#e3b341] hover:bg-[#e3b341]/30 font-medium transition-colors"
+                    >
+                      Add duplicate anyway
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </DialogContent>

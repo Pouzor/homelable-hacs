@@ -337,6 +337,12 @@ async def ws_scan_approve(
     if node is None:
         connection.send_error(msg["id"], "not_found", "Device not found")
         return
+    # A same-design duplicate isn't placed automatically: return the conflict so
+    # the panel can ask (go to existing / add duplicate anyway). WS send_error
+    # can't carry a structured body, so this rides a normal result instead.
+    if "duplicate" in node:
+        connection.send_result(msg["id"], {"duplicate": node["duplicate"]})
+        return
     auto_edge = await coord._create_wireless_parent_edge(
         node, overrides.get("design_id")
     )

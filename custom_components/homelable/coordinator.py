@@ -130,6 +130,17 @@ def _add_source(sources: list[str] | None, source: str | None) -> list[str]:
     return out
 
 
+def _ip_tokens(ip: str | None) -> list[str]:
+    """Split a node/device ``ip`` field into individual, trimmed addresses.
+
+    The canvas stores several addresses in one comma-separated string once a
+    user edits a node to add e.g. an IPv6 address (``"fe80::1, 192.168.1.5"``).
+    Matching a scanned device against that field must compare per-address, or
+    the device looks absent from the canvas (issue #258).
+    """
+    return [t.strip() for t in ip.split(",") if t.strip()] if ip else []
+
+
 def _match_pending_by_ip_or_mac(
     devices: list[dict[str, Any]], ip: str | None, mac: str | None
 ) -> dict[str, Any] | None:
@@ -708,25 +719,35 @@ class HomelableCoordinator(DataUpdateCoordinator):
     ) -> tuple[
         dict[str, list[tuple[str, dict[str, Any]]]],
         dict[str, list[tuple[str, dict[str, Any]]]],
+        dict[str, list[tuple[str, dict[str, Any]]]],
     ]:
-        """Index canvas nodes by ip / ieee_address → list of (design_id, node).
+        """Index canvas nodes by ip-token / mac / ieee_address → (design_id, node).
 
         Backs both the canvas-count badge and the linked-node timestamps on the
         inventory. Nodes are stored flat (top-level ip/ieee_address) but may also
         carry the values under `data` after a frontend round-trip, so read both.
+
+        IP matching is per-address: a node's ``ip`` may hold several
+        comma-separated addresses (an IPv6 added before the IPv4), so we index
+        each token, not the raw string. MAC is a stable identifier immune to
+        such IP edits, so it is matched too — cumulatively with ip/ieee (#258).
         """
         by_ip: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+        by_mac: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         by_ieee: dict[str, list[tuple[str, dict[str, Any]]]] = {}
         for design_id, canvas in (self._canvases or {}).items():
             for n in canvas.get("nodes", []):
                 data = n.get("data") or {}
                 ip = n.get("ip") or data.get("ip")
+                mac = n.get("mac") or data.get("mac")
                 ieee = n.get("ieee_address") or data.get("ieee_address")
-                if ip:
-                    by_ip.setdefault(ip, []).append((design_id, n))
+                for tok in _ip_tokens(ip):
+                    by_ip.setdefault(tok, []).append((design_id, n))
+                if mac:
+                    by_mac.setdefault(mac, []).append((design_id, n))
                 if ieee:
                     by_ieee.setdefault(ieee, []).append((design_id, n))
-        return by_ip, by_ieee
+        return by_ip, by_mac, by_ieee
 
     @staticmethod
     def _agg_timestamp(values: list[str | None], *, newest: bool) -> str | None:
@@ -747,24 +768,85 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return None
         return (max(parsed) if newest else min(parsed))[1]
 
-    def _design_placed_keys(
+    def _design_placed_index(
         self, design_id: str | None
-    ) -> tuple[set[str], set[str]]:
-        """(ips, ieee_addresses) already placed on a design's canvas."""
-        ips: set[str] = set()
-        ieees: set[str] = set()
+    ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+        """(ip-token, mac, ieee) → existing node id already on a design's canvas.
+
+        IPs are indexed per comma-separated token so a node whose ip is
+        ``"fe80::1, 192.168.1.5"`` still matches a device scanned as the plain
+        ``192.168.1.5`` (issue #258). MAC is matched too — stable across IP
+        edits. The node id lets bulk-approve point the user at what it skipped.
+        """
+        by_ip: dict[str, str] = {}
+        by_mac: dict[str, str] = {}
+        by_ieee: dict[str, str] = {}
         if not design_id:
-            return ips, ieees
+            return by_ip, by_mac, by_ieee
         canvas = (self._canvases or {}).get(design_id) or {}
         for n in canvas.get("nodes", []):
             data = n.get("data") or {}
+            nid = n.get("id")
             ip = n.get("ip") or data.get("ip")
+            mac = n.get("mac") or data.get("mac")
             ieee = n.get("ieee_address") or data.get("ieee_address")
-            if ip:
-                ips.add(ip)
+            for tok in _ip_tokens(ip):
+                by_ip.setdefault(tok, nid)
+            if mac:
+                by_mac.setdefault(mac, nid)
             if ieee:
-                ieees.add(ieee)
-        return ips, ieees
+                by_ieee.setdefault(ieee, nid)
+        return by_ip, by_mac, by_ieee
+
+    def _find_duplicate_node(
+        self,
+        design_id: str | None,
+        ip: str | None,
+        mac: str | None,
+        ieee: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Conflict details if an equivalent node (same ieee, ip OR mac) already
+        sits on ``design_id``, else ``None``.
+
+        Scoped to a single design on purpose: the same device may legitimately
+        appear on several canvases (one node per design). Only a second node for
+        the same ieee/ip/mac on the *same* design is a duplicate — which the
+        approve path turns into a prompt so the UI can offer "go to existing" vs
+        "add duplicate anyway", uniformly for IEEE (Zigbee/Z-Wave) and plain
+        IP/ARP hosts.
+
+        IP matching is per-token and whole-address: a node at ``10.0.0.40`` is
+        not a duplicate of a device at ``10.0.0.4`` (guards the substring false
+        positive). Prefers ieee > ip > mac when several identifiers match.
+        """
+        if not design_id:
+            return None
+        ip_toks = _ip_tokens(ip)
+        canvas = (self._canvases or {}).get(design_id) or {}
+        for n in canvas.get("nodes", []):
+            data = n.get("data") or {}
+            n_ieee = n.get("ieee_address") or data.get("ieee_address")
+            n_mac = n.get("mac") or data.get("mac")
+            n_toks = set(_ip_tokens(n.get("ip") or data.get("ip")))
+            match: str | None = None
+            value: str | None = None
+            if ieee and n_ieee == ieee:
+                match, value = "ieee", n_ieee
+            else:
+                hit = next((t for t in ip_toks if t in n_toks), None)
+                if hit is not None:
+                    match, value = "ip", hit
+                elif mac and n_mac == mac:
+                    match, value = "mac", mac
+            if match is not None:
+                return {
+                    "duplicate": True,
+                    "existing_node_id": n.get("id"),
+                    "existing_label": n.get("label") or (data.get("label")),
+                    "match": match,
+                    "value": value,
+                }
+        return None
 
     async def list_pending(
         self, *, status: str = "pending", source: str | None = None
@@ -795,7 +877,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if source is not None:
             out = [d for d in out if (d.get("source") or "scan") == source]
 
-        by_ip, by_ieee = self._canvas_node_index()
+        by_ip, by_mac, by_ieee = self._canvas_node_index()
         wire: list[dict[str, Any]] = []
         for d in out:
             # Copy so the transient fields never leak back into the store.
@@ -804,9 +886,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
             ieee = fd.get("ieee_address")
             if ieee:
                 matched += by_ieee.get(ieee, [])
-            if fd.get("ip"):
-                matched += by_ip.get(fd["ip"], [])
-            # De-duplicate nodes matched by both ip and ieee_address.
+            if fd.get("mac"):
+                matched += by_mac.get(fd["mac"], [])
+            for tok in _ip_tokens(fd.get("ip")):
+                matched += by_ip.get(tok, [])
+            # De-duplicate nodes matched by more than one identifier.
             matched = list({id(n): (did, n) for did, n in matched}.values())
             designs = {did for did, _ in matched}
             nodes = [n for _, n in matched]
@@ -1059,6 +1143,22 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # vendor, lqi, parent_id) under data_extras; merge them so the node on
         # the canvas has everything the zigbee/zwave node component renders.
         data_extras = device.get("data_extras") or {}
+        # A device already on THIS design (matched by ieee, ip OR mac) is NOT
+        # placed again automatically: the user might genuinely want a second
+        # card, or might be re-approving by mistake. Return the conflict + the
+        # existing node so the panel can ask — identical handling for IEEE
+        # (Zigbee/Z-Wave) and plain IP/ARP hosts. force=True (set after the user
+        # confirms) skips this. The same device on a *different* design is valid
+        # (one node per canvas), so this is scoped to design_id.
+        if not overrides.get("force"):
+            conflict = self._find_duplicate_node(
+                design_id,
+                overrides.get("ip") or device.get("ip"),
+                overrides.get("mac") or device.get("mac"),
+                data_extras.get("ieee_address"),
+            )
+            if conflict is not None:
+                return {"duplicate": conflict}
         # Surface Identity/Vendor/Model/LQI as right-panel property rows (hidden
         # by default — users opt in to showing them on the canvas card). Z-Wave
         # has no LQI row.
@@ -1143,24 +1243,43 @@ class HomelableCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         """Approve several devices onto the active design in one pass.
 
-        Skips any device already placed on that design (matched by ip or
-        ieee_address) — including a duplicate selection within this same batch —
-        so a re-approve or a doubled id never creates a duplicate node. Canvas
+        Skips any device already placed on that design (matched by ip-token, mac
+        or ieee_address) — including a duplicate selection within this same batch
+        — so a re-approve or a doubled id never creates a duplicate node. Canvas
         membership is per-design, so a device already approved onto *another*
         canvas is still placed here.
+
+        Bulk can't prompt per-device the way single approve does, so each skip
+        is also reported in ``skipped_devices`` (with the identifier that matched
+        and the existing node id) instead of being silently dropped.
         """
         overrides = overrides or {}
         await self._ensure_loaded()
         design_id = await self._resolve_design_id(overrides.get("design_id"))
-        placed_ips, placed_ieee = self._design_placed_keys(design_id)
+        placed_ip, placed_mac, placed_ieee = self._design_placed_index(design_id)
         pending = await self._get_pending()
         by_id = {d["id"]: d for d in pending["devices"]}
+        # This method has already decided per-device whether to place, so tell
+        # approve_pending to skip its own duplicate guard (force) — otherwise it
+        # would refuse the very nodes we chose to add.
+        force_overrides = {**overrides, "force": True}
+
+        def _label(device: dict[str, Any]) -> str:
+            extras = device.get("data_extras") or {}
+            return (
+                device.get("hostname")
+                or extras.get("friendly_name")
+                or device.get("ip")
+                or extras.get("ieee_address")
+                or "device"
+            )
 
         nodes: list[dict[str, Any]] = []
         node_ids: list[str] = []
         approved_ids: list[str] = []
         edges: list[dict[str, Any]] = []
         skipped: list[str] = []
+        skipped_devices: list[dict[str, Any]] = []
         not_found: list[str] = []
         for device_id in device_ids:
             device = by_id.get(device_id)
@@ -1168,22 +1287,49 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 not_found.append(device_id)
                 continue
             ip = device.get("ip")
+            mac = device.get("mac")
             ieee = (device.get("data_extras") or {}).get("ieee_address")
-            if (ip and ip in placed_ips) or (ieee and ieee in placed_ieee):
+            # Record which identifier collided so the caller can explain each
+            # skip and link to the node already there (ip > ieee > mac).
+            ip_hit = next((t for t in _ip_tokens(ip) if t in placed_ip), None)
+            if ip_hit is not None:
                 skipped.append(device_id)
+                skipped_devices.append({
+                    "device_id": device_id, "label": _label(device),
+                    "match": "ip", "value": ip_hit,
+                    "existing_node_id": placed_ip[ip_hit],
+                })
                 continue
-            node = await self.approve_pending(device_id, overrides)
+            if ieee and ieee in placed_ieee:
+                skipped.append(device_id)
+                skipped_devices.append({
+                    "device_id": device_id, "label": _label(device),
+                    "match": "ieee", "value": ieee,
+                    "existing_node_id": placed_ieee[ieee],
+                })
+                continue
+            if mac and mac in placed_mac:
+                skipped.append(device_id)
+                skipped_devices.append({
+                    "device_id": device_id, "label": _label(device),
+                    "match": "mac", "value": mac,
+                    "existing_node_id": placed_mac[mac],
+                })
+                continue
+            node = await self.approve_pending(device_id, force_overrides)
             if node is None:
                 not_found.append(device_id)
                 continue
             nodes.append(node)
             node_ids.append(node["id"])
             approved_ids.append(device_id)
-            # Track within the batch so a repeated ip/ieee isn't placed twice.
-            if ip:
-                placed_ips.add(ip)
+            # Track within the batch so a repeated ip/mac/ieee isn't placed twice.
+            for tok in _ip_tokens(ip):
+                placed_ip[tok] = node["id"]
+            if mac:
+                placed_mac[mac] = node["id"]
             if ieee:
-                placed_ieee.add(ieee)
+                placed_ieee[ieee] = node["id"]
             auto_edge = await self._create_wireless_parent_edge(node, design_id)
             if auto_edge:
                 edges.append(auto_edge)
@@ -1196,6 +1342,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "edges": edges,
             "edges_created": len(edges),
             "skipped": skipped,
+            "skipped_devices": skipped_devices,
             "not_found": not_found,
         }
 
@@ -2018,7 +2165,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             links_by_ieee.setdefault(b, []).append(link)
         cluster_members = set(peers_by_ieee)
 
-        by_ip, by_ieee = self._canvas_node_index()
+        by_ip, _, by_ieee = self._canvas_node_index()
         by_mac = self._canvas_index_by_mac()
 
         def _find_pending(
