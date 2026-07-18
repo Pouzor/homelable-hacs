@@ -11,9 +11,12 @@ status_checker). Nothing blocking runs on the event loop.
 import asyncio
 import logging
 import re
+import ssl
 from typing import Any
 
 import httpx
+
+from .status_checker import _verifying_ssl_context
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +61,12 @@ async def probe_port(
     """
     if port in _NON_HTTP_PORTS:
         return None
-    async with httpx.AsyncClient(verify=verify_tls, timeout=_PROBE_TIMEOUT) as client:
+    # A verifying context loads the CA bundle (blocking I/O); build it off the
+    # event loop and reuse it, mirroring status_checker.
+    verify_arg: bool | ssl.SSLContext = verify_tls
+    if verify_tls:
+        verify_arg = await _verifying_ssl_context()
+    async with httpx.AsyncClient(verify=verify_arg, timeout=_PROBE_TIMEOUT) as client:
         for scheme in ("https", "http"):
             result = await _probe_scheme(client, f"{scheme}://{ip}:{port}/")
             if result is not None:

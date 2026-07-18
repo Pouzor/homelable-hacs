@@ -227,6 +227,85 @@ async def test_check_services_returns_one_row_per_service() -> None:
     ]
 
 
+# --- HTTPS verify: SSL context built off the event loop (blocking-call fix) ---
+
+@pytest.fixture(autouse=True)
+def _reset_ssl_context():
+    """Clear the cached SSL context so each test observes a fresh build."""
+    status_checker._ssl_context = None
+    yield
+    status_checker._ssl_context = None
+
+
+@pytest.mark.asyncio
+async def test_verifying_ssl_context_built_in_thread_and_cached() -> None:
+    """The verifying context is created via a thread (never load CA on the loop)
+    and reused on subsequent calls."""
+    import ssl
+
+    with patch.object(
+        status_checker.asyncio, "to_thread", wraps=status_checker.asyncio.to_thread
+    ) as to_thread:
+        ctx1 = await status_checker._verifying_ssl_context()
+        ctx2 = await status_checker._verifying_ssl_context()
+
+    assert isinstance(ctx1, ssl.SSLContext)
+    assert ctx1 is ctx2  # cached, not rebuilt
+    to_thread.assert_awaited_once()  # only the first call builds it
+
+
+@pytest.mark.asyncio
+async def test_http_get_verify_passes_ssl_context_not_true() -> None:
+    """_http_get(verify=True) must hand httpx a pre-built SSLContext, so httpx
+    never loads the CA bundle (blocking I/O) on the event loop."""
+    import ssl
+
+    captured: dict = {}
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url):
+            return type("R", (), {"status_code": 200})()
+
+    with patch.object(status_checker.httpx, "AsyncClient", _FakeClient):
+        assert await status_checker._http_get("https://example.com", verify=True)
+
+    assert isinstance(captured["verify"], ssl.SSLContext)
+    assert captured["verify"] is not True
+
+
+@pytest.mark.asyncio
+async def test_http_get_no_verify_stays_false() -> None:
+    """verify=False keeps verify False — no SSL context, no CA load at all."""
+    captured: dict = {}
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url):
+            return type("R", (), {"status_code": 204})()
+
+    with patch.object(status_checker.httpx, "AsyncClient", _FakeClient):
+        assert await status_checker._http_get("http://example.com", verify=False)
+
+    assert captured["verify"] is False
+
+
 @pytest.mark.asyncio
 async def test_check_services_empty() -> None:
     assert await status_checker.check_services("10.0.0.5", []) == []
