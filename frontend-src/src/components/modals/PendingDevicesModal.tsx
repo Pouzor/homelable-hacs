@@ -301,8 +301,10 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       injectAutoEdges(res.data.edges)
       const extra = res.data.edges_created > 0 ? ` (+${res.data.edges_created} link${res.data.edges_created !== 1 ? 's' : ''})` : ''
       toast.success(`Approved ${nodeData.label}${extra}`)
-      setDevices((prev) => prev.filter((d) => d.id !== device.id))
+      // Keep the row (now on-canvas, shown with an "In N canvas" badge); reload
+      // for a fresh canvas_count rather than dropping it until reopen.
       setSelected(null)
+      await load()
     } catch {
       toast.error('Failed to approve device')
     }
@@ -367,8 +369,11 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
         })
       })
       injectAutoEdges(res.data.edges)
-      setDevices((prev) => prev.filter((d) => !ids.includes(d.id)))
+      // Don't strip approved rows locally: the inventory keeps them with an
+      // "In N canvas" badge (that's what showOnCanvas toggles). Reload so they
+      // reappear with a fresh canvas_count instead of vanishing until reopen.
       setSelectedIds(new Set())
+      await load()
       const linkExtra = res.data.edges_created > 0 ? ` (+${res.data.edges_created} link${res.data.edges_created !== 1 ? 's' : ''})` : ''
       toast.success(`Approved ${res.data.approved} device${res.data.approved !== 1 ? 's' : ''}${linkExtra}`)
     } catch {
