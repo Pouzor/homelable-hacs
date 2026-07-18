@@ -1052,3 +1052,205 @@ async def test_approve_batch_skips_device_already_on_target(coord) -> None:  # n
     assert r["skipped"] == ["pd-1"]
     ips = sorted(n["ip"] for n in (await coord.get_canvas(default["id"]))["nodes"])
     assert ips == ["192.168.1.10", "192.168.1.11"]
+
+
+# ─── Duplicate prompt on approve (homelable #260 / #261) ─────────────────────
+
+@pytest.mark.asyncio
+async def test_approve_pending_conflicts_on_existing_ip(coord) -> None:  # noqa: ANN001
+    """A host whose ip already sits on the target design is NOT silently
+    duplicated: approve returns the conflict + existing node so the UI can ask."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.100", "status": "pending", "suggested_type": "server"},
+        {"id": "pd-2", "ip": "192.168.1.100", "status": "pending", "suggested_type": "server"},
+    ]
+    await coord._save_pending()
+    first = await coord.approve_pending("pd-1")
+
+    res = await coord.approve_pending("pd-2")
+    assert "duplicate" in res
+    conflict = res["duplicate"]
+    assert conflict["match"] == "ip"
+    assert conflict["value"] == "192.168.1.100"
+    assert conflict["existing_node_id"] == first["id"]
+    # No second node created; device stays pending until the user decides.
+    assert len((await coord.get_canvas())["nodes"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_conflicts_on_existing_mac(coord) -> None:  # noqa: ANN001
+    """MAC match (device re-IP'd via DHCP) also triggers the duplicate guard."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "10.0.0.9", "mac": "aa:bb:cc:dd:ee:ff", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.55", "mac": "aa:bb:cc:dd:ee:ff", "status": "pending"},
+    ]
+    await coord._save_pending()
+    first = await coord.approve_pending("pd-1")
+
+    res = await coord.approve_pending("pd-2")
+    assert res["duplicate"]["match"] == "mac"
+    assert res["duplicate"]["existing_node_id"] == first["id"]
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_conflicts_on_existing_ieee(coord) -> None:  # noqa: ANN001
+    """IEEE (Zigbee/Z-Wave) uses the same prompt as ip/mac, not an auto-merge."""
+    pending = await coord._get_pending()
+    for did in ("pd-1", "pd-2"):
+        pending["devices"].append({
+            "id": did, "ip": None, "mac": None, "status": "pending",
+            "suggested_type": "zigbee_router", "source": "zigbee",
+            "data_extras": {"ieee_address": "0xZZZ", "parent_id": None},
+        })
+    await coord._save_pending()
+    first = await coord.approve_pending("pd-1")
+
+    res = await coord.approve_pending("pd-2")
+    assert res["duplicate"]["match"] == "ieee"
+    assert res["duplicate"]["value"] == "0xZZZ"
+    assert res["duplicate"]["existing_node_id"] == first["id"]
+    assert len((await coord.get_canvas())["nodes"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_force_creates_duplicate(coord) -> None:  # noqa: ANN001
+    """force=True lets the user place a second card for the same host."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.100", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.100", "status": "pending"},
+    ]
+    await coord._save_pending()
+    await coord.approve_pending("pd-1")
+
+    node = await coord.approve_pending("pd-2", {"force": True})
+    assert "duplicate" not in node
+    assert len((await coord.get_canvas())["nodes"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_same_device_other_design_places(coord) -> None:  # noqa: ANN001
+    """Canvas membership is per-design: a device already on one canvas can be
+    approved onto another (one node per design)."""
+    pending = await coord._get_pending()
+    pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "pending"})
+    await coord._save_pending()
+    default = (await coord.list_designs())[0]
+    other = await coord.create_design("Other")
+
+    await coord.approve_pending("pd-1", {"design_id": default["id"]})
+    node = await coord.approve_pending("pd-1", {"design_id": other["id"]})
+    assert "duplicate" not in node
+    assert len((await coord.get_canvas(other["id"]))["nodes"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_conflicts_on_ip_in_comma_list(coord) -> None:  # noqa: ANN001
+    """The existing node's ip holds an IPv6 before the IPv4 the device scanned
+    as. Per-token matching still catches the duplicate (issue #258)."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "fe80::1, 192.168.1.100", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.100", "status": "pending"},
+    ]
+    await coord._save_pending()
+    await coord.approve_pending("pd-1")
+
+    res = await coord.approve_pending("pd-2")
+    assert res["duplicate"]["match"] == "ip"
+    assert res["duplicate"]["value"] == "192.168.1.100"
+
+
+@pytest.mark.asyncio
+async def test_approve_pending_no_conflict_on_ip_substring(coord) -> None:  # noqa: ANN001
+    """The ip guard matches whole addresses, not substrings: 10.0.0.40 is not a
+    duplicate of 10.0.0.4 (issue #258)."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "10.0.0.40", "status": "pending"},
+        {"id": "pd-2", "ip": "10.0.0.4", "status": "pending"},
+    ]
+    await coord._save_pending()
+    await coord.approve_pending("pd-1")
+
+    node = await coord.approve_pending("pd-2")
+    assert "duplicate" not in node
+    assert len((await coord.get_canvas())["nodes"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_pending_canvas_count_matches_ip_in_comma_list(coord) -> None:  # noqa: ANN001
+    """A node's ip holds several comma-separated addresses (IPv6 added first);
+    the device scanned as the plain IPv4 must still correlate (issue #258)."""
+    pending = await coord._get_pending()
+    pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "approved"})
+    await coord._save_pending()
+    await coord._ensure_loaded()
+    default = coord._designs[0]["id"]
+    coord._canvases[default]["nodes"] = [{"id": "a", "ip": "fe80::1, 192.168.1.100"}]
+
+    d = (await coord.list_pending())[0]
+    assert d["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_pending_canvas_count_correlates_by_mac(coord) -> None:  # noqa: ANN001
+    """Node's ip differs entirely (user edited it) but the MAC still matches:
+    the device is recognised as on the canvas (issue #258)."""
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {"id": "pd-1", "ip": "192.168.1.55", "mac": "aa:bb:cc:dd:ee:ff", "status": "approved"}
+    )
+    await coord._save_pending()
+    await coord._ensure_loaded()
+    default = coord._designs[0]["id"]
+    coord._canvases[default]["nodes"] = [{"id": "a", "ip": "10.9.9.9", "mac": "aa:bb:cc:dd:ee:ff"}]
+
+    d = (await coord.list_pending())[0]
+    assert d["canvas_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_approve_batch_reports_skipped_devices(coord) -> None:  # noqa: ANN001
+    """Bulk can't prompt per-device, so it reports each duplicate it skipped
+    (with the existing node id) instead of silently dropping it."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.10", "hostname": "host-a", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.11", "status": "pending"},
+    ]
+    await coord._save_pending()
+    default = (await coord.list_designs())[0]
+    first = await coord.approve_pending("pd-1", {"design_id": default["id"]})
+
+    r = await coord.approve_batch(["pd-1", "pd-2"], {"design_id": default["id"]})
+    assert r["approved"] == 1
+    assert len(r["skipped_devices"]) == 1
+    entry = r["skipped_devices"][0]
+    assert entry["device_id"] == "pd-1"
+    assert entry["match"] == "ip"
+    assert entry["value"] == "192.168.1.10"
+    assert entry["label"] == "host-a"
+    assert entry["existing_node_id"] == first["id"]
+
+
+@pytest.mark.asyncio
+async def test_approve_batch_skips_device_matching_ip_in_comma_list(coord) -> None:  # noqa: ANN001
+    """The on-canvas node's ip holds an IPv6 before the IPv4; the device scanned
+    as the plain IPv4 is still recognised as already placed (issue #258)."""
+    pending = await coord._get_pending()
+    pending["devices"] += [
+        {"id": "pd-1", "ip": "192.168.1.10", "status": "pending"},
+        {"id": "pd-2", "ip": "192.168.1.11", "status": "pending"},
+    ]
+    await coord._save_pending()
+    await coord._ensure_loaded()
+    default = coord._designs[0]["id"]
+    coord._canvases[default]["nodes"] = [{"id": "a", "ip": "fe80::1, 192.168.1.10"}]
+
+    r = await coord.approve_batch(["pd-1", "pd-2"], {"design_id": default})
+    assert r["approved"] == 1
+    assert r["skipped"] == ["pd-1"]
+    assert r["skipped_devices"][0]["value"] == "192.168.1.10"

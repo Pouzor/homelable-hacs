@@ -85,11 +85,23 @@ async def test_probe_port_skips_non_http_ports() -> None:
 
 
 async def test_probe_port_verify_tls_flag_passed() -> None:
+    # verify_tls=True must hand httpx a pre-built SSLContext (built off the event
+    # loop), never verify=True — which would load the CA bundle on the loop.
+    import ssl
+
     with patch("custom_components.homelable.http_probe.httpx.AsyncClient") as client_cls:
         instance = client_cls.return_value.__aenter__.return_value
         instance.get = AsyncMock(return_value=_response("<title>X</title>"))
         await probe_port("10.0.0.5", 8443, verify_tls=True)
-    assert client_cls.call_args.kwargs["verify"] is True
+    assert isinstance(client_cls.call_args.kwargs["verify"], ssl.SSLContext)
+
+
+async def test_probe_port_no_verify_stays_false() -> None:
+    with patch("custom_components.homelable.http_probe.httpx.AsyncClient") as client_cls:
+        instance = client_cls.return_value.__aenter__.return_value
+        instance.get = AsyncMock(return_value=_response("<title>X</title>"))
+        await probe_port("10.0.0.5", 8080, verify_tls=False)
+    assert client_cls.call_args.kwargs["verify"] is False
 
 
 # ── probe_open_ports ─────────────────────────────────────────────────────────

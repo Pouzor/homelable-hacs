@@ -14,6 +14,7 @@ import asyncio
 import ipaddress
 import logging
 import socket
+import ssl
 import sys
 import time
 from typing import Any
@@ -22,6 +23,22 @@ from urllib.parse import urlparse
 import httpx
 
 _LOGGER = logging.getLogger(__name__)
+
+# A verifying SSL context loads the system CA bundle from disk
+# (`load_verify_locations`), which is blocking I/O. Building it on the event
+# loop trips Home Assistant's blocking-call detector, so build it once in a
+# thread and reuse the cached context for every https check.
+_ssl_context: ssl.SSLContext | None = None
+_ssl_context_lock = asyncio.Lock()
+
+
+async def _verifying_ssl_context() -> ssl.SSLContext:
+    global _ssl_context
+    if _ssl_context is None:
+        async with _ssl_context_lock:
+            if _ssl_context is None:
+                _ssl_context = await asyncio.to_thread(ssl.create_default_context)
+    return _ssl_context
 
 # HTTP-family checks may only fire over these schemes.
 _ALLOWED_SCHEMES = {"http", "https"}
@@ -259,9 +276,13 @@ async def _http_check(
 async def _http_get(url: str, verify: bool = False) -> bool:
     # follow_redirects=False — health checks have no business chasing 3xx,
     # and a redirect to an internal endpoint would defeat the host filter
-    # we just applied.
+    # we just applied. When verifying, pass a pre-built SSL context so httpx
+    # doesn't load the CA bundle (blocking I/O) on the event loop.
+    verify_arg: bool | ssl.SSLContext = verify
+    if verify:
+        verify_arg = await _verifying_ssl_context()
     async with httpx.AsyncClient(
-        verify=verify, timeout=5, follow_redirects=False
+        verify=verify_arg, timeout=5, follow_redirects=False
     ) as client:
         resp = await client.get(url)
         # Treat 2xx/3xx/4xx as "the host is up"; 5xx as offline.

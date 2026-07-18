@@ -121,6 +121,26 @@ export interface DeepScanConfig {
   verify_tls: boolean
 }
 
+// A device bulk-approve refused to place because an equivalent node already
+// exists on the target design (same ip/mac/ieee). `existing_node_id` points at
+// the node already there so the UI can link to it.
+export interface SkippedDevice {
+  device_id: string
+  label: string
+  match: 'ip' | 'mac' | 'ieee'
+  value: string
+  existing_node_id: string | null
+}
+
+// Conflict body returned by single approve when a same-design duplicate exists.
+export interface DuplicateNodeConflict {
+  duplicate: true
+  existing_node_id: string
+  existing_label: string | null
+  match: 'ip' | 'mac' | 'ieee'
+  value: string
+}
+
 export const scanApi = {
   /** Start a scan. Optional deep-scan options are a per-scan override (extra
    *  port ranges + HTTP probe); they are not persisted. */
@@ -148,10 +168,13 @@ export const scanApi = {
     return toAxiosLike(result.devices)
   },
   approve: async (id: string, nodeData: object, designId?: string | null) => {
+    // Success either places the node OR (same-design duplicate) returns a
+    // `duplicate` conflict so the caller can ask the user. `node`/`node_id` are
+    // absent in the duplicate case.
     const result = await wsCall<{
-      node: { id: string; type: string; data: object }
-      node_id: string
-      edges: Array<{
+      node?: { id: string; type: string; data: object }
+      node_id?: string
+      edges?: Array<{
         id: string
         source: string
         target: string
@@ -159,7 +182,8 @@ export const scanApi = {
         sourceHandle?: string | null
         targetHandle?: string | null
       }>
-      edges_created: number
+      edges_created?: number
+      duplicate?: DuplicateNodeConflict
     }>('homelable/scan/approve', { device_id: id, overrides: nodeData, design_id: designId ?? null })
     return toAxiosLike(result)
   },
@@ -203,6 +227,7 @@ export const scanApi = {
       }>
       edges_created: number
       skipped: string[]
+      skipped_devices: SkippedDevice[]
       not_found: string[]
     }>('homelable/scan/approve_batch', { device_ids: ids, overrides, design_id: designId ?? null })
     return toAxiosLike(result)
