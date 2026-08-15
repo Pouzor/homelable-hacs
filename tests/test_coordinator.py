@@ -1519,3 +1519,59 @@ async def test_periodic_scan_tick_does_not_stack_runs(coord) -> None:  # noqa: A
 
     assert first["status"] == "running"
     assert len(runs) == 1
+
+
+@pytest.mark.asyncio
+async def test_last_seen_keeps_advancing_across_intervals(coord) -> None:  # noqa: ANN001
+    """A node that never goes offline must still get its stamp refreshed.
+
+    The in-memory node dict is the Store's payload, so bumping last_seen on
+    every poll while writing only every fifth would leave the staleness check
+    comparing against a value one poll old forever — the persisted stamp would
+    freeze at the first poll after startup and a long-running node would come
+    back from a restart reading "last seen: days ago".
+    """
+    from datetime import UTC, datetime, timedelta
+
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    online = AsyncMock(return_value={"status": "online", "response_time_ms": 5})
+
+    async def _poll_at(moment):
+        with (
+            patch.object(coord.canvas_store, "async_delay_save") as delayed,
+            patch(
+                "custom_components.homelable.coordinator._utc_now",
+                return_value=moment,
+            ),
+            patch(
+                "custom_components.homelable.coordinator.status_checker.check_node",
+                online,
+            ),
+        ):
+            await coord._async_update_data()
+        return delayed.call_count, (await coord.get_canvas())["nodes"][0]["last_seen"]
+
+    writes, first = await _poll_at(base)
+    assert writes == 1
+
+    # One interval later: too soon, stamp holds.
+    writes, held = await _poll_at(base + timedelta(seconds=60))
+    assert writes == 0
+    assert held == first
+
+    # Past LAST_SEEN_PERSIST_INTERVAL: stamp advances and is written again.
+    writes, moved = await _poll_at(base + timedelta(seconds=400))
+    assert writes == 1
+    assert moved > first
+
+    # And again on the next window — not a one-shot.
+    writes, moved_again = await _poll_at(base + timedelta(seconds=800))
+    assert writes == 1
+    assert moved_again > moved

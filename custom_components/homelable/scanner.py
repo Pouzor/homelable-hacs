@@ -356,6 +356,22 @@ async def _phase2_port_scan(
     return results
 
 
+def _merge_ports(
+    host: dict[str, Any], extra: list[dict[str, Any]]
+) -> None:
+    """Add `extra` port entries to host['open_ports'], keeping existing ones.
+
+    A port already present wins — it carries the richer banner from the pass
+    that scanned it with the full port list.
+    """
+    if not extra:
+        return
+    open_ports = host.setdefault("open_ports", [])
+    known = {p.get("port") for p in open_ports}
+    open_ports.extend(p for p in extra if p.get("port") not in known)
+    open_ports.sort(key=lambda p: p.get("port") or 0)
+
+
 async def _scan_target(
     target: str,
     *,
@@ -398,6 +414,12 @@ async def _scan_target(
     probed = await _phase2_port_scan(
         sweep_hosts, port_list=_FALLBACK_PROBE_PORTS
     )
+    # Stage A's findings are kept and merged back after stage B: the probe set
+    # is not a subset of `port_list`, so a host whose only open port is a
+    # probe-only one (139) would otherwise be found and then dropped.
+    probe_ports = {
+        h["ip"]: h["open_ports"] for h in probed if h.get("open_ports")
+    }
     full_alive = {
         h["ip"]: {**h, "open_ports": []} for h in probed if h.get("open_ports")
     }
@@ -411,6 +433,9 @@ async def _scan_target(
         return []
 
     async def _filtered_phase2(host: dict[str, Any]) -> None:
+        # Runs before the host lands in the result list and holds the same dict,
+        # so merging here covers both the streamed event and the return value.
+        _merge_ports(host, probe_ports.get(host["ip"], []))
         if not host.get("open_ports"):
             return
         if host.get("hostname") is None:

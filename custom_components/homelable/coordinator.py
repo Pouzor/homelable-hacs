@@ -173,9 +173,14 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _utc_now() -> datetime:
+    """Current UTC time. A seam so tests can drive the clock."""
+    return datetime.now(UTC)
+
+
 def _utc_now_iso() -> str:
     """Now, as ISO-8601 UTC with trailing 'Z'."""
-    return _iso(datetime.now(UTC))
+    return _iso(_utc_now())
 
 
 def _is_stale(stamp: Any, now: datetime, max_age: int) -> bool:
@@ -303,14 +308,21 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 else:
                     results[node_id] = res
 
-        # Refresh last_seen on every node a check just found up (handles nodes
-        # copied across designs — matched by id, not the de-duped loop above).
-        # In memory this is free and always current; the Store is only rewritten
-        # once the persisted value has gone stale, and even then through a
-        # debounced save. Writing the whole canvas on every poll where anything
-        # is online burns SD-card life for a timestamp read at minute
-        # resolution (issue #73).
-        now_dt = datetime.now(UTC)
+        # Advance last_seen on every node a check just found up (handles nodes
+        # copied across designs — matched by id, not the de-duped loop above),
+        # but only once the current value has aged past
+        # LAST_SEEN_PERSIST_INTERVAL, and then through a debounced save.
+        # Writing the whole canvas on every poll where anything is online burns
+        # SD-card life for a timestamp read at minute resolution (issue #73).
+        #
+        # The in-memory node dict *is* the Store's payload, so the stamp must
+        # only move when it is also being written: bumping it every poll while
+        # writing every fifth leaves the comparison reading a value ~1 interval
+        # old forever, and the persisted stamp then never advances past the
+        # first poll. Consequence of moving them together: last_seen lags real
+        # time by up to LAST_SEEN_PERSIST_INTERVAL. That is the resolution the
+        # inventory displays anyway.
+        now_dt = _utc_now()
         now = _iso(now_dt)
         stale = False
         for node in self._all_canvas_nodes():
@@ -318,8 +330,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
             if not res or res.get("status") != "online":
                 continue
             if _is_stale(node.get("last_seen"), now_dt, LAST_SEEN_PERSIST_INTERVAL):
+                node["last_seen"] = now
                 stale = True
-            node["last_seen"] = now
         if stale:
             self._save_canvases_debounced()
         return results
