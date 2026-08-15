@@ -1,6 +1,7 @@
 """Tests for the Proxmox VE import (service + coordinator + WS)."""
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from homeassistant.core import HomeAssistant
 
@@ -76,6 +77,11 @@ def _proxmox_json(url: str):
     """Canned Proxmox REST responses keyed on the request path."""
     if url.endswith("/nodes"):
         return [{"node": "pve1", "status": "online", "maxcpu": 8, "maxmem": 2 * 1024**3, "maxdisk": 100 * 1024**3}]
+    if url.endswith("/cluster/status"):
+        return [
+            {"type": "cluster", "name": "homelab", "quorate": 1},
+            {"type": "node", "name": "pve1", "ip": "10.0.0.2", "online": 1},
+        ]
     if url.endswith("/nodes/pve1/qemu"):
         return [{"vmid": 100, "name": "web", "status": "running", "maxcpu": 2, "maxmem": 1024**3}]
     if url.endswith("/nodes/pve1/lxc"):
@@ -100,6 +106,10 @@ async def test_fetch_proxmox_inventory_maps_hosts_and_guests(hass: HomeAssistant
 
     by_type = {n["type"] for n in nodes}
     assert by_type == {"proxmox", "vm", "lxc"}
+    host = next(n for n in nodes if n["type"] == "proxmox")
+    # /nodes carries no address — the IP comes from /cluster/status, and it is
+    # the only key that can merge this host with its ARP-scanned twin.
+    assert host["ip"] == "10.0.0.2"
     vm = next(n for n in nodes if n["type"] == "vm")
     assert vm["ip"] == "10.0.0.100"
     assert vm["mac"] == "bc:24:11:00:00:01"
@@ -112,6 +122,79 @@ async def test_fetch_proxmox_inventory_maps_hosts_and_guests(hass: HomeAssistant
         ("pve-node-pve1", "pve-pve1-100"),
         ("pve-node-pve1", "pve-pve1-200"),
     }
+
+
+async def _fetch_with(hass: HomeAssistant, json_fn, host: str = "pve.lan"):  # noqa: ANN001
+    """Run fetch_proxmox_inventory against canned JSON, return the host node."""
+    with patch(
+        "custom_components.homelable.proxmox._get_json",
+        AsyncMock(side_effect=lambda _s, url, _h, _v: json_fn(url)),
+    ), patch("custom_components.homelable.proxmox.async_get_clientsession", MagicMock()):
+        nodes, _ = await proxmox.fetch_proxmox_inventory(
+            hass, host, 8006, "u@pam!t", "secret", verify_tls=False
+        )
+    return next(n for n in nodes if n["type"] == "proxmox")
+
+
+def _no_cluster_status(url: str):
+    """Canned responses where /cluster/status is unreachable (no Sys.Audit)."""
+    if url.endswith("/cluster/status"):
+        raise aiohttp.ClientError("403 Forbidden")
+    return _proxmox_json(url)
+
+
+async def test_fetch_falls_back_to_configured_ip_when_cluster_status_fails(
+    hass: HomeAssistant,
+) -> None:
+    # A token that can list /nodes but not /cluster/status: the configured host
+    # is an IP literal and only one node is unresolved, so it is that node's.
+    host = await _fetch_with(hass, _no_cluster_status, host="10.0.0.2")
+    assert host["ip"] == "10.0.0.2"
+
+
+async def test_fetch_leaves_host_ip_none_when_configured_host_is_a_hostname(
+    hass: HomeAssistant,
+) -> None:
+    # No /cluster/status and a non-literal host: nothing to infer, but the
+    # import still succeeds with the host node present.
+    host = await _fetch_with(hass, _no_cluster_status, host="pve.lan")
+    assert host["ip"] is None
+
+
+async def test_fetch_does_not_guess_ip_with_several_unresolved_hosts(
+    hass: HomeAssistant,
+) -> None:
+    def _json(url: str):
+        if url.endswith("/nodes"):
+            return [
+                {"node": "pve1", "status": "offline"},
+                {"node": "pve2", "status": "offline"},
+            ]
+        if url.endswith("/cluster/status"):
+            raise aiohttp.ClientError("403 Forbidden")
+        return _proxmox_json(url)
+
+    with patch(
+        "custom_components.homelable.proxmox._get_json",
+        AsyncMock(side_effect=lambda _s, url, _h, _v: _json(url)),
+    ), patch("custom_components.homelable.proxmox.async_get_clientsession", MagicMock()):
+        nodes, _ = await proxmox.fetch_proxmox_inventory(
+            hass, "10.0.0.2", 8006, "u@pam!t", "secret", verify_tls=False
+        )
+    # Ambiguous — the configured IP belongs to exactly one of them, unknown which.
+    assert [n["ip"] for n in nodes] == [None, None]
+
+
+async def test_fetch_ignores_cluster_status_entries_without_an_ip(
+    hass: HomeAssistant,
+) -> None:
+    def _json(url: str):
+        if url.endswith("/cluster/status"):
+            return [{"type": "node", "name": "pve1", "online": 0}]
+        return _proxmox_json(url)
+
+    host = await _fetch_with(hass, _json, host="pve.lan")
+    assert host["ip"] is None
 
 
 async def test_test_connection_reports_no_permission(hass: HomeAssistant) -> None:
@@ -150,13 +233,13 @@ def coord(hass):  # noqa: ANN001
     return HomelableCoordinator(hass, _mock_entry())
 
 
-def _host(name: str) -> dict:
+def _host(name: str, ip: str | None = None) -> dict:
     return {
         "ieee_address": f"pve-node-{name}",
         "label": name,
         "type": "proxmox",
         "hostname": name,
-        "ip": None,
+        "ip": ip,
         "mac": None,
         "vendor": "Proxmox VE",
         "model": None,
@@ -222,6 +305,35 @@ async def test_import_merges_onto_scanned_row_by_mac(coord) -> None:  # noqa: AN
     assert row["data_extras"]["ieee_address"] == "pve-a-100"
     assert row["ip"] == "10.0.0.100"
     assert row["suggested_type"] == "vm"
+
+
+async def test_import_merges_host_onto_scanned_row_by_ip(coord) -> None:  # noqa: ANN001
+    # The PVE host itself was found by the IP scan (ARP: IP + MAC).
+    store = await coord._get_pending()
+    store["devices"].append(
+        {
+            "id": "pd-scan-host",
+            "ip": "10.0.0.2",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "hostname": "pve1.lan",
+            "services": [],
+            "status": "pending",
+            "discovery_source": "arp",
+            "discovery_sources": ["arp"],
+        }
+    )
+    # Proxmox imports the same machine. No API exposes a host MAC, so the IP
+    # resolved from /cluster/status is the only join key.
+    res = await coord.import_proxmox_pending([_host("pve1", ip="10.0.0.2")], [], [])
+    assert res["created"] == 0
+    assert res["updated"] == 1
+
+    pending = await coord.list_pending()
+    assert len(pending) == 1  # merged, not doubled
+    row = pending[0]
+    assert set(row["discovery_sources"]) >= {"arp", "proxmox"}
+    assert row["data_extras"]["ieee_address"] == "pve-node-pve1"
+    assert row["mac"] == "aa:bb:cc:dd:ee:ff"  # scanned MAC kept
 
 
 async def test_approve_proxmox_guest_creates_virtual_edge(coord) -> None:  # noqa: ANN001

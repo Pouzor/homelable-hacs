@@ -17,6 +17,7 @@ Ported from the standalone ``homelable`` repo
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import re
 from typing import Any
@@ -159,8 +160,17 @@ def _extract_net_mac(config_payload: dict[str, Any] | None) -> str | None:
     return normalize_mac(match.group(1)) if match else None
 
 
-def _host_node(raw: dict[str, Any]) -> dict[str, Any] | None:
-    """Build a homelable ``proxmox`` host node from a ``/nodes`` entry."""
+def _host_node(
+    raw: dict[str, Any], ip: str | None = None
+) -> dict[str, Any] | None:
+    """Build a homelable ``proxmox`` host node from a ``/nodes`` entry.
+
+    ``/nodes`` carries no address, so ``ip`` is resolved by the caller from
+    ``/cluster/status`` — without it a host imports with no join key at all and
+    can never merge with its ARP-scanned twin. The host MAC is not exposed by
+    any PVE endpoint; the IP is the only cross-source key, and a later scan
+    fills the MAC in on merge.
+    """
     name = raw.get("node")
     if not name:
         return None
@@ -171,7 +181,7 @@ def _host_node(raw: dict[str, Any]) -> dict[str, Any] | None:
         "type": "proxmox",
         "ieee_address": ieee,
         "hostname": name,
-        "ip": raw.get("ip") or None,
+        "ip": ip or raw.get("ip") or None,
         "mac": None,
         "status": "online" if raw.get("status") == "online" else "offline",
         "cpu_count": _int_or_none(raw.get("maxcpu")),
@@ -273,19 +283,22 @@ def guest_visibility_advisory(nodes: list[dict[str, Any]]) -> str | None:
 def _parse_inventory(
     hosts_raw: list[dict[str, Any]],
     guests_by_host: dict[str, list[dict[str, Any]]],
+    host_ips: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Assemble (nodes, edges) from fetched host + guest data.
 
     ``guests_by_host`` maps host name → list of already-normalized guest node
-    dicts. Edges are one host→guest link per guest (materialized as canvas
-    edges on approval, mirroring the mesh link mechanism).
+    dicts. ``host_ips`` maps host name → management IP (from
+    ``/cluster/status``). Edges are one host→guest link per guest (materialized
+    as canvas edges on approval, mirroring the mesh link mechanism).
     """
+    host_ips = host_ips or {}
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     for raw in hosts_raw:
-        host = _host_node(raw)
+        host = _host_node(raw, host_ips.get(raw.get("node")))
         if host is None or host["id"] in seen:
             continue
         seen.add(host["id"])
@@ -360,6 +373,9 @@ async def fetch_proxmox_inventory(
         if not isinstance(hosts_raw, list):
             raise ValueError("Malformed /nodes response")
 
+        host_ips = await _fetch_host_ips(session, base, headers, verify_tls)
+        _fill_local_host_ip(hosts_raw, host_ips, host)
+
         for host_entry in hosts_raw:
             name = host_entry.get("node")
             if not name or host_entry.get("status") != "online":
@@ -371,7 +387,60 @@ async def fetch_proxmox_inventory(
     except (aiohttp.ClientError, TimeoutError) as exc:
         raise ProxmoxError(_sanitize_proxmox_error(exc)) from exc
 
-    return _parse_inventory(hosts_raw, guests_by_host)
+    return _parse_inventory(hosts_raw, guests_by_host, host_ips)
+
+
+async def _fetch_host_ips(
+    session: aiohttp.ClientSession,
+    base: str,
+    headers: dict[str, str],
+    verify_tls: bool,
+) -> dict[str, str]:
+    """Map host name → management IP from ``/cluster/status``. Never raises.
+
+    ``/nodes`` has no address field, so this is the only API source for a host's
+    IP — the sole key that lets an imported host merge with the same machine
+    found by the IP scan. Answered by standalone installs too (one ``type=node``
+    entry). Best-effort: a token without ``Sys.Audit`` just yields no IPs, and
+    the import still returns hosts.
+    """
+    try:
+        entries = await _get_json(session, f"{base}/cluster/status", headers, verify_tls)
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        _LOGGER.warning("Proxmox /cluster/status failed, host IPs unresolved: %s", exc)
+        return {}
+    if not isinstance(entries, list):
+        return {}
+    return {
+        entry["name"]: entry["ip"]
+        for entry in entries
+        if isinstance(entry, dict)
+        and entry.get("type") == "node"
+        and entry.get("name")
+        and entry.get("ip")
+    }
+
+
+def _fill_local_host_ip(
+    hosts_raw: list[dict[str, Any]], host_ips: dict[str, str], host: str
+) -> None:
+    """Fall back to the configured host address for the node we're talking to.
+
+    Covers a token that can list ``/nodes`` but not ``/cluster/status``: if
+    exactly one host is unresolved and the configured ``host`` is an IP literal,
+    that address is by definition this node's. Mutates ``host_ips`` in place.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return
+    unresolved = [
+        name
+        for raw in hosts_raw
+        if (name := raw.get("node")) and name not in host_ips
+    ]
+    if len(unresolved) == 1:
+        host_ips[unresolved[0]] = host
 
 
 async def _fetch_host_guests(
