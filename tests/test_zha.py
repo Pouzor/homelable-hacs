@@ -13,7 +13,7 @@ from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homelable import zha
-from custom_components.homelable.const import DOMAIN
+from custom_components.homelable.const import CONF_ZIGBEE_SOURCE, DOMAIN
 from custom_components.homelable.coordinator import HomelableCoordinator
 from custom_components.homelable.websocket import async_register_websocket_commands
 
@@ -305,31 +305,89 @@ async def coordinator(hass: HomeAssistant) -> HomelableCoordinator:
     return HomelableCoordinator(hass, _mock_entry())
 
 
-def test_resolve_backend_prefers_zha_when_available(
+def test_auto_source_prefers_zha_when_available(
     coordinator: HomelableCoordinator, hass: HomeAssistant
 ) -> None:
+    assert coordinator.get_zigbee_source() == "auto"
     assert coordinator.resolve_zigbee_backend() == "z2m"
     hass.config.components.add("zha")
     assert coordinator.resolve_zigbee_backend() == "zha"
 
 
-def test_resolve_backend_honours_explicit_request(
+def test_configured_source_wins_over_detection(
+    coordinator: HomelableCoordinator, hass: HomeAssistant
+) -> None:
+    """The switch is the authority — a ZHA install can still import from Z2M."""
+    hass.config.components.add("zha")
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "z2m"}
+    assert coordinator.get_zigbee_source() == "z2m"
+    assert coordinator.resolve_zigbee_backend() == "z2m"
+
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "zha"}
+    assert coordinator.resolve_zigbee_backend() == "zha"
+
+
+def test_configured_zha_source_is_honoured_without_detection(
+    coordinator: HomelableCoordinator,
+) -> None:
+    """No ZHA component loaded, but the user said ZHA: don't silently use Z2M."""
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "zha"}
+    assert coordinator.resolve_zigbee_backend() == "zha"
+
+
+def test_source_falls_back_to_auto_when_garbage(
+    coordinator: HomelableCoordinator,
+) -> None:
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "carrier_pigeon"}
+    assert coordinator.get_zigbee_source() == "auto"
+
+
+def test_source_read_from_entry_data_when_not_in_options(
+    coordinator: HomelableCoordinator,
+) -> None:
+    """Set in the initial config flow, never touched in options."""
+    coordinator.entry.data = {**coordinator.entry.data, CONF_ZIGBEE_SOURCE: "zha"}
+    assert coordinator.get_zigbee_source() == "zha"
+
+
+def test_explicit_request_overrides_the_configured_source(
     coordinator: HomelableCoordinator, hass: HomeAssistant
 ) -> None:
     hass.config.components.add("zha")
-    assert coordinator.resolve_zigbee_backend("z2m") == "z2m"
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "z2m"}
     assert coordinator.resolve_zigbee_backend("zha") == "zha"
-    assert coordinator.resolve_zigbee_backend("auto") == "zha"
-    assert coordinator.resolve_zigbee_backend("nonsense") == "zha"
+    assert coordinator.resolve_zigbee_backend("auto") == "z2m"
+    assert coordinator.resolve_zigbee_backend("nonsense") == "z2m"
 
 
-def test_zigbee_backends_reports_availability(
+def test_zigbee_gateway_never_claims_z2m_from_a_loaded_mqtt(
     coordinator: HomelableCoordinator, hass: HomeAssistant
 ) -> None:
-    assert coordinator.zigbee_backends() == {"zha": False, "z2m": False}
+    """MQTT is loaded for plenty of non-Z2M reasons (Tasmota, ESPHome…).
+
+    Reporting Z2M off the `mqtt` component would let the panel advertise a
+    gateway that is not there, and an import against it would burn the full
+    300s networkmap timeout before failing.
+    """
     hass.config.components.add("zha")
     hass.config.components.add("mqtt")
-    assert coordinator.zigbee_backends() == {"zha": True, "z2m": True}
+    assert coordinator.zigbee_gateway() == {
+        "source": "auto",
+        "resolved": "zha",
+        "zha_detected": True,
+    }
+
+
+def test_zigbee_gateway_reports_the_configured_source(
+    coordinator: HomelableCoordinator, hass: HomeAssistant
+) -> None:
+    hass.config.components.add("zha")
+    coordinator.entry.options = {CONF_ZIGBEE_SOURCE: "z2m"}
+    assert coordinator.zigbee_gateway() == {
+        "source": "z2m",
+        "resolved": "z2m",
+        "zha_detected": True,
+    }
 
 
 async def test_fetch_networkmap_routes_to_zha(
@@ -423,15 +481,47 @@ async def setup_ws(hass: HomeAssistant) -> HomelableCoordinator:
     return coord
 
 
-async def test_ws_zigbee_backends(
+async def test_ws_zigbee_gateway(
     hass: HomeAssistant, hass_ws_client, hass_admin_user, setup_ws  # noqa: ANN001, ARG001
 ) -> None:
     hass.config.components.add("zha")
     client = await hass_ws_client(hass)
-    await client.send_json({"id": 1, "type": "homelable/zigbee/backends"})
+    await client.send_json({"id": 1, "type": "homelable/zigbee/gateway"})
     msg = await client.receive_json()
     assert msg["success"] is True
-    assert msg["result"] == {"zha": True, "z2m": False, "default": "zha"}
+    assert msg["result"] == {
+        "source": "auto",
+        "resolved": "zha",
+        "zha_detected": True,
+    }
+
+
+async def test_ws_zigbee_gateway_reflects_the_configured_switch(
+    hass: HomeAssistant, hass_ws_client, hass_admin_user, setup_ws  # noqa: ANN001
+) -> None:
+    hass.config.components.add("zha")
+    setup_ws.entry.options = {CONF_ZIGBEE_SOURCE: "z2m"}
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/zigbee/gateway"})
+    msg = await client.receive_json()
+    assert msg["result"]["source"] == "z2m"
+    assert msg["result"]["resolved"] == "z2m"
+
+
+async def test_ws_zigbee_import_uses_the_configured_source(
+    hass: HomeAssistant, hass_ws_client, hass_admin_user, setup_ws  # noqa: ANN001
+) -> None:
+    """No `backend` on the wire — the options switch decides."""
+    hass.config.components.add("zha")
+    setup_ws.entry.options = {CONF_ZIGBEE_SOURCE: "zha"}
+    with patch.object(zha, "_device_infos", return_value=[_info(END, "EndDevice")]):
+        client = await hass_ws_client(hass)
+        await client.send_json({"id": 1, "type": "homelable/zigbee/import"})
+        msg = await client.receive_json()
+        assert msg["result"]["backend"] == "zha"
+        await hass.async_block_till_done(wait_background_tasks=True)
+    pending = await setup_ws.list_pending(source="zigbee")
+    assert pending[0]["discovery_source"] == "zha"
 
 
 async def test_ws_zigbee_devices_via_zha(
@@ -455,6 +545,19 @@ async def test_ws_zigbee_devices_explicit_zha_without_zha(
     await client.send_json(
         {"id": 1, "type": "homelable/zigbee/devices", "backend": "zha"}
     )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "zha_not_configured"
+
+
+async def test_ws_zigbee_devices_configured_zha_without_zha_errors_loudly(
+    hass: HomeAssistant, hass_ws_client, hass_admin_user, setup_ws  # noqa: ANN001
+) -> None:
+    """Configured for ZHA but ZHA is gone: say so, never fall back to Z2M and
+    burn the 300s networkmap timeout on a gateway the user didn't ask for."""
+    setup_ws.entry.options = {CONF_ZIGBEE_SOURCE: "zha"}
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/zigbee/devices"})
     msg = await client.receive_json()
     assert msg["success"] is False
     assert msg["error"]["code"] == "zha_not_configured"

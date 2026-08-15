@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ZigbeeImportModal } from '../ZigbeeImportModal'
-import type { ZigbeeBackend, ZigbeeBackends } from '../types'
+import type { ZigbeeBackend, ZigbeeGateway, ZigbeeSource } from '../types'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/api/ha', () => ({
   zigbeeApi: {
-    backends: vi.fn(),
+    gateway: vi.fn(),
     startImport: vi.fn(),
   },
 }))
@@ -14,16 +14,16 @@ vi.mock('@/api/ha', () => ({
 import { zigbeeApi } from '@/api/ha'
 import { toast } from 'sonner'
 
-function mockBackends(zha: boolean, z2m: boolean, def: ZigbeeBackend) {
-  const data: ZigbeeBackends = { zha, z2m, default: def }
-  vi.mocked(zigbeeApi.backends).mockResolvedValue({ data } as never)
+function mockGateway(source: ZigbeeSource, resolved: ZigbeeBackend, zhaDetected = true) {
+  const data: ZigbeeGateway = { source, resolved, zha_detected: zhaDetected }
+  vi.mocked(zigbeeApi.gateway).mockResolvedValue({ data } as never)
 }
 
 describe('ZigbeeImportModal', () => {
   beforeEach(() => {
     vi.mocked(toast.success).mockReset()
     vi.mocked(toast.error).mockReset()
-    vi.mocked(zigbeeApi.backends).mockReset()
+    vi.mocked(zigbeeApi.gateway).mockReset()
     vi.mocked(zigbeeApi.startImport).mockReset()
     vi.mocked(zigbeeApi.startImport).mockResolvedValue({
       data: { run_id: 'r1', status: 'running', devices_found: 0, backend: 'zha' },
@@ -31,39 +31,61 @@ describe('ZigbeeImportModal', () => {
   })
 
   it('renders the import dialog when open', async () => {
-    mockBackends(false, true, 'z2m')
+    mockGateway('z2m', 'z2m', false)
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
     expect(screen.getByText('Zigbee Import')).toBeDefined()
     expect(screen.getByRole('button', { name: /Start Zigbee scan/i })).toBeDefined()
-    await waitFor(() => expect(zigbeeApi.backends).toHaveBeenCalled())
+    await waitFor(() => expect(zigbeeApi.gateway).toHaveBeenCalled())
   })
 
   it('names both gateways whichever one is in use', async () => {
-    mockBackends(true, false, 'zha')
+    mockGateway('zha', 'zha')
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(zigbeeApi.backends).toHaveBeenCalled())
+    await waitFor(() => expect(zigbeeApi.gateway).toHaveBeenCalled())
     expect(screen.getAllByText('ZHA').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Zigbee2MQTT').length).toBeGreaterThan(0)
   })
 
-  it('shows the detected gateway instead of a picker when only one is available', async () => {
-    mockBackends(true, false, 'zha')
+  it('names the configured gateway and offers no picker', async () => {
+    mockGateway('zha', 'zha')
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/Detected gateway/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/Gateway:/i)).toBeDefined())
+    // The gateway is a setting, not a per-import choice.
     expect(screen.queryByRole('button', { name: 'Zigbee2MQTT' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'ZHA' })).toBeNull()
     // ZHA-specific copy: no broker, near-instant.
     expect(screen.getByText(/no MQTT broker/i)).toBeDefined()
   })
 
-  it('never shows Z2M-only copy to a ZHA user', async () => {
-    mockBackends(true, false, 'zha')
+  it('marks an auto-resolved gateway as auto-detected', async () => {
+    mockGateway('auto', 'zha')
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/Detected gateway/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByText(/auto-detected/i)).toBeDefined())
+  })
+
+  it('does not call a gateway auto-detected when it was configured explicitly', async () => {
+    mockGateway('zha', 'zha')
+    render(<ZigbeeImportModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Gateway:/i)).toBeDefined())
+    expect(screen.queryByText(/auto-detected/i)).toBeNull()
+  })
+
+  it('points at the integration options to switch gateway', async () => {
+    mockGateway('zha', 'zha')
+    render(<ZigbeeImportModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Running the other one/i)).toBeDefined())
+    expect(screen.getByText('Zigbee gateway')).toBeDefined()
+  })
+
+  it('never shows Z2M-only copy to a ZHA user', async () => {
+    mockGateway('zha', 'zha')
+    render(<ZigbeeImportModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/Gateway:/i)).toBeDefined())
     expect(screen.queryByText(/base topic/i)).toBeNull()
   })
 
   it('claims no gateway until the probe answers', () => {
-    mockBackends(true, false, 'zha')
+    mockGateway('zha', 'zha')
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
     // Rendered before the probe resolves: no backend asserted either way.
     expect(screen.getByText(/checking/i)).toBeDefined()
@@ -72,57 +94,34 @@ describe('ZigbeeImportModal', () => {
   })
 
   it('falls back to neutral copy when the probe fails', async () => {
-    vi.mocked(zigbeeApi.backends).mockRejectedValue(new Error('nope'))
+    vi.mocked(zigbeeApi.gateway).mockRejectedValue(new Error('nope'))
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(zigbeeApi.backends).toHaveBeenCalled())
+    await waitFor(() => expect(zigbeeApi.gateway).toHaveBeenCalled())
     expect(screen.getByText(/picks the gateway for you/i)).toBeDefined()
   })
 
-  it('offers a backend picker when both gateways are available', async () => {
-    mockBackends(true, true, 'zha')
+  it('starts the import without overriding the configured gateway', async () => {
+    mockGateway('zha', 'zha')
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Zigbee2MQTT' })).toBeDefined(),
-    )
-    expect(screen.getByRole('button', { name: 'ZHA' })).toBeDefined()
-  })
-
-  it('starts the import with the picked backend', async () => {
-    mockBackends(true, true, 'zha')
-    render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Zigbee2MQTT' })).toBeDefined(),
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Zigbee2MQTT' }))
-    fireEvent.click(screen.getByRole('button', { name: /Start Zigbee scan/i }))
-
-    await waitFor(() => expect(zigbeeApi.startImport).toHaveBeenCalledWith('z2m'))
-  })
-
-  it('starts with the integration default when the picker is hidden', async () => {
-    mockBackends(true, false, 'zha')
-    render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(zigbeeApi.backends).toHaveBeenCalled())
+    await waitFor(() => expect(zigbeeApi.gateway).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole('button', { name: /Start Zigbee scan/i }))
 
-    await waitFor(() => expect(zigbeeApi.startImport).toHaveBeenCalledWith('zha'))
+    await waitFor(() => expect(zigbeeApi.startImport).toHaveBeenCalledWith())
   })
 
-  it('still starts an import when the backend probe fails', async () => {
-    vi.mocked(zigbeeApi.backends).mockRejectedValue(new Error('nope'))
+  it('starts an import even when the gateway probe failed', async () => {
+    vi.mocked(zigbeeApi.gateway).mockRejectedValue(new Error('nope'))
     render(<ZigbeeImportModal open onClose={vi.fn()} />)
-    await waitFor(() => expect(zigbeeApi.backends).toHaveBeenCalled())
+    await waitFor(() => expect(zigbeeApi.gateway).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole('button', { name: /Start Zigbee scan/i }))
 
-    // No backend known → let the integration choose.
-    await waitFor(() => expect(zigbeeApi.startImport).toHaveBeenCalledWith(undefined))
+    await waitFor(() => expect(zigbeeApi.startImport).toHaveBeenCalled())
   })
 
   it('toasts and closes on success', async () => {
-    mockBackends(false, true, 'z2m')
+    mockGateway('z2m', 'z2m', false)
     const onClose = vi.fn()
     const onImported = vi.fn()
     render(<ZigbeeImportModal open onClose={onClose} onImported={onImported} />)
@@ -138,7 +137,7 @@ describe('ZigbeeImportModal', () => {
   })
 
   it('surfaces the WS error message on failure', async () => {
-    mockBackends(true, false, 'zha')
+    mockGateway('zha', 'zha')
     vi.mocked(zigbeeApi.startImport).mockRejectedValue({
       error: { code: 'zha_not_configured', message: 'ZHA is not set up' },
     })
@@ -150,7 +149,7 @@ describe('ZigbeeImportModal', () => {
   })
 
   it('cancels without starting an import', async () => {
-    mockBackends(false, true, 'z2m')
+    mockGateway('z2m', 'z2m', false)
     const onClose = vi.fn()
     render(<ZigbeeImportModal open onClose={onClose} />)
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))

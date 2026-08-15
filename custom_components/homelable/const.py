@@ -28,6 +28,7 @@ CONF_SCAN_RANGES = "scan_ranges"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_SCAN_AUTO_ENABLED = "scan_auto_enabled"
 CONF_STATUS_INTERVAL = "status_interval"
+CONF_ZIGBEE_SOURCE = "zigbee_source"
 CONF_ZIGBEE_BASE_TOPIC = "zigbee_base_topic"
 CONF_ZWAVE_PREFIX = "zwave_prefix"
 CONF_ZWAVE_GATEWAY = "zwave_gateway"
@@ -80,6 +81,18 @@ LAST_SEEN_PERSIST_INTERVAL = 300  # seconds (5 min)
 # Delay (seconds) for the debounced canvas write that carries `last_seen`.
 # Store flushes pending delayed saves on HA shutdown, so nothing is lost.
 LAST_SEEN_SAVE_DELAY = 30
+# Which gateway the Zigbee import reads from. The user picks this explicitly
+# rather than the integration sniffing for it: HA's MQTT integration being
+# loaded says nothing about Zigbee2MQTT actually running (Tasmota, ESPHome and
+# plenty else share the same broker), so a detected `mqtt` component must never
+# be taken as a Z2M gateway. "auto" only falls back to detecting ZHA, which is
+# a loaded HA component and therefore unambiguous.
+ZIGBEE_SOURCE_AUTO = "auto"
+ZIGBEE_SOURCE_ZHA = "zha"
+ZIGBEE_SOURCE_Z2M = "z2m"
+ZIGBEE_SOURCES = (ZIGBEE_SOURCE_AUTO, ZIGBEE_SOURCE_ZHA, ZIGBEE_SOURCE_Z2M)
+DEFAULT_ZIGBEE_SOURCE = ZIGBEE_SOURCE_AUTO
+
 DEFAULT_ZIGBEE_BASE_TOPIC = "zigbee2mqtt"
 DEFAULT_ZWAVE_PREFIX = "zwave"
 DEFAULT_ZWAVE_GATEWAY = "zwavejs2mqtt"

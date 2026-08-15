@@ -15,6 +15,7 @@ from custom_components.homelable.const import (
     CONF_SERVICE_CHECK_ENABLED,
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
+    CONF_ZIGBEE_SOURCE,
     DOMAIN,
 )
 
@@ -149,4 +150,62 @@ async def test_user_flow_rejects_scan_interval_below_floor(
                 CONF_SCAN_INTERVAL: 10,
                 CONF_STATUS_INTERVAL: 60,
             }
+        )
+
+
+async def test_user_flow_defaults_zigbee_source_to_auto(hass: HomeAssistant) -> None:
+    """The setup form offers the Zigbee gateway switch, defaulting to auto."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if k == CONF_ZIGBEE_SOURCE)
+    assert key.default() == "auto"
+
+
+async def test_options_flow_saves_zigbee_source(hass: HomeAssistant) -> None:
+    """The gateway is an explicit setting, not something we sniff for."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Homelable",
+        data={
+            CONF_SCAN_RANGES: "192.168.1.0/24",
+            CONF_SCAN_INTERVAL: 3600,
+            CONF_STATUS_INTERVAL: 60,
+        },
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_SCAN_RANGES: "192.168.1.0/24",
+            CONF_SCAN_INTERVAL: 3600,
+            CONF_STATUS_INTERVAL: 60,
+            CONF_ZIGBEE_SOURCE: "zha",
+        },
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_ZIGBEE_SOURCE] == "zha"
+
+
+async def test_options_flow_rejects_unknown_zigbee_source(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Homelable",
+        data={CONF_SCAN_RANGES: "192.168.1.0/24"},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_RANGES: "192.168.1.0/24",
+                CONF_SCAN_INTERVAL: 3600,
+                CONF_STATUS_INTERVAL: 60,
+                CONF_ZIGBEE_SOURCE: "carrier_pigeon",
+            },
         )

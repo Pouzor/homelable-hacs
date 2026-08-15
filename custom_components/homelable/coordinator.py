@@ -32,6 +32,7 @@ from .const import (
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    CONF_ZIGBEE_SOURCE,
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
     DEFAULT_DESIGN_ICON,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
+    DEFAULT_ZIGBEE_SOURCE,
     DEFAULT_ZWAVE_GATEWAY,
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
@@ -69,6 +71,9 @@ from .const import (
     STORAGE_VERSION_DESIGNS,
     STORAGE_VERSION_PENDING,
     STORAGE_VERSION_RUNS,
+    ZIGBEE_SOURCE_Z2M,
+    ZIGBEE_SOURCE_ZHA,
+    ZIGBEE_SOURCES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1833,24 +1838,49 @@ class HomelableCoordinator(DataUpdateCoordinator):
             self.entry.data.get(CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC),
         )
 
-    def zigbee_backends(self) -> dict[str, bool]:
-        """Which Zigbee data sources this HA instance can serve right now."""
+    def get_zigbee_source(self) -> str:
+        """The configured Zigbee gateway: ``"auto"``, ``"zha"`` or ``"z2m"``."""
+        value = self.entry.options.get(
+            CONF_ZIGBEE_SOURCE,
+            self.entry.data.get(CONF_ZIGBEE_SOURCE, DEFAULT_ZIGBEE_SOURCE),
+        )
+        return value if value in ZIGBEE_SOURCES else DEFAULT_ZIGBEE_SOURCE
+
+    def zigbee_gateway(self) -> dict[str, Any]:
+        """What the panel needs to name the gateway it is about to use.
+
+        ``source`` is the user's setting, ``resolved`` is what an import would
+        actually talk to, and ``zha_detected`` says whether "auto" had anything
+        to detect. Deliberately no "is Z2M available" flag: HA's MQTT
+        integration being loaded says nothing about Zigbee2MQTT running — it is
+        just as likely to be Tasmota or ESPHome — so Z2M is only ever claimed
+        because the user configured it (or because no ZHA was found).
+        """
         return {
-            "zha": zha.zha_available(self.hass),
-            "z2m": "mqtt" in self.hass.config.components,
+            "source": self.get_zigbee_source(),
+            "resolved": self.resolve_zigbee_backend(),
+            "zha_detected": zha.zha_available(self.hass),
         }
 
     def resolve_zigbee_backend(self, requested: str | None = None) -> str:
         """Pick the Zigbee data source — ``"zha"`` or ``"z2m"``.
 
-        Anything else (including ``"auto"`` and ``None``) prefers ZHA when its
-        integration is set up: it needs no broker and carries the real
-        neighbour tables. Otherwise Zigbee2MQTT, which stays the default for
-        every install that never had ZHA.
+        An explicit per-call ``requested`` wins (the WS override), then the
+        configured source. ``"auto"`` prefers ZHA when its integration is set
+        up: it needs no broker and carries the real neighbour tables. Otherwise
+        Zigbee2MQTT, which stays the default for every install that never had
+        ZHA.
         """
-        if requested in ("zha", "z2m"):
+        if requested in (ZIGBEE_SOURCE_ZHA, ZIGBEE_SOURCE_Z2M):
             return requested
-        return "zha" if zha.zha_available(self.hass) else "z2m"
+        source = self.get_zigbee_source()
+        if source in (ZIGBEE_SOURCE_ZHA, ZIGBEE_SOURCE_Z2M):
+            return source
+        return (
+            ZIGBEE_SOURCE_ZHA
+            if zha.zha_available(self.hass)
+            else ZIGBEE_SOURCE_Z2M
+        )
 
     def _zigbee_run_target(self, backend: str) -> list[str]:
         """What to show in Scan History's `ranges` column for this backend."""

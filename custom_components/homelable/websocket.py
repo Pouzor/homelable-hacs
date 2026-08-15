@@ -44,7 +44,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_ignore)
     websocket_api.async_register_command(hass, ws_scan_restore)
     websocket_api.async_register_command(hass, ws_scan_restore_batch)
-    websocket_api.async_register_command(hass, ws_zigbee_backends)
+    websocket_api.async_register_command(hass, ws_zigbee_gateway)
     websocket_api.async_register_command(hass, ws_zigbee_devices)
     websocket_api.async_register_command(hass, ws_zigbee_import)
     websocket_api.async_register_command(hass, ws_zwave_devices)
@@ -631,30 +631,27 @@ async def ws_scan_restore_batch(
 
 # ─── Zigbee (Zigbee2MQTT / ZHA) ──────────────────────────────────────────────
 
-# The `backend` param below selects which gateway to read the mesh from.
-# Omitted / "auto" prefers ZHA when it is set up (no broker needed, real
-# neighbour tables) and falls back to Zigbee2MQTT.
+# The `backend` param below is a per-call override of the gateway configured in
+# the integration options (CONF_ZIGBEE_SOURCE). Omitted / "auto" defers to that
+# setting, whose own "auto" prefers ZHA when it is set up (no broker needed,
+# real neighbour tables) and falls back to Zigbee2MQTT.
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "homelable/zigbee/backends"}
+    {vol.Required("type"): "homelable/zigbee/gateway"}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
-async def ws_zigbee_backends(
+async def ws_zigbee_gateway(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Report which Zigbee gateways are usable, so the panel only offers a
-    backend picker when the user actually runs both ZHA and Zigbee2MQTT."""
+    """Report the configured Zigbee gateway and what an import would use, so
+    the panel can name it instead of describing the wrong one."""
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    backends = coord.zigbee_backends()
-    connection.send_result(
-        msg["id"],
-        {**backends, "default": coord.resolve_zigbee_backend()},
-    )
+    connection.send_result(msg["id"], coord.zigbee_gateway())
 
 
 @websocket_api.websocket_command(

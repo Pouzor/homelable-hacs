@@ -3,16 +3,22 @@ import { Network, Loader2, ScanLine } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { zigbeeApi } from '@/api/ha'
-import type { ZigbeeBackend, ZigbeeBackends } from '@/components/zigbee/types'
+import type { ZigbeeBackend, ZigbeeGateway } from '@/components/zigbee/types'
 import { toast } from 'sonner'
 
 /**
  * Zigbee import modal — HA build.
  *
- * Reads the mesh from whichever gateway the user runs:
+ * Reads the mesh from whichever gateway the integration options point at:
  *  - ZHA: straight out of the running integration, no broker, real neighbour
  *    tables (so routers get their actual children and LQI).
  *  - Zigbee2MQTT: a networkmap round-trip over HA's MQTT integration.
+ *
+ * There is deliberately no gateway picker here. Which gateway you run is a
+ * property of your setup, not a per-import decision, so it lives in the
+ * integration options; this modal only names what it is about to use. Sniffing
+ * for it would be worse than asking — a loaded MQTT integration says nothing
+ * about Zigbee2MQTT actually running.
  *
  * Differs from the standalone modal:
  *  - No MQTT host/port/user/pass/TLS form. HA's MQTT integration owns the
@@ -52,38 +58,33 @@ const BACKEND_LABEL: Record<ZigbeeBackend, string> = {
 
 export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportModalProps) {
   const [starting, setStarting] = useState(false)
-  const [backends, setBackends] = useState<ZigbeeBackends | null>(null)
-  const [backend, setBackend] = useState<ZigbeeBackend | null>(null)
+  const [gateway, setGateway] = useState<ZigbeeGateway | null>(null)
 
-  // Probe on open so the picker below only appears for the rare setup that
-  // runs both gateways; everyone else just gets the one they have.
+  // Ask on open rather than caching: the user can change the setting in the
+  // integration options between two imports.
   useEffect(() => {
     if (!open) return
     let cancelled = false
     zigbeeApi
-      .backends()
+      .gateway()
       .then(({ data }) => {
-        if (cancelled) return
-        setBackends(data)
-        setBackend(data.default)
+        if (!cancelled) setGateway(data)
       })
       .catch(() => {
-        if (!cancelled) setBackends(null)
+        if (!cancelled) setGateway(null)
       })
     return () => {
       cancelled = true
     }
   }, [open])
 
-  const bothAvailable = Boolean(backends?.zha && backends?.z2m)
-  // Until the probe answers (or if it fails) neither gateway is claimed —
-  // showing Z2M copy to a ZHA-only user was the whole complaint.
-  const active: ZigbeeBackend | null = backend ?? backends?.default ?? null
+  const active = gateway?.resolved ?? null
 
   const handleStart = async () => {
     setStarting(true)
     try {
-      await zigbeeApi.startImport(backend ?? undefined)
+      // No backend argument — the integration options are the authority.
+      await zigbeeApi.startImport()
       toast.success('Zigbee scan started — check Scan History for results')
       onImported?.()
       onClose()
@@ -112,33 +113,13 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
             or <strong className="text-foreground">Zigbee2MQTT</strong>.
           </p>
 
-          {bothAvailable ? (
-            <div className="space-y-1.5">
-              <p className="text-xs text-muted-foreground">Read the mesh from</p>
-              <div className="flex gap-2">
-                {(['zha', 'z2m'] as const).map((b) => (
-                  <Button
-                    key={b}
-                    type="button"
-                    variant={active === b ? 'default' : 'ghost'}
-                    onClick={() => setBackend(b)}
-                    disabled={starting}
-                    className="flex-1 text-xs"
-                    style={active === b ? { background: '#00d4ff', color: '#0d1117' } : undefined}
-                  >
-                    {BACKEND_LABEL[b]}
-                  </Button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Detected gateway:{' '}
-              <span className="text-foreground font-medium">
-                {active ? BACKEND_LABEL[active] : 'checking…'}
-              </span>
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            Gateway:{' '}
+            <span className="text-foreground font-medium">
+              {active ? BACKEND_LABEL[active] : 'checking…'}
+            </span>
+            {gateway?.source === 'auto' && active && ' (auto-detected)'}
+          </p>
 
           {active === 'zha' && (
             <p className="text-[11px] text-muted-foreground italic">
@@ -160,6 +141,13 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
             <p className="text-[11px] text-muted-foreground italic">
               Homelable picks the gateway for you: ZHA when its integration is set up,
               otherwise Zigbee2MQTT. Nothing to configure for ZHA.
+            </p>
+          )}
+
+          {active && (
+            <p className="text-[11px] text-muted-foreground">
+              Running the other one? Change <strong className="text-foreground">Zigbee gateway</strong>{' '}
+              in Settings → Devices &amp; services → Homelable → Configure.
             </p>
           )}
         </div>

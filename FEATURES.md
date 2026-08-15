@@ -109,9 +109,9 @@ Here's what Homelable can do inside Home Assistant. One line on what each featur
 - **Zigbee2MQTT** — a network-map request over the MQTT broker HA already talks to.
 
 **Use:**
-1. Sidebar → **Zigbee Import**.
-2. Nothing to configure for ZHA. For Zigbee2MQTT, set the base topic (default `zigbee2mqtt`) if you changed it.
-3. If you run both gateways, pick one in the dialog; otherwise it uses whichever you have (ZHA first).
+1. Pick your gateway once: Settings → Devices & services → Homelable → **Configure** → **Zigbee gateway**. `Auto-detect` (the default) uses ZHA when its integration is set up, otherwise Zigbee2MQTT; set it explicitly if you run both.
+2. Nothing else to configure for ZHA. For Zigbee2MQTT, set the base topic (default `zigbee2mqtt`) if you changed it.
+3. Sidebar → **Zigbee Import**. The dialog names the gateway it is about to use.
 4. **Start Zigbee scan** → results land in **Pending** → approve them onto the canvas.
 
 Nodes come in as `zigbee_coordinator` / `zigbee_router` / `zigbee_enddevice`. The hierarchy (coordinator → routers → end devices) and **LQI** are filled in automatically — ZHA reads them from the radio's neighbour tables, Z2M from the network map.

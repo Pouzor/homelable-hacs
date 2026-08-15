@@ -23,9 +23,12 @@ export interface ZigbeeEdge {
   target: string
 }
 
-/** Which gateway the mesh is read from. `auto` lets the integration pick:
- *  ZHA when it is set up (no broker, real neighbour tables), else Z2M. */
+/** Which gateway the mesh is read from. */
 export type ZigbeeBackend = 'zha' | 'z2m'
+
+/** The gateway setting in the integration options. `auto` lets the integration
+ *  pick: ZHA when it is set up (no broker, real neighbour tables), else Z2M. */
+export type ZigbeeSource = ZigbeeBackend | 'auto'
 
 export interface ZigbeeNetworkmap {
   nodes: ZigbeeNode[]
@@ -41,9 +44,12 @@ export interface ZigbeeImportResult {
   backend: ZigbeeBackend
 }
 
-/** Gateways this HA instance can actually serve right now. */
-export interface ZigbeeBackends {
-  zha: boolean
-  z2m: boolean
-  default: ZigbeeBackend
+/** The configured gateway, and what an import would actually talk to. */
+export interface ZigbeeGateway {
+  /** The user's setting in the integration options. */
+  source: ZigbeeSource
+  /** What `source` resolves to right now. */
+  resolved: ZigbeeBackend
+  /** Whether HA's ZHA integration is set up — what `auto` keys off. */
+  zha_detected: boolean
 }

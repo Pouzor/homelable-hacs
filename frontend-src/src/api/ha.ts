@@ -270,23 +270,24 @@ export const scanApi = {
 // ─── Zigbee (Zigbee2MQTT / ZHA) ─────────────────────────────────────────────
 
 import type {
-  ZigbeeBackend,
-  ZigbeeBackends,
+  ZigbeeGateway,
   ZigbeeNetworkmap,
   ZigbeeImportResult,
+  ZigbeeSource,
 } from '@/components/zigbee/types'
 
-/** Omitted backend = let the integration choose (ZHA when set up, else Z2M). */
-type BackendArg = ZigbeeBackend | 'auto' | undefined
+/** Per-call override of the gateway set in the integration options. Omit it to
+ *  use that setting — which is what the panel does. */
+type BackendArg = ZigbeeSource | undefined
 
 // The WS command schema rejects an explicit `backend: null`, so omit the key
 // entirely rather than sending an empty one.
 const backendArgs = (backend: BackendArg) => (backend ? { backend } : {})
 
 export const zigbeeApi = {
-  /** Which Zigbee gateways this HA instance can serve. */
-  backends: async () => {
-    const result = await wsCall<ZigbeeBackends>('homelable/zigbee/backends')
+  /** The configured Zigbee gateway and what an import would actually use. */
+  gateway: async () => {
+    const result = await wsCall<ZigbeeGateway>('homelable/zigbee/gateway')
     return toAxiosLike(result)
   },
   /** Fetch the Zigbee mesh. May reject with WS error `zha_not_configured`,
