@@ -3,8 +3,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.homelable.const import (
+    DEFAULT_SCAN_INTERVAL,
+    LAST_SEEN_SAVE_DELAY,
+    MIN_SCAN_INTERVAL,
+    STATUS_CHECK_CONCURRENCY,
+)
 from custom_components.homelable.coordinator import (
     HomelableCoordinator,
+    _is_stale,
+    _iso,
     build_mac_property,
     merge_mac_property,
 )
@@ -67,7 +75,7 @@ async def test_trigger_scan_adds_new_device_to_pending(coord) -> None:  # noqa: 
     ):
         result = await coord.trigger_scan()
         assert result["status"] == "running"
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     pending = await coord.list_pending()
     assert len(pending) == 1
@@ -108,7 +116,7 @@ async def test_trigger_scan_excludes_hidden_but_keeps_canvas(coord) -> None:  # 
         "custom_components.homelable.coordinator.scanner.run_scan", _fake
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     # Canvas IP stays scannable; only the hidden IP is excluded.
     assert "192.168.1.1" not in captured["exclude"]
@@ -170,7 +178,7 @@ async def test_streaming_events_create_then_enrich_pending(coord) -> None:  # no
         "custom_components.homelable.coordinator.scanner.run_scan", _fake
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     unsub()
 
@@ -210,7 +218,7 @@ async def test_streaming_discovering_entry_dropped_when_never_enriched(coord) ->
         "custom_components.homelable.coordinator.scanner.run_scan", _fake
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     pending = await coord.list_pending(status="discovering")
     assert pending == []
@@ -617,7 +625,7 @@ async def test_trigger_scan_updates_existing_pending_in_place(coord) -> None:  #
         AsyncMock(return_value=fake),
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     devices = await coord.list_pending()
     assert len(devices) == 1
@@ -693,7 +701,7 @@ async def test_run_service_checks_dispatches_per_node(hass) -> None:  # noqa: AN
         AsyncMock(return_value=[{"port": 80, "protocol": "tcp", "status": "offline"}]),
     ) as mock:
         await c._run_service_checks()
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
     unsub()
 
     assert mock.called
@@ -797,7 +805,7 @@ async def test_trigger_scan_forwards_deep_scan_options(coord) -> None:  # noqa: 
         await coord.trigger_scan(
             http_ranges=["8000-8100"], http_probe_enabled=True, verify_tls=True
         )
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     deep = captured["deep_scan"]
     assert deep is not None
@@ -899,7 +907,7 @@ async def test_scan_stamps_last_scan_by_ip(coord) -> None:  # noqa: ANN001
         AsyncMock(return_value=[_scan_device("192.168.1.5")]),
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     assert (await coord.get_canvas())["nodes"][0]["last_scan"] is not None
 
@@ -915,7 +923,7 @@ async def test_scan_stamps_last_scan_by_mac(coord) -> None:  # noqa: ANN001
         AsyncMock(return_value=[_scan_device("192.168.1.9", mac="AA:BB:CC:DD:EE:FF")]),
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     assert (await coord.get_canvas())["nodes"][0]["last_scan"] is not None
 
@@ -930,7 +938,7 @@ async def test_scan_leaves_last_scan_untouched_on_unmatched_node(coord) -> None:
         AsyncMock(return_value=[_scan_device("192.168.1.5")]),
     ):
         await coord.trigger_scan()
-        await coord.hass.async_block_till_done()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
 
     assert (await coord.get_canvas())["nodes"][0]["last_scan"] is None
 
@@ -1254,3 +1262,316 @@ async def test_approve_batch_skips_device_matching_ip_in_comma_list(coord) -> No
     assert r["approved"] == 1
     assert r["skipped"] == ["pd-1"]
     assert r["skipped_devices"][0]["value"] == "192.168.1.10"
+
+
+# ─── Restart-pressure regressions (issue #73) ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_bounds_check_concurrency(coord) -> None:  # noqa: ANN001
+    """Node checks fan out one `ping` subprocess each; the fan-out must be capped.
+
+    Unbounded, a large canvas forks a process per node on every poll, which is
+    what gets Home Assistant OOM-killed / watchdog-restarted on small hosts.
+    """
+    import asyncio
+
+    nodes = [
+        {"id": f"n{i}", "type": "server", "position": {"x": 0, "y": 0},
+         "data": {"ip": f"10.0.0.{i}", "check_method": "ping"}}
+        for i in range(STATUS_CHECK_CONCURRENCY * 3)
+    ]
+    await coord.save_canvas(
+        {"nodes": nodes, "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
+    )
+
+    in_flight = 0
+    peak = 0
+
+    async def _fake_check(method, target, ip, **_kw):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return {"status": "online", "response_time_ms": 5}
+
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        _fake_check,
+    ):
+        result = await coord._async_update_data()
+
+    assert len(result) == len(nodes)
+    assert all(r["status"] == "online" for r in result.values())
+    assert peak <= STATUS_CHECK_CONCURRENCY
+    # Still parallel — a serial loop would peak at 1.
+    assert peak > 1
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_persists_last_seen_debounced(coord) -> None:  # noqa: ANN001
+    """The first online poll queues a *delayed* canvas write, never a direct one."""
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    with (
+        patch.object(coord.canvas_store, "async_delay_save") as delayed,
+        patch.object(coord.canvas_store, "async_save", AsyncMock()) as immediate,
+        patch(
+            "custom_components.homelable.coordinator.status_checker.check_node",
+            AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
+        ),
+    ):
+        await coord._async_update_data()
+
+    assert delayed.call_count == 1
+    assert delayed.call_args[0][1] == LAST_SEEN_SAVE_DELAY
+    assert delayed.call_args[0][0]() == {"canvases": coord._canvases}
+    assert immediate.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_skips_write_while_last_seen_is_fresh(coord) -> None:  # noqa: ANN001
+    """Back-to-back polls rewrite last_seen in memory but not on disk.
+
+    Writing the whole canvas Store every DEFAULT_STATUS_INTERVAL for a
+    timestamp read at minute resolution is pure SD-card wear.
+    """
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    check = AsyncMock(return_value={"status": "online", "response_time_ms": 5})
+    with (
+        patch.object(coord.canvas_store, "async_delay_save") as delayed,
+        patch(
+            "custom_components.homelable.coordinator.status_checker.check_node",
+            check,
+        ),
+    ):
+        await coord._async_update_data()
+        first = (await coord.get_canvas())["nodes"][0]["last_seen"]
+        await coord._async_update_data()
+        second = (await coord.get_canvas())["nodes"][0]["last_seen"]
+
+    assert delayed.call_count == 1
+    # In memory it is still refreshed on every poll.
+    assert first is not None
+    assert second >= first
+
+
+@pytest.mark.asyncio
+async def test_status_refresh_rewrites_last_seen_once_stale(coord) -> None:  # noqa: ANN001
+    """A last_seen older than LAST_SEEN_PERSIST_INTERVAL earns a write."""
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    await coord._ensure_loaded()
+    design_id = coord._designs[0]["id"]
+    coord._canvases[design_id]["nodes"][0]["last_seen"] = "2020-01-01T00:00:00Z"
+
+    with (
+        patch.object(coord.canvas_store, "async_delay_save") as delayed,
+        patch(
+            "custom_components.homelable.coordinator.status_checker.check_node",
+            AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
+        ),
+    ):
+        await coord._async_update_data()
+
+    assert delayed.call_count == 1
+    assert (await coord.get_canvas())["nodes"][0]["last_seen"] != "2020-01-01T00:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_trigger_scan_runs_as_background_task(coord) -> None:  # noqa: ANN001
+    """Scans must not be tracked tasks: HA blocks shutdown waiting on those,
+    and the forced stop that follows looks like a spontaneous restart."""
+    with (
+        patch.object(
+            coord.hass,
+            "async_create_background_task",
+            wraps=coord.hass.async_create_background_task,
+        ) as background,
+        patch.object(coord.hass, "async_create_task") as tracked,
+        patch(
+            "custom_components.homelable.coordinator.scanner.run_scan",
+            AsyncMock(return_value=[]),
+        ),
+    ):
+        res = await coord.trigger_scan()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
+
+    assert tracked.call_count == 0
+    assert background.call_count == 1
+    assert res["run_id"] in background.call_args[0][1]
+
+
+def test_is_stale_handles_missing_bad_and_future_stamps() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    assert _is_stale(None, now, 300) is True
+    assert _is_stale("not-a-date", now, 300) is True
+    assert _is_stale(_iso(now - timedelta(seconds=299)), now, 300) is False
+    assert _is_stale(_iso(now - timedelta(seconds=301)), now, 300) is True
+    # Clock skew / restored backup: a future stamp is rewritten, not trusted.
+    assert _is_stale(_iso(now + timedelta(hours=1)), now, 300) is True
+    # Naive stamps are read as UTC rather than blowing up.
+    assert _is_stale("2026-01-01T11:59:00", now, 300) is False
+
+
+# ─── Periodic scan (opt-in) ──────────────────────────────────────────────────
+
+
+def test_periodic_scan_is_off_by_default(coord) -> None:  # noqa: ANN001
+    """A stored scan_interval alone must not schedule anything.
+
+    Every existing install carries the 3600 default, so honouring it without an
+    explicit opt-in would silently start hourly sweeps everywhere.
+    """
+    entry = coord.entry
+    entry.data = {"scan_ranges": "192.168.1.0/24", "scan_interval": 3600}
+    entry.options = {}
+
+    assert coord.get_scan_auto_enabled() is False
+    with patch(
+        "custom_components.homelable.coordinator.async_track_time_interval"
+    ) as track:
+        coord.async_start_periodic_scan()
+    assert track.call_count == 0
+    assert coord._periodic_scan_unsub is None
+
+
+def test_periodic_scan_schedules_when_enabled(coord) -> None:  # noqa: ANN001
+    from datetime import timedelta
+
+    coord.entry.options = {"scan_auto_enabled": True, "scan_interval": 900}
+    with patch(
+        "custom_components.homelable.coordinator.async_track_time_interval"
+    ) as track:
+        coord.async_start_periodic_scan()
+
+    assert track.call_count == 1
+    assert track.call_args[0][1] == coord._run_periodic_scan
+    assert track.call_args[0][2] == timedelta(seconds=900)
+    assert coord._periodic_scan_unsub is not None
+
+
+def test_periodic_scan_interval_is_floored(coord) -> None:  # noqa: ANN001
+    """A too-small interval is clamped, not honoured — back-to-back sweeps are
+    exactly the load pattern this integration must not create."""
+    coord.entry.options = {"scan_auto_enabled": True, "scan_interval": 5}
+    assert coord.get_scan_interval() == MIN_SCAN_INTERVAL
+    coord.entry.options = {"scan_auto_enabled": True, "scan_interval": "nonsense"}
+    assert coord.get_scan_interval() == DEFAULT_SCAN_INTERVAL
+
+
+def test_stop_periodic_scan_releases_the_timer(coord) -> None:  # noqa: ANN001
+    coord.entry.options = {"scan_auto_enabled": True, "scan_interval": 900}
+    unsub = MagicMock()
+    with patch(
+        "custom_components.homelable.coordinator.async_track_time_interval",
+        return_value=unsub,
+    ):
+        coord.async_start_periodic_scan()
+    coord.async_stop_periodic_scan()
+
+    assert unsub.call_count == 1
+    assert coord._periodic_scan_unsub is None
+    # Idempotent — unloading twice must not blow up or double-unsub.
+    coord.async_stop_periodic_scan()
+    assert unsub.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_periodic_scan_tick_triggers_a_scan(coord) -> None:  # noqa: ANN001
+    with patch.object(
+        coord, "trigger_scan", AsyncMock(return_value={"run_id": "r1", "status": "running"})
+    ) as trigger:
+        await coord._run_periodic_scan()
+    assert trigger.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_periodic_scan_tick_does_not_stack_runs(coord) -> None:  # noqa: ANN001
+    """A sweep slower than the interval must be skipped, never queued behind."""
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan",
+        AsyncMock(return_value=[]),
+    ):
+        first = await coord.trigger_scan()
+        coord._scan_run_id = first["run_id"]  # pretend it is still in flight
+        await coord._run_periodic_scan()
+        runs = await coord.list_runs()
+
+    assert first["status"] == "running"
+    assert len(runs) == 1
+
+
+@pytest.mark.asyncio
+async def test_last_seen_keeps_advancing_across_intervals(coord) -> None:  # noqa: ANN001
+    """A node that never goes offline must still get its stamp refreshed.
+
+    The in-memory node dict is the Store's payload, so bumping last_seen on
+    every poll while writing only every fifth would leave the staleness check
+    comparing against a value one poll old forever — the persisted stamp would
+    freeze at the first poll after startup and a long-running node would come
+    back from a restart reading "last seen: days ago".
+    """
+    from datetime import UTC, datetime, timedelta
+
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    base = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    online = AsyncMock(return_value={"status": "online", "response_time_ms": 5})
+
+    async def _poll_at(moment):
+        with (
+            patch.object(coord.canvas_store, "async_delay_save") as delayed,
+            patch(
+                "custom_components.homelable.coordinator._utc_now",
+                return_value=moment,
+            ),
+            patch(
+                "custom_components.homelable.coordinator.status_checker.check_node",
+                online,
+            ),
+        ):
+            await coord._async_update_data()
+        return delayed.call_count, (await coord.get_canvas())["nodes"][0]["last_seen"]
+
+    writes, first = await _poll_at(base)
+    assert writes == 1
+
+    # One interval later: too soon, stamp holds.
+    writes, held = await _poll_at(base + timedelta(seconds=60))
+    assert writes == 0
+    assert held == first
+
+    # Past LAST_SEEN_PERSIST_INTERVAL: stamp advances and is written again.
+    writes, moved = await _poll_at(base + timedelta(seconds=400))
+    assert writes == 1
+    assert moved > first
+
+    # And again on the next window — not a one-shot.
+    writes, moved_again = await _poll_at(base + timedelta(seconds=800))
+    assert writes == 1
+    assert moved_again > moved

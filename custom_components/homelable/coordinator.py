@@ -25,6 +25,8 @@ from .const import (
     CONF_PROXMOX_TOKEN_ID,
     CONF_PROXMOX_TOKEN_SECRET,
     CONF_PROXMOX_VERIFY_TLS,
+    CONF_SCAN_AUTO_ENABLED,
+    CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
     CONF_SERVICE_CHECK_ENABLED,
     CONF_SERVICE_CHECK_INTERVAL,
@@ -39,6 +41,8 @@ from .const import (
     DEFAULT_PROXMOX_SYNC_ENABLED,
     DEFAULT_PROXMOX_SYNC_INTERVAL,
     DEFAULT_PROXMOX_VERIFY_TLS,
+    DEFAULT_SCAN_AUTO_ENABLED,
+    DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_RANGES,
     DEFAULT_SERVICE_CHECK_ENABLED,
     DEFAULT_SERVICE_CHECK_INTERVAL,
@@ -47,12 +51,16 @@ from .const import (
     DEFAULT_ZWAVE_GATEWAY,
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
+    LAST_SEEN_PERSIST_INTERVAL,
+    LAST_SEEN_SAVE_DELAY,
     MAX_SCAN_RUNS,
     MIN_PROXMOX_SYNC_INTERVAL,
+    MIN_SCAN_INTERVAL,
     MIN_SERVICE_CHECK_INTERVAL,
     PROXMOX_SOURCE,
     SCAN_SIGNAL,
     SERVICE_STATUS_SIGNAL,
+    STATUS_CHECK_CONCURRENCY,
     STORAGE_KEY_CANVAS,
     STORAGE_KEY_DESIGNS,
     STORAGE_KEY_PENDING,
@@ -160,9 +168,38 @@ def _match_pending_by_ip_or_mac(
     return None
 
 
-def _utc_now_iso() -> str:
+def _iso(moment: datetime) -> str:
     """ISO-8601 UTC with trailing 'Z' (frontend Date() expects this form)."""
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return moment.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _utc_now() -> datetime:
+    """Current UTC time. A seam so tests can drive the clock."""
+    return datetime.now(UTC)
+
+
+def _utc_now_iso() -> str:
+    """Now, as ISO-8601 UTC with trailing 'Z'."""
+    return _iso(_utc_now())
+
+
+def _is_stale(stamp: Any, now: datetime, max_age: int) -> bool:
+    """True when `stamp` is missing, unparseable, or older than `max_age` seconds.
+
+    Unparseable counts as stale so a hand-edited or legacy value gets rewritten
+    once rather than pinning the node to a value nothing can compare against.
+    """
+    if not isinstance(stamp, str):
+        return True
+    try:
+        previous = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if previous.tzinfo is None:
+        previous = previous.replace(tzinfo=UTC)
+    # A stamp in the future (clock skew, restored backup) is treated as stale so
+    # the next online check corrects it.
+    return abs((now - previous).total_seconds()) >= max_age
 
 
 class HomelableCoordinator(DataUpdateCoordinator):
@@ -201,6 +238,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._runs: list[dict[str, Any]] | None = None
         self._scan_run_id: str | None = None
         self._service_check_unsub: Callable[[], None] | None = None
+        self._periodic_scan_unsub: Callable[[], None] | None = None
         self._proxmox_sync_unsub: Callable[[], None] | None = None
 
     # ─── Status checks (periodic) ────────────────────────────────────────────
@@ -218,9 +256,19 @@ class HomelableCoordinator(DataUpdateCoordinator):
             self.get_scan_ranges()
         )
         results: dict[str, dict[str, Any]] = {}
-        # Build the checks first, then run them all concurrently. Sequential
-        # awaits let a handful of offline hosts stack their timeouts and blow
-        # past HA's 60s setup deadline (issue #51 → CancelledError at startup).
+        # Build the checks first, then run them concurrently but bounded.
+        # Sequential awaits let a handful of offline hosts stack their timeouts
+        # and blow past HA's 60s setup deadline (issue #51 → CancelledError at
+        # startup); fully unbounded forks one `ping` per node at once, which
+        # starves small hosts and gets HA restarted by the watchdog (issue #73).
+        sem = asyncio.Semaphore(STATUS_CHECK_CONCURRENCY)
+
+        async def _bounded(check: str, target: Any, ip: Any) -> dict[str, Any]:
+            async with sem:
+                return await status_checker.check_node(
+                    check, target, ip, allowed_networks=allowed_networks
+                )
+
         node_ids: list[str] = []
         tasks: list[Any] = []
         for node in self._all_canvas_nodes():
@@ -246,11 +294,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
             )
             ip = node.get("ip") or data.get("ip")
             node_ids.append(node_id)
-            tasks.append(
-                status_checker.check_node(
-                    check, target, ip, allowed_networks=allowed_networks
-                )
-            )
+            tasks.append(_bounded(check, target, ip))
 
         if tasks:
             checked = await asyncio.gather(*tasks, return_exceptions=True)
@@ -264,19 +308,32 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 else:
                     results[node_id] = res
 
-        # Persist last_seen on every node a check just found up (handles nodes
-        # copied across designs — matched by id, not the de-duped loop above).
-        # This writes the canvas Store on any poll where something is online;
-        # accepted so the inventory can surface a real "Last Seen".
-        now = _utc_now_iso()
-        dirty = False
+        # Advance last_seen on every node a check just found up (handles nodes
+        # copied across designs — matched by id, not the de-duped loop above),
+        # but only once the current value has aged past
+        # LAST_SEEN_PERSIST_INTERVAL, and then through a debounced save.
+        # Writing the whole canvas on every poll where anything is online burns
+        # SD-card life for a timestamp read at minute resolution (issue #73).
+        #
+        # The in-memory node dict *is* the Store's payload, so the stamp must
+        # only move when it is also being written: bumping it every poll while
+        # writing every fifth leaves the comparison reading a value ~1 interval
+        # old forever, and the persisted stamp then never advances past the
+        # first poll. Consequence of moving them together: last_seen lags real
+        # time by up to LAST_SEEN_PERSIST_INTERVAL. That is the resolution the
+        # inventory displays anyway.
+        now_dt = _utc_now()
+        now = _iso(now_dt)
+        stale = False
         for node in self._all_canvas_nodes():
             res = results.get(node.get("id"))
-            if res and res.get("status") == "online":
+            if not res or res.get("status") != "online":
+                continue
+            if _is_stale(node.get("last_seen"), now_dt, LAST_SEEN_PERSIST_INTERVAL):
                 node["last_seen"] = now
-                dirty = True
-        if dirty:
-            await self._save_canvases()
+                stale = True
+        if stale:
+            self._save_canvases_debounced()
         return results
 
     # ─── Per-service status checks (periodic, independent) ────────────────────
@@ -448,6 +505,19 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
     async def _save_canvases(self) -> None:
         await self.canvas_store.async_save({"canvases": self._canvases})
+
+    @callback
+    def _save_canvases_debounced(self) -> None:
+        """Queue a delayed canvas write.
+
+        Used for background bookkeeping (last_seen) that must survive a restart
+        but doesn't justify a synchronous write per poll. Store flushes pending
+        delayed saves on HA shutdown, and a later immediate `_save_canvases`
+        supersedes the pending one.
+        """
+        self.canvas_store.async_delay_save(
+            lambda: {"canvases": self._canvases}, LAST_SEEN_SAVE_DELAY
+        )
 
     async def _resolve_design_id(self, design_id: str | None) -> str | None:
         """Return a valid design id: the requested one if it exists, else the
@@ -1381,6 +1451,63 @@ class HomelableCoordinator(DataUpdateCoordinator):
             ranges = [r.strip() for r in ranges.split(",") if r.strip()]
         return list(ranges)
 
+    # ─── Periodic scan (opt-in) ──────────────────────────────────────────────
+
+    def get_scan_auto_enabled(self) -> bool:
+        """Whether scans run on a timer (options → data → default False)."""
+        return bool(
+            self.entry.options.get(
+                CONF_SCAN_AUTO_ENABLED,
+                self.entry.data.get(
+                    CONF_SCAN_AUTO_ENABLED, DEFAULT_SCAN_AUTO_ENABLED
+                ),
+            )
+        )
+
+    def get_scan_interval(self) -> int:
+        """Periodic-scan interval in seconds, floored at MIN_SCAN_INTERVAL."""
+        raw = self.entry.options.get(
+            CONF_SCAN_INTERVAL,
+            self.entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        )
+        try:
+            return max(MIN_SCAN_INTERVAL, int(raw))
+        except (TypeError, ValueError):
+            return DEFAULT_SCAN_INTERVAL
+
+    @callback
+    def async_start_periodic_scan(self) -> None:
+        """Schedule the recurring scan if the user opted in.
+
+        Off by default: a sweep is the heaviest job here, so it only runs on a
+        timer when explicitly enabled. Reload on options change recreates the
+        coordinator, so the flag and interval are always picked up fresh.
+        """
+        if not self.get_scan_auto_enabled():
+            return
+        interval = timedelta(seconds=self.get_scan_interval())
+        self._periodic_scan_unsub = async_track_time_interval(
+            self.hass, self._run_periodic_scan, interval
+        )
+        _LOGGER.debug("Periodic scan every %ds", self.get_scan_interval())
+
+    @callback
+    def async_stop_periodic_scan(self) -> None:
+        """Cancel the recurring scan, if scheduled."""
+        if self._periodic_scan_unsub is not None:
+            self._periodic_scan_unsub()
+            self._periodic_scan_unsub = None
+
+    async def _run_periodic_scan(self, _now: datetime | None = None) -> None:
+        """Timer body: kick a scan unless one is already in flight.
+
+        trigger_scan already returns `already_running` rather than stacking, so
+        a slow sweep can never pile up behind the timer.
+        """
+        result = await self.trigger_scan()
+        if result["status"] == "already_running":
+            _LOGGER.debug("Periodic scan skipped: run %s still going", result["run_id"])
+
     async def trigger_scan(
         self,
         *,
@@ -1434,8 +1561,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
             }
         )
 
-        self.hass.async_create_task(
-            self._run_scan_task(run_id, ranges, exclude, started_at, deep_scan)
+        # Background task: a sweep runs for minutes. As a tracked task HA would
+        # block shutdown waiting on it (and the forced stop reads as a
+        # spontaneous restart — issue #73); as a background task HA cancels it.
+        self.hass.async_create_background_task(
+            self._run_scan_task(run_id, ranges, exclude, started_at, deep_scan),
+            f"{DOMAIN}_scan_{run_id}",
         )
         return {
             "run_id": run_id,
@@ -1735,8 +1866,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "error": None,
             }
         )
-        self.hass.async_create_task(
-            self._run_zigbee_import_task(run_id, started_at)
+        self.hass.async_create_background_task(
+            self._run_zigbee_import_task(run_id, started_at),
+            f"{DOMAIN}_zigbee_import_{run_id}",
         )
         return {"run_id": run_id, "status": "running", "devices_found": 0}
 
@@ -1961,8 +2093,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "error": None,
             }
         )
-        self.hass.async_create_task(
-            self._run_zwave_import_task(run_id, started_at)
+        self.hass.async_create_background_task(
+            self._run_zwave_import_task(run_id, started_at),
+            f"{DOMAIN}_zwave_import_{run_id}",
         )
         return {"run_id": run_id, "status": "running", "devices_found": 0}
 
@@ -2380,8 +2513,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "error": None,
             }
         )
-        self.hass.async_create_task(
-            self._run_proxmox_import_task(run_id, started_at, req)
+        self.hass.async_create_background_task(
+            self._run_proxmox_import_task(run_id, started_at, req),
+            f"{DOMAIN}_proxmox_import_{run_id}",
         )
         return {"run_id": run_id, "status": "running", "devices_found": 0}
 

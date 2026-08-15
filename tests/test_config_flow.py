@@ -9,6 +9,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homelable.const import (
+    CONF_SCAN_AUTO_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
     CONF_SERVICE_CHECK_ENABLED,
@@ -106,4 +107,46 @@ async def test_options_flow_rejects_sub_minimum_interval(hass: HomeAssistant) ->
                 CONF_SERVICE_CHECK_ENABLED: True,
                 CONF_SERVICE_CHECK_INTERVAL: 5,
             },
+        )
+
+
+async def test_user_flow_defaults_auto_scan_off(hass: HomeAssistant) -> None:
+    """The setup form offers scheduled scanning but leaves it off."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if k == CONF_SCAN_AUTO_ENABLED)
+    assert key.default() is False
+
+    with patch("custom_components.homelable.async_setup_entry", return_value=True):
+        created = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_RANGES: "192.168.1.0/24",
+                CONF_SCAN_AUTO_ENABLED: False,
+                CONF_SCAN_INTERVAL: 3600,
+                CONF_STATUS_INTERVAL: 60,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert created["data"][CONF_SCAN_AUTO_ENABLED] is False
+
+
+async def test_user_flow_rejects_scan_interval_below_floor(
+    hass: HomeAssistant,
+) -> None:
+    """Sub-floor intervals are refused by the schema, not silently accepted."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    with pytest.raises(vol.Invalid):
+        result["data_schema"](
+            {
+                CONF_SCAN_RANGES: "192.168.1.0/24",
+                CONF_SCAN_AUTO_ENABLED: True,
+                CONF_SCAN_INTERVAL: 10,
+                CONF_STATUS_INTERVAL: 60,
+            }
         )

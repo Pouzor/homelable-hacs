@@ -26,6 +26,7 @@ MAX_SCAN_RUNS = 50
 # Config flow
 CONF_SCAN_RANGES = "scan_ranges"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SCAN_AUTO_ENABLED = "scan_auto_enabled"
 CONF_STATUS_INTERVAL = "status_interval"
 CONF_ZIGBEE_BASE_TOPIC = "zigbee_base_topic"
 CONF_ZWAVE_PREFIX = "zwave_prefix"
@@ -57,8 +58,28 @@ PROXMOX_SOURCE = "proxmox"
 PROXMOX_CLUSTER_SOURCE = "proxmox_cluster"
 
 DEFAULT_SCAN_RANGES = ["192.168.1.0/24"]
+# Periodic scans are opt-in. A sweep is by far the heaviest thing this
+# integration does, so it never runs on a timer unless the user says so; the
+# interval below only applies once CONF_SCAN_AUTO_ENABLED is on.
+DEFAULT_SCAN_AUTO_ENABLED = False
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
+MIN_SCAN_INTERVAL = 300  # seconds (5 min)
 DEFAULT_STATUS_INTERVAL = 60   # seconds
+
+# Node status checks fan out one subprocess per node (ping). Unbounded, a large
+# canvas forks dozens of processes at once every poll, which starves low-memory
+# hosts (RPi / HA Green) and trips the Supervisor watchdog. Cap the fan-out.
+STATUS_CHECK_CONCURRENCY = 10
+
+# `last_seen` is refreshed in memory on every poll, but the canvas Store is only
+# rewritten when the stored value is older than this. Without it a canvas with
+# one online node rewrites the whole Store every DEFAULT_STATUS_INTERVAL,
+# hammering SD cards for a timestamp nobody reads at that resolution.
+LAST_SEEN_PERSIST_INTERVAL = 300  # seconds (5 min)
+
+# Delay (seconds) for the debounced canvas write that carries `last_seen`.
+# Store flushes pending delayed saves on HA shutdown, so nothing is lost.
+LAST_SEEN_SAVE_DELAY = 30
 DEFAULT_ZIGBEE_BASE_TOPIC = "zigbee2mqtt"
 DEFAULT_ZWAVE_PREFIX = "zwave"
 DEFAULT_ZWAVE_GATEWAY = "zwavejs2mqtt"

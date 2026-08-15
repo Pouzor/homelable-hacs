@@ -1,9 +1,9 @@
 """Tests for the scanner module."""
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from custom_components.homelable import scanner
+from custom_components.homelable import scanner, tcp_scanner
 
 
 @pytest.mark.asyncio
@@ -135,7 +135,7 @@ async def test_phase2_dispatches_to_tcp_connect_scan() -> None:
         "10.0.0.5": {"ip": "10.0.0.5", "hostname": None, "mac": None, "os": None, "open_ports": []},
     }
 
-    async def _fake_tcp(host: dict, ports: tuple[int, ...]) -> dict:
+    async def _fake_tcp(host: dict, ports: tuple[int, ...], **_kw) -> dict:
         host["open_ports"] = [{"port": 80, "protocol": "tcp", "banner": "nginx"}]
         return host
 
@@ -154,7 +154,7 @@ async def test_phase2_invokes_on_host_done_callback() -> None:
     }
     seen: list[dict] = []
 
-    async def _fake_tcp(host: dict, ports: tuple[int, ...]) -> dict:
+    async def _fake_tcp(host: dict, ports: tuple[int, ...], **_kw) -> dict:
         host["open_ports"] = [{"port": 22, "protocol": "tcp", "banner": ""}]
         return host
 
@@ -295,3 +295,220 @@ def test_request_cancel_records_run_id() -> None:
     # cleanup
     with scanner._cancelled_lock:
         scanner._cancelled_runs.discard("my-run")
+
+
+# ── Fan-out caps (issue #73) ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_phase2_caps_total_open_sockets() -> None:
+    """Every host shares one socket budget, so hosts x ports can't multiply.
+
+    Per-host budgets let 10 parallel hosts hold 10 x 50 sockets at once, which
+    is the fan-out that starves small hosts and gets HA watchdog-restarted.
+    """
+    import asyncio
+
+    alive = {
+        f"10.0.0.{i}": {
+            "ip": f"10.0.0.{i}", "hostname": None, "mac": None,
+            "os": None, "open_ports": [],
+        }
+        for i in range(1, 41)
+    }
+    ports = tuple(range(1, 61))
+
+    in_flight = 0
+    peak = 0
+
+    async def _fake_connect(ip, port, **_kw):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return None
+
+    with patch.object(tcp_scanner, "_scan_port", _fake_connect):
+        results = await scanner._phase2_port_scan(alive, port_list=ports)
+
+    assert len(results) == len(alive)
+    assert peak <= scanner._SOCKET_CONCURRENCY
+    assert peak > 1  # still concurrent, not serialised
+
+
+@pytest.mark.asyncio
+async def test_phase2_host_concurrency_is_capped() -> None:
+    """No more than _HOST_CONCURRENCY hosts are scanned at once."""
+    import asyncio
+
+    alive = {
+        f"10.0.0.{i}": {
+            "ip": f"10.0.0.{i}", "hostname": None, "mac": None,
+            "os": None, "open_ports": [],
+        }
+        for i in range(1, 26)
+    }
+
+    active = 0
+    peak = 0
+
+    async def _fake_tcp(host: dict, ports, **_kw) -> dict:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return host
+
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp):
+        await scanner._phase2_port_scan(alive)
+
+    assert peak <= scanner._HOST_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_ping_sweep_concurrency_is_capped() -> None:
+    """The ping sweep forks a process per address; cap how many run at once."""
+    import asyncio
+
+    active = 0
+    peak = 0
+
+    class _FakeProc:
+        returncode = 0
+
+        async def wait(self) -> None:
+            await asyncio.sleep(0)
+
+    async def _fake_exec(*_args, **_kw):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return _FakeProc()
+
+    with (
+        patch.object(asyncio, "create_subprocess_exec", _fake_exec),
+        patch.object(scanner, "_arp_table_hosts", lambda _t: {}),
+        patch.object(scanner, "_resolve_hostname", lambda _ip: None),
+    ):
+        alive = await scanner._ping_sweep("10.0.0.0/24")
+
+    assert len(alive) == 254
+    assert peak <= scanner._PING_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_tcp_sweep_fallback_probes_before_full_port_list() -> None:
+    """With ping/ARP blind, the sweep probes a small port set across the range
+    and only spends the full port list on addresses that answered."""
+    calls: list[tuple[str, tuple[int, ...]]] = []
+
+    async def _fake_tcp(host: dict, ports, **_kw) -> dict:
+        calls.append((host["ip"], tuple(ports)))
+        # Exactly one address in the range is up.
+        host["open_ports"] = (
+            [{"port": 80, "protocol": "tcp", "banner": ""}]
+            if host["ip"] == "10.0.0.7"
+            else []
+        )
+        return host
+
+    with (
+        patch.object(scanner, "_ping_sweep", AsyncMock(return_value={})),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+        patch.object(scanner, "_resolve_hostname", lambda _ip: "host.lan"),
+    ):
+        results = await scanner._scan_target("10.0.0.0/28")
+
+    probe_calls = [c for c in calls if c[1] == scanner._FALLBACK_PROBE_PORTS]
+    full_calls = [c for c in calls if c[1] == scanner._PORT_LIST]
+    # Every address gets the cheap probe...
+    assert len(probe_calls) == 14
+    # ...only the responder gets the full port list.
+    assert [c[0] for c in full_calls] == ["10.0.0.7"]
+    assert [r["ip"] for r in results] == ["10.0.0.7"]
+
+
+@pytest.mark.asyncio
+async def test_tcp_sweep_fallback_returns_early_when_range_is_empty() -> None:
+    """Nothing answers the probe → no second pass at all."""
+    calls: list[tuple[int, ...]] = []
+
+    async def _fake_tcp(host: dict, ports, **_kw) -> dict:
+        calls.append(tuple(ports))
+        host["open_ports"] = []
+        return host
+
+    with (
+        patch.object(scanner, "_ping_sweep", AsyncMock(return_value={})),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+    ):
+        results = await scanner._scan_target("10.0.0.0/29")
+
+    assert results == []
+    assert all(c == scanner._FALLBACK_PROBE_PORTS for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_tcp_sweep_fallback_keeps_probe_only_ports() -> None:
+    """The probe set is not a subset of the full port list (139 is probe-only).
+
+    A host whose only open port is probe-only was found in stage A and then
+    dropped, because stage B rescans with the full list and the sweep filters
+    on the result. Stage A's ports are merged back instead.
+    """
+    async def _fake_tcp(host: dict, ports, **_kw) -> dict:
+        if tuple(ports) == scanner._FALLBACK_PROBE_PORTS:
+            host["open_ports"] = (
+                [{"port": 139, "protocol": "tcp", "banner": ""}]
+                if host["ip"] == "10.0.0.3"
+                else []
+            )
+        else:
+            # Full port list has no 139, so this host looks closed on stage B.
+            host["open_ports"] = []
+        return host
+
+    with (
+        patch.object(scanner, "_ping_sweep", AsyncMock(return_value={})),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+        patch.object(scanner, "_resolve_hostname", lambda _ip: "smb.lan"),
+    ):
+        results = await scanner._scan_target("10.0.0.0/28")
+
+    assert [r["ip"] for r in results] == ["10.0.0.3"]
+    assert [p["port"] for p in results[0]["open_ports"]] == [139]
+
+
+@pytest.mark.asyncio
+async def test_tcp_sweep_fallback_prefers_full_scan_port_entry() -> None:
+    """A port found by both passes keeps the full scan's richer banner."""
+    async def _fake_tcp(host: dict, ports, **_kw) -> dict:
+        if tuple(ports) == scanner._FALLBACK_PROBE_PORTS:
+            host["open_ports"] = [{"port": 80, "protocol": "tcp", "banner": ""}]
+        else:
+            host["open_ports"] = [
+                {"port": 80, "protocol": "tcp", "banner": "nginx"},
+                {"port": 8080, "protocol": "tcp", "banner": ""},
+            ]
+        return host
+
+    with (
+        patch.object(scanner, "_ping_sweep", AsyncMock(return_value={})),
+        patch.object(scanner, "tcp_connect_scan", _fake_tcp),
+        patch.object(scanner, "_resolve_hostname", lambda _ip: "web.lan"),
+    ):
+        results = await scanner._scan_target("10.0.0.0/30")
+
+    ports = results[0]["open_ports"]
+    assert [p["port"] for p in ports] == [80, 8080]
+    assert ports[0]["banner"] == "nginx"
+
+
+def test_merge_ports_is_a_noop_without_extras() -> None:
+    host = {"ip": "10.0.0.1", "open_ports": [{"port": 22, "protocol": "tcp"}]}
+    scanner._merge_ports(host, [])
+    assert host["open_ports"] == [{"port": 22, "protocol": "tcp"}]

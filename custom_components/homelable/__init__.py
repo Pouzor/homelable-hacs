@@ -44,6 +44,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.async_start_service_checks()
     entry.async_on_unload(coordinator.async_stop_service_checks)
 
+    # Optional periodic network scan (off by default — a sweep is heavy, so it
+    # only runs on a timer when the user opts in).
+    coordinator.async_start_periodic_scan()
+    entry.async_on_unload(coordinator.async_stop_periodic_scan)
+
     # Optional Proxmox auto-sync: re-imports the inventory into pending on the
     # configured interval. Reload on options change recreates the coordinator,
     # so enable/interval are always picked up fresh.

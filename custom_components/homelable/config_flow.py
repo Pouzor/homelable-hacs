@@ -15,6 +15,7 @@ from .const import (
     CONF_PROXMOX_TOKEN_ID,
     CONF_PROXMOX_TOKEN_SECRET,
     CONF_PROXMOX_VERIFY_TLS,
+    CONF_SCAN_AUTO_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
     CONF_SERVICE_CHECK_ENABLED,
@@ -27,6 +28,7 @@ from .const import (
     DEFAULT_PROXMOX_SYNC_ENABLED,
     DEFAULT_PROXMOX_SYNC_INTERVAL,
     DEFAULT_PROXMOX_VERIFY_TLS,
+    DEFAULT_SCAN_AUTO_ENABLED,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCAN_RANGES,
     DEFAULT_SERVICE_CHECK_ENABLED,
@@ -37,6 +39,7 @@ from .const import (
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
     MIN_PROXMOX_SYNC_INTERVAL,
+    MIN_SCAN_INTERVAL,
     MIN_SERVICE_CHECK_INTERVAL,
 )
 
@@ -62,8 +65,11 @@ class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_SCAN_RANGES, default=",".join(DEFAULT_SCAN_RANGES)
                 ): str,
                 vol.Required(
+                    CONF_SCAN_AUTO_ENABLED, default=DEFAULT_SCAN_AUTO_ENABLED
+                ): bool,
+                vol.Required(
                     CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
-                ): int,
+                ): vol.All(int, vol.Range(min=MIN_SCAN_INTERVAL)),
                 vol.Required(
                     CONF_STATUS_INTERVAL, default=DEFAULT_STATUS_INTERVAL
                 ): int,
@@ -117,9 +123,15 @@ class HomelableOptionsFlow(OptionsFlow):
                     default=data.get(CONF_SCAN_RANGES, ",".join(DEFAULT_SCAN_RANGES)),
                 ): str,
                 vol.Required(
+                    CONF_SCAN_AUTO_ENABLED,
+                    default=data.get(
+                        CONF_SCAN_AUTO_ENABLED, DEFAULT_SCAN_AUTO_ENABLED
+                    ),
+                ): bool,
+                vol.Required(
                     CONF_SCAN_INTERVAL,
                     default=data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-                ): int,
+                ): vol.All(int, vol.Range(min=MIN_SCAN_INTERVAL)),
                 vol.Required(
                     CONF_STATUS_INTERVAL,
                     default=data.get(CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL),

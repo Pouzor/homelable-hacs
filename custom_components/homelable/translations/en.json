@@ -6,7 +6,8 @@
         "description": "Configure homelab network discovery and monitoring.",
         "data": {
           "scan_ranges": "Network ranges (CIDR, comma-separated)",
-          "scan_interval": "Scan interval (seconds)",
+          "scan_auto_enabled": "Scan automatically on a schedule",
+          "scan_interval": "Scan interval (seconds, min 300)",
           "status_interval": "Status check interval (seconds)",
           "zigbee_base_topic": "Zigbee2MQTT base topic",
           "zwave_prefix": "Z-Wave JS UI MQTT prefix",
@@ -24,7 +25,8 @@
         "title": "Homelable options",
         "data": {
           "scan_ranges": "Network ranges (CIDR, comma-separated)",
-          "scan_interval": "Scan interval (seconds)",
+          "scan_auto_enabled": "Scan automatically on a schedule",
+          "scan_interval": "Scan interval (seconds, min 300)",
           "status_interval": "Status check interval (seconds)",
           "zigbee_base_topic": "Zigbee2MQTT base topic",
           "zwave_prefix": "Z-Wave JS UI MQTT prefix",

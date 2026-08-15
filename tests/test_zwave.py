@@ -279,7 +279,7 @@ async def test_trigger_zwave_import_records_running_then_done(
     assert res["status"] == "running"
     run_id = res["run_id"]
 
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     runs = await coordinator.list_runs()
     assert len(runs) == 1
@@ -301,7 +301,7 @@ async def test_trigger_zwave_import_records_error_run(
 
     monkeypatch.setattr(coordinator, "fetch_zwave_network", boom)
     res = await coordinator.trigger_zwave_import()
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     runs = await coordinator.list_runs()
     assert runs[0]["id"] == res["run_id"]
@@ -345,7 +345,7 @@ async def test_ws_zwave_import_pushes_to_pending(
         assert msg["result"]["status"] == "running"
         assert "run_id" in msg["result"]
 
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
 
     pending = await setup_ws.list_pending(source="zwave")
     assert len(pending) == 1
