@@ -240,7 +240,7 @@ async def test_trigger_zigbee_import_records_running_then_done(
     assert res["devices_found"] == 0
     run_id = res["run_id"]
 
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     runs = await coordinator.list_runs()
     assert len(runs) == 1
@@ -265,7 +265,7 @@ async def test_trigger_zigbee_import_records_error_run(
 
     monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", boom)
     res = await coordinator.trigger_zigbee_import()
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     runs = await coordinator.list_runs()
     assert len(runs) == 1
@@ -515,7 +515,7 @@ async def test_ws_zigbee_import_pushes_to_pending(
         assert msg["result"]["status"] == "running"
         assert "run_id" in msg["result"]
 
-        await hass.async_block_till_done()
+        await hass.async_block_till_done(wait_background_tasks=True)
 
     pending = await setup_ws.list_pending(source="zigbee")
     assert len(pending) == 1

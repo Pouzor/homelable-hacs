@@ -154,14 +154,20 @@ async def tcp_connect_scan(
     connect_timeout: float = _CONNECT_TIMEOUT,
     banner_timeout: float = _BANNER_TIMEOUT,
     port_concurrency: int = _PORT_CONCURRENCY,
+    socket_sem: asyncio.Semaphore | None = None,
 ) -> dict[str, Any]:
     """Scan all `ports` against host['ip']. Mutates and returns the host dict.
 
     Mirrors the shape produced by scanner._nmap_scan_single so downstream
     fingerprinting works unchanged. Sets host['open_ports']; leaves 'os' alone.
+
+    `socket_sem`, when given, is a semaphore shared by every host in the scan
+    and replaces the per-host `port_concurrency` cap. Without it, N hosts
+    scanned in parallel each get their own budget and the open-socket count is
+    the product of the two — the fan-out behind issue #73.
     """
     ip = host["ip"]
-    sem = asyncio.Semaphore(port_concurrency)
+    sem = socket_sem if socket_sem is not None else asyncio.Semaphore(port_concurrency)
 
     async def _bound(port: int) -> dict[str, Any] | None:
         async with sem:

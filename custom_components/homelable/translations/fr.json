@@ -6,7 +6,8 @@
         "description": "Configurer la découverte et la supervision du homelab.",
         "data": {
           "scan_ranges": "Plages réseau (CIDR, séparées par des virgules)",
-          "scan_interval": "Intervalle de scan (secondes)",
+          "scan_auto_enabled": "Scanner automatiquement selon une planification",
+          "scan_interval": "Intervalle de scan (secondes, min 300)",
           "status_interval": "Intervalle de vérification d'état (secondes)",
           "zigbee_base_topic": "Topic de base Zigbee2MQTT",
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",
@@ -24,7 +25,8 @@
         "title": "Options Homelable",
         "data": {
           "scan_ranges": "Plages réseau (CIDR, séparées par des virgules)",
-          "scan_interval": "Intervalle de scan (secondes)",
+          "scan_auto_enabled": "Scanner automatiquement selon une planification",
+          "scan_interval": "Intervalle de scan (secondes, min 300)",
           "status_interval": "Intervalle de vérification d'état (secondes)",
           "zigbee_base_topic": "Topic de base Zigbee2MQTT",
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",

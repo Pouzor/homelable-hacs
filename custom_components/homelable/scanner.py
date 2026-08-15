@@ -66,6 +66,27 @@ _EXTRA_PORTS = (
 
 _PORT_LIST: tuple[int, ...] = tuple(int(p) for p in _EXTRA_PORTS.split(","))
 
+# ─── Fan-out caps (issue #73) ────────────────────────────────────────────────
+# A scan used to peak at 50 concurrent `ping` processes and 10 hosts x 50 ports
+# = 500 simultaneous sockets. On a small host (RPi / HA Green) that starves the
+# event loop long enough for the Supervisor watchdog to restart Core. These
+# caps trade a slower scan for a machine that stays responsive.
+_PING_CONCURRENCY = 25
+_HOST_CONCURRENCY = 5
+# Shared across every host in a phase, so the host x port product can no longer
+# multiply: this is the hard ceiling on open sockets for the whole scan.
+_SOCKET_CONCURRENCY = 100
+
+# Ping/ARP finding nothing means a full TCP sweep of the range — the common case
+# in a container without CAP_NET_RAW, or on an ICMP-blocked LAN. Sweeping all 87
+# ports across a /24 is ~22k connects; probe this subset first and only spend the
+# full port list on the IPs that answer. Covers the usual homelab surface
+# (SSH/HTTP(S)/SMB/RDP/Proxmox/*arr/media/DB/MQTT/HA).
+_FALLBACK_PROBE_PORTS: tuple[int, ...] = (
+    22, 23, 25, 53, 80, 139, 443, 445, 548, 1883, 3000, 3306, 3389, 5000,
+    5432, 5900, 6379, 8000, 8006, 8080, 8081, 8096, 8123, 8443, 9000, 9090,
+)
+
 # Deep scan (opt-in): extra TCP ports + an HTTP probe that identifies services on
 # custom ports. Off by default → identical to the standard scan.
 _PORT_RANGE_RE = re.compile(r"^\d{1,5}(-\d{1,5})?$")
@@ -240,7 +261,7 @@ async def _ping_sweep(
     all_ips = [str(ip) for ip in net.hosts()]
     _LOGGER.info("[Phase 1] Pinging %d hosts in %s", len(all_ips), target)
 
-    sem = asyncio.Semaphore(50)
+    sem = asyncio.Semaphore(_PING_CONCURRENCY)
 
     async def _ping(ip: str) -> str | None:
         async with sem:
@@ -306,11 +327,15 @@ async def _phase2_port_scan(
     if not alive:
         return []
 
-    semaphore = asyncio.Semaphore(10)
+    semaphore = asyncio.Semaphore(_HOST_CONCURRENCY)
+    # One socket budget for the whole phase — see _SOCKET_CONCURRENCY.
+    socket_sem = asyncio.Semaphore(_SOCKET_CONCURRENCY)
 
     async def _scan_and_notify(host_dict: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
-            result = await tcp_connect_scan(host_dict, port_list)
+            result = await tcp_connect_scan(
+                host_dict, port_list, socket_sem=socket_sem
+            )
         if on_host_done is not None:
             try:
                 await on_host_done(result)
@@ -341,8 +366,10 @@ async def _scan_target(
     """Two-phase scan for a CIDR range (ping → TCP port scan).
 
     If ping + ARP yield zero hosts (foreign subnet, unprivileged container with
-    no CAP_NET_RAW, ICMP-blocked LAN), fall back to a full TCP sweep across
-    every IP in the CIDR. Slower but catches cases where ping is the blocker.
+    no CAP_NET_RAW, ICMP-blocked LAN), fall back to a TCP sweep across every IP
+    in the CIDR. Slower but catches cases where ping is the blocker. The sweep
+    is two-stage: a small probe port set over the whole range, then the full
+    port list only on the addresses that answered.
     """
     alive = await _ping_sweep(target, on_host=on_phase1_host)
     if alive:
@@ -351,10 +378,10 @@ async def _scan_target(
         )
 
     _LOGGER.info(
-        "[Phase 1] no hosts via ping/ARP for %s — full TCP sweep fallback", target
+        "[Phase 1] no hosts via ping/ARP for %s — TCP sweep fallback", target
     )
     net = ipaddress.ip_network(target, strict=False)
-    full_alive: dict[str, dict[str, Any]] = {
+    sweep_hosts: dict[str, dict[str, Any]] = {
         str(ip): {
             "ip": str(ip),
             "mac": None,
@@ -364,6 +391,24 @@ async def _scan_target(
         }
         for ip in net.hosts()
     }
+
+    # Stage A: cheap probe across the whole range to find what is even there.
+    # Sweeping the full port list over every address is ~87 connects per host
+    # for a range that is mostly empty; the probe set costs a third of that.
+    probed = await _phase2_port_scan(
+        sweep_hosts, port_list=_FALLBACK_PROBE_PORTS
+    )
+    full_alive = {
+        h["ip"]: {**h, "open_ports": []} for h in probed if h.get("open_ports")
+    }
+    _LOGGER.info(
+        "[Phase 1] TCP sweep found %d/%d hosts in %s",
+        len(full_alive),
+        len(sweep_hosts),
+        target,
+    )
+    if not full_alive:
+        return []
 
     async def _filtered_phase2(host: dict[str, Any]) -> None:
         if not host.get("open_ports"):
