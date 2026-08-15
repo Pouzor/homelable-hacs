@@ -11,6 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from . import proxmox, scanner
 from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .media import delete_media
+from .zha import ZhaNotReadyError
 from .zigbee import ZigbeeMqttNotReadyError
 from .zwave import ZwaveMqttNotReadyError
 
@@ -43,6 +44,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_ignore)
     websocket_api.async_register_command(hass, ws_scan_restore)
     websocket_api.async_register_command(hass, ws_scan_restore_batch)
+    websocket_api.async_register_command(hass, ws_zigbee_backends)
     websocket_api.async_register_command(hass, ws_zigbee_devices)
     websocket_api.async_register_command(hass, ws_zigbee_import)
     websocket_api.async_register_command(hass, ws_zwave_devices)
@@ -627,23 +629,56 @@ async def ws_scan_restore_batch(
     connection.send_result(msg["id"], {"restored": restored})
 
 
-# ─── Zigbee2MQTT ─────────────────────────────────────────────────────────────
+# ─── Zigbee (Zigbee2MQTT / ZHA) ──────────────────────────────────────────────
+
+# The `backend` param below selects which gateway to read the mesh from.
+# Omitted / "auto" prefers ZHA when it is set up (no broker needed, real
+# neighbour tables) and falls back to Zigbee2MQTT.
+
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "homelable/zigbee/devices"}
+    {vol.Required("type"): "homelable/zigbee/backends"}
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_zigbee_backends(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Report which Zigbee gateways are usable, so the panel only offers a
+    backend picker when the user actually runs both ZHA and Zigbee2MQTT."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    backends = coord.zigbee_backends()
+    connection.send_result(
+        msg["id"],
+        {**backends, "default": coord.resolve_zigbee_backend()},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/zigbee/devices",
+        vol.Optional("backend"): vol.In(["auto", "zha", "z2m"]),
+    }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_zigbee_devices(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Fetch the Z2M networkmap and return parsed nodes + edges."""
+    """Fetch the Zigbee mesh (ZHA or Z2M) and return parsed nodes + edges."""
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
+    backend = coord.resolve_zigbee_backend(msg.get("backend"))
     try:
-        nodes, edges = await coord.fetch_zigbee_networkmap()
+        nodes, edges = await coord.fetch_zigbee_networkmap(backend)
+    except ZhaNotReadyError as exc:
+        connection.send_error(msg["id"], "zha_not_configured", str(exc))
+        return
     except ZigbeeMqttNotReadyError as exc:
         connection.send_error(msg["id"], "mqtt_not_configured", str(exc))
         return
@@ -655,12 +690,20 @@ async def ws_zigbee_devices(
         return
     connection.send_result(
         msg["id"],
-        {"nodes": nodes, "edges": edges, "base_topic": coord.get_zigbee_base_topic()},
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "backend": backend,
+            "base_topic": coord.get_zigbee_base_topic(),
+        },
     )
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "homelable/zigbee/import"}
+    {
+        vol.Required("type"): "homelable/zigbee/import",
+        vol.Optional("backend"): vol.In(["auto", "zha", "z2m"]),
+    }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -673,7 +716,7 @@ async def ws_zigbee_import(
     if coord is None:
         _send_not_setup(connection, msg["id"])
         return
-    result = await coord.trigger_zigbee_import()
+    result = await coord.trigger_zigbee_import(msg.get("backend"))
     connection.send_result(msg["id"], result)
 
 

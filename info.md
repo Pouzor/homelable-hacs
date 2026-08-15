@@ -8,7 +8,7 @@ Visualize and monitor your homelab network as an interactive topology, inside Ho
 - nmap-based local network scanning + service fingerprinting
 - Live status monitoring (ping/HTTP/SSH/TCP)
 - 11 node types covering routers, switches, servers, Proxmox + VM/LXC, NAS, IoT, APs
-- Zigbee2MQTT and Z-Wave JS import through HA's MQTT integration
+- Zigbee import from ZHA or Zigbee2MQTT, plus Z-Wave JS through HA's MQTT integration
 - Proxmox VE import (hosts / VMs / LXC) via a read-only API token, with optional auto-sync
 - Canvas persisted via HA Storage — no external database
 - Uses HA native auth — no extra login

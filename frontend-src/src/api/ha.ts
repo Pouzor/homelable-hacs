@@ -267,22 +267,45 @@ export const scanApi = {
   },
 }
 
-// ─── Zigbee2MQTT ────────────────────────────────────────────────────────────
+// ─── Zigbee (Zigbee2MQTT / ZHA) ─────────────────────────────────────────────
 
-import type { ZigbeeNetworkmap, ZigbeeImportResult } from '@/components/zigbee/types'
+import type {
+  ZigbeeBackend,
+  ZigbeeBackends,
+  ZigbeeNetworkmap,
+  ZigbeeImportResult,
+} from '@/components/zigbee/types'
+
+/** Omitted backend = let the integration choose (ZHA when set up, else Z2M). */
+type BackendArg = ZigbeeBackend | 'auto' | undefined
+
+// The WS command schema rejects an explicit `backend: null`, so omit the key
+// entirely rather than sending an empty one.
+const backendArgs = (backend: BackendArg) => (backend ? { backend } : {})
 
 export const zigbeeApi = {
-  /** Fetch the Z2M networkmap. May reject with WS error `mqtt_not_configured`,
-   *  `timeout`, or `bad_response`. */
-  fetchDevices: async () => {
-    const result = await wsCall<ZigbeeNetworkmap>('homelable/zigbee/devices')
+  /** Which Zigbee gateways this HA instance can serve. */
+  backends: async () => {
+    const result = await wsCall<ZigbeeBackends>('homelable/zigbee/backends')
     return toAxiosLike(result)
   },
-  /** Kick off a background Zigbee import (fetch network map + push all
-   *  discovered devices into the pending store). Returns a running scan run;
+  /** Fetch the Zigbee mesh. May reject with WS error `zha_not_configured`,
+   *  `mqtt_not_configured`, `timeout`, or `bad_response`. */
+  fetchDevices: async (backend?: BackendArg) => {
+    const result = await wsCall<ZigbeeNetworkmap>(
+      'homelable/zigbee/devices',
+      backendArgs(backend)
+    )
+    return toAxiosLike(result)
+  },
+  /** Kick off a background Zigbee import (fetch mesh + push all discovered
+   *  devices into the pending store). Returns a running scan run;
    *  progress/completion is polled via Scan History. */
-  startImport: async () => {
-    const result = await wsCall<ZigbeeImportResult>('homelable/zigbee/import')
+  startImport: async (backend?: BackendArg) => {
+    const result = await wsCall<ZigbeeImportResult>(
+      'homelable/zigbee/import',
+      backendArgs(backend)
+    )
     return toAxiosLike(result)
   },
 }

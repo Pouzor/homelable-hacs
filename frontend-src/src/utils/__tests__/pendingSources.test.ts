@@ -34,6 +34,11 @@ describe('sourceBuckets', () => {
     expect([...sourceBuckets(device({ discovery_source: 'proxmox' }))]).toEqual(['proxmox'])
   })
 
+  it('buckets ZHA-discovered devices as zigbee', () => {
+    expect([...sourceBuckets(device({ discovery_source: 'zha' }))]).toEqual(['zigbee'])
+    expect([...sourceBuckets(device({ discovery_sources: ['zha'] }))]).toEqual(['zigbee'])
+  })
+
   it('uses the ieee heuristic when no source is recorded', () => {
     // Mesh device (non-pve ieee) with no discovery_source → zigbee.
     expect([...sourceBuckets(device({ ieee_address: '0x00124b00' }))]).toEqual(['zigbee'])

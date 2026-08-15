@@ -24,7 +24,7 @@ const SOURCE_ORDER: SourceBucket[] = ['ip', 'proxmox', 'zigbee', 'zwave']
  *  (zigbee2mqtt/zwavejs2mqtt) the mesh importers write. */
 function classify(s: string): SourceBucket {
   if (s === 'zwave' || s === 'zwavejs2mqtt') return 'zwave'
-  if (s === 'zigbee' || s === 'zigbee2mqtt') return 'zigbee'
+  if (s === 'zigbee' || s === 'zigbee2mqtt' || s === 'zha') return 'zigbee'
   if (s === 'proxmox' || s === 'proxmox_cluster') return 'proxmox'
   return 'ip' // arp / mdns / tcp / anything else → IP scan
 }

@@ -1,7 +1,7 @@
 {
   "domain": "homelable",
   "name": "Homelable",
-  "after_dependencies": ["zeroconf", "mqtt"],
+  "after_dependencies": ["zeroconf", "mqtt", "zha"],
   "codeowners": ["@Pouzor"],
   "config_flow": true,
   "dependencies": [
