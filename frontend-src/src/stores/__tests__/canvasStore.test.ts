@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
-import type { Node, Edge } from '@xyflow/react'
+import type { Node, Edge, NodeChange } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
 
 const makeNode = (id: string, overrides: Partial<NodeData> = {}): Node<NodeData> => ({
@@ -1272,5 +1272,215 @@ describe('canvasStore — floorMap', () => {
     useCanvasStore.getState().requestFloorMapEdit()
     useCanvasStore.getState().requestFloorMapEdit()
     expect(useCanvasStore.getState().floorMapEditNonce).toBe(start + 2)
+  })
+})
+
+describe('canvasStore — container host edits keep children & size', () => {
+  beforeEach(() => {
+    useCanvasStore.setState({ nodes: [], edges: [], hasUnsavedChanges: false })
+  })
+
+  // Regression: editing any field on a container host (e.g. its icon) used to
+  // re-fire setProxmoxContainerMode(true) because the modal always re-sends
+  // container_mode. Re-running the ON transition re-applied the
+  // absolute->relative conversion to children that were ALREADY relative,
+  // collapsing them into a corner. A redundant ON call must be a no-op for
+  // already-nested children.
+  it('setProxmoxContainerMode ON is idempotent for already-nested children', () => {
+    const proxmox: Node<NodeData> = {
+      id: 'px',
+      type: 'proxmox',
+      position: { x: 500, y: -300 },
+      width: 852,
+      height: 212,
+      data: { label: 'px', type: 'proxmox', status: 'unknown', services: [], container_mode: true },
+    }
+    const child: Node<NodeData> = {
+      id: 'vm1',
+      type: 'vm',
+      position: { x: 10, y: 62 },
+      data: { label: 'vm1', type: 'vm', status: 'unknown', services: [], parent_id: 'px' },
+      parentId: 'px',
+      extent: 'parent',
+    }
+    useCanvasStore.setState({ nodes: [proxmox, child] })
+    useCanvasStore.getState().setProxmoxContainerMode('px', true)
+    const c = useCanvasStore.getState().nodes.find((n) => n.id === 'vm1')
+    expect(c?.position).toEqual({ x: 10, y: 62 })
+    expect(c?.parentId).toBe('px')
+    expect(c?.extent).toBe('parent')
+  })
+
+  it('setProxmoxContainerMode OFF is idempotent for already-detached children', () => {
+    const px: Node<NodeData> = {
+      id: 'px',
+      type: 'proxmox',
+      position: { x: 500, y: -300 },
+      data: { label: 'px', type: 'proxmox', status: 'unknown', services: [], container_mode: false },
+    }
+    const child: Node<NodeData> = {
+      id: 'vm1',
+      type: 'vm',
+      position: { x: 510, y: -238 },
+      data: { label: 'vm1', type: 'vm', status: 'unknown', services: [], parent_id: 'px' },
+    }
+    useCanvasStore.setState({ nodes: [px, child] })
+    useCanvasStore.getState().setProxmoxContainerMode('px', false)
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'vm1')?.position).toEqual({ x: 510, y: -238 })
+  })
+
+  // Regression: editing any field on a container-mode vm/lxc/docker_host used to reset its
+  // manually-set height, snapping it back to auto-fit size and scrambling nested children.
+  it.each(['vm', 'lxc', 'docker_host'] as const)(
+    'updateNode preserves manual height for a container-mode %s when properties change',
+    (type) => {
+      const host: Node<NodeData> = {
+        id: 'h1',
+        type,
+        position: { x: 0, y: 0 },
+        width: 400,
+        height: 300,
+        data: { label: type, type, status: 'unknown', services: [], container_mode: true },
+      }
+      useCanvasStore.setState({ nodes: [host], edges: [] })
+      useCanvasStore.getState().updateNode('h1', { properties: [], label: 'renamed' })
+      expect(useCanvasStore.getState().nodes.find((n) => n.id === 'h1')?.height).toBe(300)
+    }
+  )
+
+  it('updateNode still resets height for a vm NOT in container mode when properties change', () => {
+    const leaf: Node<NodeData> = {
+      id: 'v1',
+      type: 'vm',
+      position: { x: 0, y: 0 },
+      width: 200,
+      height: 120,
+      data: { label: 'vm', type: 'vm', status: 'unknown', services: [], container_mode: false },
+    }
+    useCanvasStore.setState({ nodes: [leaf], edges: [] })
+    useCanvasStore.getState().updateNode('v1', { properties: [] })
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'v1')?.height).toBeUndefined()
+  })
+
+  it('updateNode preserves height for a proxmox host when properties change', () => {
+    const px: Node<NodeData> = {
+      id: 'px1',
+      type: 'proxmox',
+      position: { x: 0, y: 0 },
+      width: 500,
+      height: 350,
+      data: { label: 'px', type: 'proxmox', status: 'unknown', services: [], container_mode: true },
+    }
+    useCanvasStore.setState({ nodes: [px], edges: [] })
+    useCanvasStore.getState().updateNode('px1', { properties: [] })
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'px1')?.height).toBe(350)
+  })
+})
+
+describe('canvasStore — edge waypoints follow dragged nodes', () => {
+  const wpEdge = (id: string, source: string, target: string, waypoints?: { x: number; y: number }[]): Edge<EdgeData> => ({
+    id,
+    source,
+    target,
+    type: 'ethernet',
+    data: { type: 'ethernet', ...(waypoints ? { waypoints } : {}) },
+  })
+
+  /** A `position` NodeChange as React Flow emits during/after a drag. */
+  const posChange = (id: string, x: number, y: number): NodeChange<Node<NodeData>> => ({
+    type: 'position',
+    id,
+    position: { x, y },
+    dragging: false,
+  })
+
+  const node = (id: string, position = { x: 0, y: 0 }, extra: Partial<Node<NodeData>> = {}): Node<NodeData> => ({
+    id,
+    type: 'server',
+    position,
+    data: { label: id, type: 'server', status: 'unknown', services: [] },
+    ...extra,
+  })
+
+  beforeEach(() => {
+    useCanvasStore.setState({ nodes: [], edges: [], hasUnsavedChanges: false })
+  })
+
+  it('translates waypoints by the delta when a connected node is dragged', () => {
+    useCanvasStore.setState({
+      nodes: [node('a'), node('b')],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 100, y: 100 }, { x: 150, y: 120 }])],
+    })
+    // node 'a' starts at (0,0), dragged to (40,-10) -> delta (40,-10)
+    useCanvasStore.getState().onNodesChange([posChange('a', 40, -10)])
+
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 140, y: 90 }, { x: 190, y: 110 }])
+  })
+
+  it('leaves waypoints untouched when an unrelated node is dragged', () => {
+    useCanvasStore.setState({
+      nodes: [node('a'), node('b'), node('c')],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 100, y: 100 }])],
+    })
+    useCanvasStore.getState().onNodesChange([posChange('c', 40, 40)])
+
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 100, y: 100 }])
+  })
+
+  it('translates waypoints of edges between children when their container is dragged', () => {
+    // Children are parent-relative; their stored position does NOT change when
+    // the container moves, so the delta must be propagated down.
+    useCanvasStore.setState({
+      nodes: [
+        {
+          id: 'box',
+          type: 'lxc',
+          position: { x: 0, y: 0 },
+          data: { label: 'box', type: 'lxc', status: 'unknown', services: [], container_mode: true },
+        },
+        node('a', { x: 20, y: 20 }, { parentId: 'box', extent: 'parent' }),
+        node('b', { x: 80, y: 60 }, { parentId: 'box', extent: 'parent' }),
+      ],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 200, y: 200 }])],
+    })
+    useCanvasStore.getState().onNodesChange([posChange('box', 30, 15)])
+
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 230, y: 215 }])
+  })
+
+  it('translates once (not doubled) when both endpoints move by the same delta', () => {
+    useCanvasStore.setState({
+      nodes: [
+        {
+          id: 'box',
+          type: 'lxc',
+          position: { x: 0, y: 0 },
+          data: { label: 'box', type: 'lxc', status: 'unknown', services: [], container_mode: true },
+        },
+        node('a', { x: 20, y: 20 }, { parentId: 'box', extent: 'parent' }),
+        node('b', { x: 80, y: 60 }, { parentId: 'box', extent: 'parent' }),
+      ],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 100, y: 100 }])],
+    })
+    useCanvasStore.getState().onNodesChange([posChange('box', 10, 10)])
+
+    // +10 once, not +20
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 110, y: 110 }])
+  })
+
+  it('does not alter edges without waypoints', () => {
+    useCanvasStore.setState({ nodes: [node('a'), node('b')], edges: [wpEdge('e1', 'a', 'b')] })
+    const before = useCanvasStore.getState().edges[0]
+    useCanvasStore.getState().onNodesChange([posChange('a', 40, 40)])
+    expect(useCanvasStore.getState().edges[0]).toBe(before)
+  })
+
+  it('ignores select-only changes (no movement)', () => {
+    useCanvasStore.setState({
+      nodes: [node('a'), node('b')],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 100, y: 100 }])],
+    })
+    useCanvasStore.getState().onNodesChange([{ type: 'select', id: 'a', selected: true }])
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 100, y: 100 }])
   })
 })
