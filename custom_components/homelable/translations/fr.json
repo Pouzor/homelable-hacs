@@ -9,6 +9,7 @@
           "scan_auto_enabled": "Scanner automatiquement selon une planification",
           "scan_interval": "Intervalle de scan (secondes, min 300)",
           "status_interval": "Intervalle de vérification d'état (secondes)",
+          "zigbee_source": "Passerelle Zigbee",
           "zigbee_base_topic": "Topic de base Zigbee2MQTT",
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",
           "zwave_gateway": "Nom de la passerelle Z-Wave JS UI"
@@ -28,6 +29,7 @@
           "scan_auto_enabled": "Scanner automatiquement selon une planification",
           "scan_interval": "Intervalle de scan (secondes, min 300)",
           "status_interval": "Intervalle de vérification d'état (secondes)",
+          "zigbee_source": "Passerelle Zigbee",
           "zigbee_base_topic": "Topic de base Zigbee2MQTT",
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",
           "zwave_gateway": "Nom de la passerelle Z-Wave JS UI",
@@ -41,6 +43,15 @@
           "proxmox_sync_enabled": "Activer la synchronisation automatique Proxmox",
           "proxmox_sync_interval": "Intervalle de synchronisation automatique Proxmox (secondes)"
         }
+      }
+    }
+  },
+  "selector": {
+    "zigbee_source": {
+      "options": {
+        "auto": "Détection automatique (ZHA si installé, sinon Zigbee2MQTT)",
+        "zha": "ZHA",
+        "z2m": "Zigbee2MQTT"
       }
     }
   }

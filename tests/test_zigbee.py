@@ -229,7 +229,7 @@ async def test_trigger_zigbee_import_records_running_then_done(
         {"id": "0xR", "ieee_address": "0xR", "friendly_name": "Router", "type": "zigbee_router"},
     ]
 
-    async def fake_fetch() -> tuple[list[dict], list[dict]]:
+    async def fake_fetch(backend: str | None = None) -> tuple[list[dict], list[dict]]:  # noqa: ARG001
         return nodes, []
 
     monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", fake_fetch)
@@ -260,7 +260,7 @@ async def test_trigger_zigbee_import_records_error_run(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def boom() -> tuple[list[dict], list[dict]]:
+    async def boom(backend: str | None = None) -> tuple[list[dict], list[dict]]:  # noqa: ARG001
         raise RuntimeError("mqtt not ready")
 
     monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", boom)

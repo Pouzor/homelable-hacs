@@ -2,7 +2,7 @@
 
 Here's what Homelable can do inside Home Assistant. One line on what each feature is, then how to switch it on and use it.
 
-> **Home Assistant integration.** Everything runs inside HA. Configuration is UI-driven (config flow + the integration's **Configure** menu), scanning is pure Python, and MQTT imports reuse the broker HA already talks to.
+> **Home Assistant integration.** Everything runs inside HA. Configuration is UI-driven (config flow + the integration's **Configure** menu), scanning is pure Python, ZHA is read straight from the integration, and the MQTT imports reuse the broker HA already talks to.
 
 ---
 
@@ -103,14 +103,18 @@ Here's what Homelable can do inside Home Assistant. One line on what each featur
 
 ## 8. Zigbee Import
 
-**What:** Pull your **Zigbee2MQTT** topology in through Home Assistant's MQTT integration and drop every device on the canvas as a typed node.
+**What:** Pull your Zigbee topology in and drop every device on the canvas as a typed node. Works with either gateway:
+
+- **ZHA** — read straight from Home Assistant's own ZHA integration. No MQTT broker, no re-pairing, and it returns instantly.
+- **Zigbee2MQTT** — a network-map request over the MQTT broker HA already talks to.
 
 **Use:**
-1. Sidebar → **Zigbee Import**.
-2. No broker config needed — it uses the MQTT broker HA already talks to. Set the base topic (default `zigbee2mqtt`) if you changed it.
-3. **Fetch Devices** → pick from the grouped list → **Add N to Canvas**.
+1. Pick your gateway once: Settings → Devices & services → Homelable → **Configure** → **Zigbee gateway**. `Auto-detect` (the default) uses ZHA when its integration is set up, otherwise Zigbee2MQTT; set it explicitly if you run both.
+2. Nothing else to configure for ZHA. For Zigbee2MQTT, set the base topic (default `zigbee2mqtt`) if you changed it.
+3. Sidebar → **Zigbee Import**. The dialog names the gateway it is about to use.
+4. **Start Zigbee scan** → results land in **Pending** → approve them onto the canvas.
 
-Nodes come in as `zigbee_coordinator` / `zigbee_router` / `zigbee_enddevice`. The hierarchy (coordinator → routers → end devices) and **LQI** are filled in automatically.
+Nodes come in as `zigbee_coordinator` / `zigbee_router` / `zigbee_enddevice`. The hierarchy (coordinator → routers → end devices) and **LQI** are filled in automatically — ZHA reads them from the radio's neighbour tables, Z2M from the network map.
 
 ---
 

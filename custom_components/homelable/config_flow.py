@@ -6,6 +6,11 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     CONF_PROXMOX_HOST,
@@ -22,6 +27,7 @@ from .const import (
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    CONF_ZIGBEE_SOURCE,
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
     DEFAULT_PROXMOX_PORT,
@@ -35,13 +41,26 @@ from .const import (
     DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
+    DEFAULT_ZIGBEE_SOURCE,
     DEFAULT_ZWAVE_GATEWAY,
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
     MIN_PROXMOX_SYNC_INTERVAL,
     MIN_SCAN_INTERVAL,
     MIN_SERVICE_CHECK_INTERVAL,
+    ZIGBEE_SOURCES,
 )
+
+
+def _zigbee_source_selector() -> SelectSelector:
+    """Dropdown for the Zigbee gateway, labels translated via `selector.*`."""
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=list(ZIGBEE_SOURCES),
+            mode=SelectSelectorMode.DROPDOWN,
+            translation_key=CONF_ZIGBEE_SOURCE,
+        )
+    )
 
 
 class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -73,6 +92,9 @@ class HomelableConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_STATUS_INTERVAL, default=DEFAULT_STATUS_INTERVAL
                 ): int,
+                vol.Required(
+                    CONF_ZIGBEE_SOURCE, default=DEFAULT_ZIGBEE_SOURCE
+                ): _zigbee_source_selector(),
                 vol.Optional(
                     CONF_ZIGBEE_BASE_TOPIC, default=DEFAULT_ZIGBEE_BASE_TOPIC
                 ): str,
@@ -136,6 +158,10 @@ class HomelableOptionsFlow(OptionsFlow):
                     CONF_STATUS_INTERVAL,
                     default=data.get(CONF_STATUS_INTERVAL, DEFAULT_STATUS_INTERVAL),
                 ): int,
+                vol.Required(
+                    CONF_ZIGBEE_SOURCE,
+                    default=data.get(CONF_ZIGBEE_SOURCE, DEFAULT_ZIGBEE_SOURCE),
+                ): _zigbee_source_selector(),
                 vol.Optional(
                     CONF_ZIGBEE_BASE_TOPIC,
                     default=data.get(

@@ -16,7 +16,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from . import proxmox, scanner, status_checker, zigbee, zwave
+from . import proxmox, scanner, status_checker, zha, zigbee, zwave
 from .const import (
     CONF_PROXMOX_HOST,
     CONF_PROXMOX_PORT,
@@ -32,6 +32,7 @@ from .const import (
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_BASE_TOPIC,
+    CONF_ZIGBEE_SOURCE,
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
     DEFAULT_DESIGN_ICON,
@@ -48,6 +49,7 @@ from .const import (
     DEFAULT_SERVICE_CHECK_INTERVAL,
     DEFAULT_STATUS_INTERVAL,
     DEFAULT_ZIGBEE_BASE_TOPIC,
+    DEFAULT_ZIGBEE_SOURCE,
     DEFAULT_ZWAVE_GATEWAY,
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
@@ -69,6 +71,9 @@ from .const import (
     STORAGE_VERSION_DESIGNS,
     STORAGE_VERSION_PENDING,
     STORAGE_VERSION_RUNS,
+    ZIGBEE_SOURCE_Z2M,
+    ZIGBEE_SOURCE_ZHA,
+    ZIGBEE_SOURCES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1825,7 +1830,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         scanner.request_cancel(self._scan_run_id)
         return True
 
-    # ─── Zigbee2MQTT ─────────────────────────────────────────────────────────
+    # ─── Zigbee (Zigbee2MQTT / ZHA) ──────────────────────────────────────────
 
     def get_zigbee_base_topic(self) -> str:
         return self.entry.options.get(
@@ -1833,33 +1838,93 @@ class HomelableCoordinator(DataUpdateCoordinator):
             self.entry.data.get(CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC),
         )
 
+    def get_zigbee_source(self) -> str:
+        """The configured Zigbee gateway: ``"auto"``, ``"zha"`` or ``"z2m"``."""
+        value = self.entry.options.get(
+            CONF_ZIGBEE_SOURCE,
+            self.entry.data.get(CONF_ZIGBEE_SOURCE, DEFAULT_ZIGBEE_SOURCE),
+        )
+        return value if value in ZIGBEE_SOURCES else DEFAULT_ZIGBEE_SOURCE
+
+    def zigbee_gateway(self) -> dict[str, Any]:
+        """What the panel needs to name the gateway it is about to use.
+
+        ``source`` is the user's setting, ``resolved`` is what an import would
+        actually talk to, and ``zha_detected`` says whether "auto" had anything
+        to detect. Deliberately no "is Z2M available" flag: HA's MQTT
+        integration being loaded says nothing about Zigbee2MQTT running — it is
+        just as likely to be Tasmota or ESPHome — so Z2M is only ever claimed
+        because the user configured it (or because no ZHA was found).
+        """
+        return {
+            "source": self.get_zigbee_source(),
+            "resolved": self.resolve_zigbee_backend(),
+            "zha_detected": zha.zha_available(self.hass),
+        }
+
+    def resolve_zigbee_backend(self, requested: str | None = None) -> str:
+        """Pick the Zigbee data source — ``"zha"`` or ``"z2m"``.
+
+        An explicit per-call ``requested`` wins (the WS override), then the
+        configured source. ``"auto"`` prefers ZHA when its integration is set
+        up: it needs no broker and carries the real neighbour tables. Otherwise
+        Zigbee2MQTT, which stays the default for every install that never had
+        ZHA.
+        """
+        if requested in (ZIGBEE_SOURCE_ZHA, ZIGBEE_SOURCE_Z2M):
+            return requested
+        source = self.get_zigbee_source()
+        if source in (ZIGBEE_SOURCE_ZHA, ZIGBEE_SOURCE_Z2M):
+            return source
+        return (
+            ZIGBEE_SOURCE_ZHA
+            if zha.zha_available(self.hass)
+            else ZIGBEE_SOURCE_Z2M
+        )
+
+    def _zigbee_run_target(self, backend: str) -> list[str]:
+        """What to show in Scan History's `ranges` column for this backend."""
+        if backend == "zha":
+            return ["zha"]
+        base = self.get_zigbee_base_topic()
+        return [base] if base else []
+
     async def fetch_zigbee_networkmap(
-        self,
+        self, backend: str | None = None
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Trigger a Z2M networkmap request and return parsed (nodes, edges)."""
+        """Fetch the Zigbee mesh and return parsed (nodes, edges).
+
+        ZHA reads straight from the running integration; Z2M does an MQTT
+        networkmap round-trip. Both return the same node/edge shape.
+        """
+        if self.resolve_zigbee_backend(backend) == "zha":
+            return await zha.fetch_zha_network(self.hass)
         return await zigbee.fetch_networkmap(self.hass, self.get_zigbee_base_topic())
 
-    async def trigger_zigbee_import(self) -> dict[str, Any]:
+    async def trigger_zigbee_import(
+        self, backend: str | None = None
+    ) -> dict[str, Any]:
         """Kick off a Zigbee import in the background. Returns immediately.
 
         Records a ``kind="zigbee"`` scan run (running) and spawns the actual
-        network-map fetch + pending-store write, so the import surfaces under
+        network fetch + pending-store write, so the import surfaces under
         Scan History with a live running → done transition — mirroring IP
-        scans. The MQTT round-trip (which can take minutes on large meshes)
-        runs in the background instead of blocking the UI. The panel polls
+        scans. The Z2M round-trip (which can take minutes on large meshes)
+        runs in the background instead of blocking the UI; ZHA is instant but
+        takes the same path so both report identically. The panel polls
         history for progress / completion.
 
-        Response: ``{run_id, status: "running", devices_found: 0}``.
+        Response: ``{run_id, status: "running", devices_found: 0, backend}``.
         """
         run_id = uuid.uuid4().hex
         started_at = _utc_now_iso()
-        base = self.get_zigbee_base_topic()
+        resolved = self.resolve_zigbee_backend(backend)
         await self._record_run(
             {
                 "id": run_id,
                 "status": "running",
                 "kind": "zigbee",
-                "ranges": [base] if base else [],
+                "ranges": self._zigbee_run_target(resolved),
                 "devices_found": 0,
                 "started_at": started_at,
                 "finished_at": None,
@@ -1867,20 +1932,24 @@ class HomelableCoordinator(DataUpdateCoordinator):
             }
         )
         self.hass.async_create_background_task(
-            self._run_zigbee_import_task(run_id, started_at),
+            self._run_zigbee_import_task(run_id, started_at, resolved),
             f"{DOMAIN}_zigbee_import_{run_id}",
         )
-        return {"run_id": run_id, "status": "running", "devices_found": 0}
+        return {
+            "run_id": run_id,
+            "status": "running",
+            "devices_found": 0,
+            "backend": resolved,
+        }
 
     async def _run_zigbee_import_task(
-        self, run_id: str, started_at: str
+        self, run_id: str, started_at: str, backend: str = "z2m"
     ) -> None:
         """Background Zigbee import body: fetch network map, import, record."""
-        base = self.get_zigbee_base_topic()
-        ranges = [base] if base else []
+        ranges = self._zigbee_run_target(backend)
         try:
-            nodes, _edges = await self.fetch_zigbee_networkmap()
-            await self.import_zigbee_devices(nodes)
+            nodes, _edges = await self.fetch_zigbee_networkmap(backend)
+            await self.import_zigbee_devices(nodes, backend=backend)
         except Exception as exc:  # noqa: BLE001 — record any failure, then exit
             _LOGGER.exception("Zigbee import %s failed", run_id)
             await self._record_run(
@@ -1924,21 +1993,26 @@ class HomelableCoordinator(DataUpdateCoordinator):
         )
 
     async def import_zigbee_devices(
-        self, devices: list[dict[str, Any]]
+        self, devices: list[dict[str, Any]], *, backend: str = "z2m"
     ) -> dict[str, int]:
         """Push selected Zigbee devices into the pending store.
 
-        Each entry in `devices` is a parsed networkmap node dict from
-        ``zigbee.parse_networkmap``. Already-pending IEEE addresses are skipped;
+        Each entry in `devices` is a mesh node dict from
+        ``zigbee.parse_networkmap`` or ``zha.fetch_zha_network`` — the two
+        share a shape. Already-pending IEEE addresses are skipped;
         already-approved (on-canvas) devices have their IEEE/Vendor/Model/LQI
         properties refreshed instead of being re-added.
+
+        ``source`` stays ``"zigbee"`` whichever backend produced the devices,
+        so dedup and the panel's Zigbee filter treat them as one inventory;
+        only ``discovery_source`` records which gateway saw them.
 
         Returns: ``{"added": N, "skipped": M, "refreshed": K}``.
         """
         return await self._import_wireless_devices(
             devices,
             source="zigbee",
-            discovery_source="zigbee2mqtt",
+            discovery_source="zha" if backend == "zha" else "zigbee2mqtt",
             build_props=lambda ieee, vendor, model, lqi: zigbee.build_zigbee_properties(
                 ieee, vendor, model, lqi
             ),
