@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { SearchBar } from '../SearchBar'
 import * as canvasStore from '@/stores/canvasStore'
 
 vi.mock('@/stores/canvasStore')
+
+let pendingDevices: unknown[] = []
+
+vi.mock('@/api/client', () => ({
+  scanApi: { pending: () => Promise.resolve({ data: pendingDevices }) },
+}))
 
 vi.mock('@xyflow/react', () => ({
   useReactFlow: () => ({ setCenter: vi.fn() }),
@@ -33,6 +39,7 @@ function openSearch() {
 describe('SearchBar', () => {
   beforeEach(() => {
     setupStore([])
+    pendingDevices = []
     vi.clearAllMocks()
   })
 
@@ -101,6 +108,61 @@ describe('SearchBar', () => {
     fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'nginx' } })
     expect(screen.getByText('Web Server')).toBeDefined()
     expect(screen.queryByText('DB Server')).toBeNull()
+  })
+
+  it('filters by notes', () => {
+    setupStore([
+      makeNode('n1', { data: { label: 'Server A', type: 'server', status: 'online', services: [], ip: null, hostname: null, notes: 'backup target every night' } }),
+      makeNode('n2', { data: { label: 'Server B', type: 'server', status: 'online', services: [], ip: null, hostname: null, notes: 'primary web host' } }),
+    ])
+    render(<SearchBar />)
+    openSearch()
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'backup' } })
+    expect(screen.getByText('Server A')).toBeDefined()
+    expect(screen.queryByText('Server B')).toBeNull()
+  })
+
+  it('filters by visible property key or value', () => {
+    setupStore([
+      makeNode('n1', { data: { label: 'Server A', type: 'server', status: 'online', services: [], ip: null, hostname: null, properties: [{ key: 'rack', value: 'B12', icon: null, visible: true }] } }),
+      makeNode('n2', { data: { label: 'Server B', type: 'server', status: 'online', services: [], ip: null, hostname: null, properties: [{ key: 'rack', value: 'A01', icon: null, visible: true }] } }),
+    ])
+    render(<SearchBar />)
+    openSearch()
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'b12' } })
+    expect(screen.getByText('Server A')).toBeDefined()
+    expect(screen.queryByText('Server B')).toBeNull()
+  })
+
+  it('ignores hidden properties', () => {
+    setupStore([
+      makeNode('n1', { data: { label: 'Server A', type: 'server', status: 'online', services: [], ip: null, hostname: null, properties: [{ key: 'secret', value: 'hidden-val', icon: null, visible: false }] } }),
+    ])
+    render(<SearchBar />)
+    openSearch()
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'hidden-val' } })
+    expect(screen.queryByText('Server A')).toBeNull()
+  })
+
+  it('shows the matched value alongside the node label', () => {
+    setupStore([
+      makeNode('n1', { data: { label: 'Server A', type: 'server', status: 'online', services: [], ip: null, hostname: null, properties: [{ key: 'rack', value: 'B12', icon: null, visible: true }] } }),
+    ])
+    render(<SearchBar />)
+    openSearch()
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'b12' } })
+    expect(screen.getByText('rack = B12')).toBeDefined()
+  })
+
+  it('does not crash on pending devices without an IP', async () => {
+    pendingDevices = [
+      { id: 'p1', ip: null, mac: null, hostname: 'nas-box', os: null, services: [], suggested_type: null, status: 'pending', discovery_source: null, discovered_at: '2026-01-01T00:00:00Z' },
+    ]
+    render(<SearchBar />)
+    openSearch()
+    await waitFor(() => expect(screen.getByPlaceholderText(/search/i)).toBeDefined())
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'nas' } })
+    expect(screen.getByText('nas-box')).toBeDefined()
   })
 
   it('excludes groupRect nodes from results', () => {
