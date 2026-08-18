@@ -1,5 +1,5 @@
 import { createElement, useRef, useState } from 'react'
-import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff } from 'lucide-react'
+import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff, GripVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
@@ -36,6 +36,10 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
   const [newProp, setNewProp] = useState<PropForm>(EMPTY_PROP)
   const [editingPropIndex, setEditingPropIndex] = useState<number | null>(null)
   const [editProp, setEditProp] = useState<PropForm>(EMPTY_PROP)
+  const [dragSvcIndex, setDragSvcIndex] = useState<number | null>(null)
+  const [dragOverSvcIndex, setDragOverSvcIndex] = useState<number | null>(null)
+  const [dragPropIndex, setDragPropIndex] = useState<number | null>(null)
+  const [dragOverPropIndex, setDragOverPropIndex] = useState<number | null>(null)
 
   // Multi-select panel
   const multiSelected = (selectedNodeIds ?? []).filter((id) => nodes.some((n) => n.id === id))
@@ -154,6 +158,15 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
     setEditingFor(null)
   }
 
+  const handleReorderService = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= services.length || to >= services.length) return
+    snapshotHistory()
+    const reordered = [...services]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    updateNode(node.id, { services: reordered })
+  }
+
   // --- Property handlers ---
   const properties: NodeProperty[] = data.properties ?? []
 
@@ -198,6 +211,15 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
       ),
     })
     setEditingPropIndex(null)
+  }
+
+  const handleReorderProp = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= properties.length || to >= properties.length) return
+    snapshotHistory()
+    const reordered = [...properties]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    updateNode(node.id, { properties: reordered })
   }
 
   return (
@@ -287,6 +309,17 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
                 <PropertyBadge
                   key={`${prop.key}-${i}`}
                   prop={prop}
+                  draggable={properties.length > 1}
+                  isDragging={dragPropIndex === i}
+                  isDragOver={dragOverPropIndex === i && dragPropIndex !== i}
+                  onDragStart={() => setDragPropIndex(i)}
+                  onDragEnter={() => { if (dragPropIndex !== null) setDragOverPropIndex(i) }}
+                  onDragEnd={() => { setDragPropIndex(null); setDragOverPropIndex(null) }}
+                  onDrop={() => {
+                    if (dragPropIndex !== null) handleReorderProp(dragPropIndex, i)
+                    setDragPropIndex(null)
+                    setDragOverPropIndex(null)
+                  }}
                   onToggleVisible={() => handleTogglePropVisible(i)}
                   onEdit={() => handleStartEditProp(i)}
                   onRemove={() => handleRemoveProp(i)}
@@ -314,7 +347,25 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
               editingIndex === i ? (
                 <ServiceForm key={`edit-${i}`} form={editSvc} onChange={setEditSvc} onConfirm={handleSaveEdit} onCancel={() => setEditingFor(null)} confirmLabel="Save" autoFocus />
               ) : (
-                <ServiceBadge key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`} svc={svc} host={host} status={serviceStatuses[serviceStatusKey(node.id, svc.port, svc.protocol)]} onEdit={() => handleStartEdit(i)} onRemove={() => handleRemoveService(i)} />
+                <ServiceBadge
+                  key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`}
+                  svc={svc}
+                  host={host}
+                  status={serviceStatuses[serviceStatusKey(node.id, svc.port, svc.protocol)]}
+                  draggable={services.length > 1}
+                  isDragging={dragSvcIndex === i}
+                  isDragOver={dragOverSvcIndex === i && dragSvcIndex !== i}
+                  onDragStart={() => setDragSvcIndex(i)}
+                  onDragEnter={() => { if (dragSvcIndex !== null) setDragOverSvcIndex(i) }}
+                  onDragEnd={() => { setDragSvcIndex(null); setDragOverSvcIndex(null) }}
+                  onDrop={() => {
+                    if (dragSvcIndex !== null) handleReorderService(dragSvcIndex, i)
+                    setDragSvcIndex(null)
+                    setDragOverSvcIndex(null)
+                  }}
+                  onEdit={() => handleStartEdit(i)}
+                  onRemove={() => handleRemoveService(i)}
+                />
               )
             )}
           </div>
@@ -753,16 +804,41 @@ function PropertyForm({ form, onChange, onConfirm, onCancel, confirmLabel }: {
   )
 }
 
-function PropertyBadge({ prop, onToggleVisible, onEdit, onRemove }: {
+function PropertyBadge({ prop, draggable, isDragging, isDragOver, onDragStart, onDragEnter, onDragEnd, onDrop, onToggleVisible, onEdit, onRemove }: {
   prop: NodeProperty
+  draggable: boolean
+  isDragging: boolean
+  isDragOver: boolean
+  onDragStart: () => void
+  onDragEnter: () => void
+  onDragEnd: () => void
+  onDrop: () => void
   onToggleVisible: () => void
   onEdit: () => void
   onRemove: () => void
 }) {
   const Icon = resolvePropertyIcon(prop.icon)
   return (
-    <div className="group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs transition-colors" style={{ background: '#21262d', borderColor: '#30363d' }}>
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDragEnd={onDragEnd}
+      onDrop={(e) => { e.preventDefault(); onDrop() }}
+      className="group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs transition-colors"
+      style={{
+        background: '#21262d',
+        borderColor: isDragOver ? '#00d4ff' : '#30363d',
+        opacity: isDragging ? 0.4 : 1,
+      }}
+    >
       <div className="flex items-center gap-1.5 min-w-0">
+        {draggable && (
+          <span className="shrink-0 cursor-grab active:cursor-grabbing text-[#8b949e] hover:text-[#00d4ff]" title="Drag to reorder">
+            {createElement(GripVertical, { size: 11 })}
+          </span>
+        )}
         {Icon && createElement(Icon, { size: 11, className: 'shrink-0 text-muted-foreground' })}
         <span className="font-medium truncate text-foreground" title={prop.key}>{prop.key}</span>
         <span className="text-muted-foreground truncate" title={prop.value}>· {prop.value}</span>
@@ -790,7 +866,20 @@ const CATEGORY_COLORS: Record<string, string> = {
   web: '#00d4ff', database: '#a855f7', monitoring: '#39d353', storage: '#e3b341', security: '#f85149', remote: '#8b949e',
 }
 
-function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInfo; host?: string; status?: ServiceStatus; onEdit: () => void; onRemove: () => void }) {
+function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, onDragStart, onDragEnter, onDragEnd, onDrop, onEdit, onRemove }: {
+  svc: ServiceInfo
+  host?: string
+  status?: ServiceStatus
+  draggable: boolean
+  isDragging: boolean
+  isDragOver: boolean
+  onDragStart: () => void
+  onDragEnter: () => void
+  onDragEnd: () => void
+  onDrop: () => void
+  onEdit: () => void
+  onRemove: () => void
+}) {
   const url = getServiceUrl(svc, host)
   // Manually-added services carry no category, so they fell back to grey even
   // when they're reachable HTTP/HTTPS. Treat any resolvable web URL as `web`.
@@ -801,10 +890,25 @@ function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInf
 
   return (
     <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      onDragEnd={onDragEnd}
+      onDrop={(e) => { e.preventDefault(); onDrop() }}
       className="group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs transition-colors min-w-0"
-      style={{ background: '#21262d', borderColor: '#30363d' }}
+      style={{
+        background: '#21262d',
+        borderColor: isDragOver ? '#00d4ff' : '#30363d',
+        opacity: isDragging ? 0.4 : 1,
+      }}
     >
       <div className="flex items-center gap-1.5 min-w-0 flex-1">
+        {draggable && (
+          <span className="shrink-0 cursor-grab active:cursor-grabbing text-[#8b949e] hover:text-[#00d4ff]" title="Drag to reorder">
+            {createElement(GripVertical, { size: 11 })}
+          </span>
+        )}
         <span className="shrink-0 w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
 
         {url ? (
