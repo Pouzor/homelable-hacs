@@ -29,10 +29,27 @@ class HomelablePanel extends HTMLElement {
   private _hass: Hass | null = null
   private _root: Root | null = null
   private _mountPoint: HTMLDivElement | null = null
+  private _resizeObserver: ResizeObserver | null = null
+  private _onResize = () => this._applyHeight()
 
   constructor() {
     super()
     this.attachShadow({ mode: 'open' })
+  }
+
+  /**
+   * `height: 100%` only resolves when every ancestor up to <html> has a
+   * resolved height. Depending on the HA version and the browser the panel
+   * container is sometimes laid out with `height: auto`, and the panel then
+   * collapses to its content instead of filling the window. Measure the space
+   * actually left below the host and pin it in pixels — that stays correct
+   * whether or not HA renders a toolbar above us.
+   */
+  private _applyHeight() {
+    if (!this.isConnected) return
+    const top = this.getBoundingClientRect().top
+    const available = Math.max(0, window.innerHeight - top)
+    if (available > 0) this.style.height = `${available}px`
   }
 
   set hass(value: Hass) {
@@ -69,10 +86,21 @@ class HomelablePanel extends HTMLElement {
       this._mountPoint.style.cssText = 'width: 100%; height: 100%;'
       shadow.appendChild(this._mountPoint)
     }
+    this._applyHeight()
+    window.addEventListener('resize', this._onResize)
+    if (typeof ResizeObserver !== 'undefined' && !this._resizeObserver) {
+      // The host moves vertically when HA shows/hides its own chrome.
+      this._resizeObserver = new ResizeObserver(this._onResize)
+      this._resizeObserver.observe(document.documentElement)
+    }
+
     if (this._hass) this._mount()
   }
 
   disconnectedCallback() {
+    window.removeEventListener('resize', this._onResize)
+    this._resizeObserver?.disconnect()
+    this._resizeObserver = null
     if (this._root) {
       this._root.unmount()
       this._root = null
