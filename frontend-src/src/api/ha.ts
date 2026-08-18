@@ -448,7 +448,14 @@ export async function subscribeStatus(
 
 export interface ServiceStatusUpdate {
   node_id: string
-  services: Array<{ port?: number; protocol?: string; status: 'online' | 'offline' | 'unknown' }>
+  services: Array<{
+    port?: number
+    protocol?: string
+    /** Per-service host override, part of the overlay key — several vhosts can
+     *  share one port on one node. Null when the service has none. */
+    host?: string | null
+    status: 'online' | 'offline' | 'unknown'
+  }>
   checked_at?: string
 }
 
