@@ -1213,8 +1213,24 @@ describe('canvasStore — per-service status overlay', () => {
   })
 
   it('serviceStatusKey is stable for the same node/port/protocol', () => {
-    expect(serviceStatusKey('n1', 80, 'tcp')).toBe('n1:80/tcp')
-    expect(serviceStatusKey('n1', undefined, undefined)).toBe('n1:/')
+    expect(serviceStatusKey('n1', 80, 'tcp')).toBe('n1:80/tcp@')
+    expect(serviceStatusKey('n1', undefined, undefined)).toBe('n1:/@')
+  })
+
+  it('serviceStatusKey separates two vhosts sharing a port', () => {
+    expect(serviceStatusKey('n1', 443, 'tcp', 'blog.example.com')).not.toBe(
+      serviceStatusKey('n1', 443, 'tcp', 'shop.example.com'),
+    )
+  })
+
+  it('setServiceStatuses keys a host-overridden service by its own host', () => {
+    useCanvasStore.getState().setServiceStatuses('n1', [
+      { port: 443, protocol: 'tcp', host: 'blog.example.com', status: 'online' },
+      { port: 443, protocol: 'tcp', host: 'shop.example.com', status: 'offline' },
+    ])
+    const { serviceStatuses } = useCanvasStore.getState()
+    expect(serviceStatuses[serviceStatusKey('n1', 443, 'tcp', 'blog.example.com')]).toBe('online')
+    expect(serviceStatuses[serviceStatusKey('n1', 443, 'tcp', 'shop.example.com')]).toBe('offline')
   })
 
   it('setServiceStatuses stores statuses keyed per node+service', () => {

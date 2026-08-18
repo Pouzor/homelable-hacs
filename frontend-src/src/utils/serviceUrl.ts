@@ -35,7 +35,15 @@ function parseHostParts(host: string): { protocol?: 'http' | 'https'; hostname: 
   if (!firstHost) return null
 
   if (firstHost.startsWith('http://') || firstHost.startsWith('https://')) {
-    const url = new URL(firstHost)
+    // A hand-typed host override can be a bare scheme ("https://"), which
+    // throws — an unusable URL is null, not a crashed render.
+    let url: URL
+    try {
+      url = new URL(firstHost)
+    } catch {
+      return null
+    }
+    if (!url.hostname) return null
     return {
       protocol: url.protocol === 'https:' ? 'https' : 'http',
       hostname: url.hostname,
@@ -78,10 +86,13 @@ function formatHostname(hostname: string): string {
 }
 
 export function getServiceUrl(svc: ServiceInfo, host?: string): string | null {
-  if (!host) return null
+  // A node can serve several domains, so a service may carry its own host that
+  // overrides the node one.
+  const effectiveHost = svc.host?.trim() || host
+  if (!effectiveHost) return null
   if (svc.protocol === 'udp') return null // UDP — not HTTP
 
-  const parts = parseHostParts(host)
+  const parts = parseHostParts(effectiveHost)
   if (!parts?.hostname) return null
 
   const effectivePort = svc.port ?? parts.port

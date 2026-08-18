@@ -222,8 +222,96 @@ async def test_check_services_returns_one_row_per_service() -> None:
     with patch.object(status_checker, "_http_get", AsyncMock(return_value=True)):
         rows = await status_checker.check_services("10.0.0.5", services)
     assert rows == [
-        {"port": 80, "protocol": "tcp", "status": "online"},
-        {"port": 22, "protocol": "tcp", "status": "unknown"},
+        {"port": 80, "protocol": "tcp", "host": None, "status": "online"},
+        {"port": 22, "protocol": "tcp", "host": None, "status": "unknown"},
+    ]
+
+
+# --- Per-service host override ---
+
+async def _captured_url(svc: dict, host: str | None) -> str | None:
+    """Run check_service with the network stubbed out; return the probed URL."""
+    captured: dict[str, str] = {}
+
+    async def fake_http_get(url: str, verify: bool = False) -> bool:
+        captured["url"] = url
+        return True
+
+    with (
+        patch.object(status_checker, "_http_get", fake_http_get),
+        patch.object(status_checker, "_host_is_allowed", lambda *_: True),
+    ):
+        await status_checker.check_service(svc, host)
+    return captured.get("url")
+
+
+@pytest.mark.asyncio
+async def test_check_service_uses_the_host_override() -> None:
+    svc = {"port": 8080, "protocol": "tcp", "service_name": "blog", "host": "blog.example.com"}
+    assert await _captured_url(svc, "10.0.0.1") == "http://blog.example.com:8080"
+
+
+@pytest.mark.asyncio
+async def test_check_service_falls_back_to_the_node_host_when_override_is_blank() -> None:
+    svc = {"port": 8080, "protocol": "tcp", "service_name": "blog", "host": "   "}
+    assert await _captured_url(svc, "10.0.0.1") == "http://10.0.0.1:8080"
+
+
+@pytest.mark.asyncio
+async def test_check_service_honours_a_scheme_in_the_override() -> None:
+    svc = {"protocol": "tcp", "service_name": "blog", "host": "https://blog.example.com"}
+    assert await _captured_url(svc, "10.0.0.1") == "https://blog.example.com"
+
+
+@pytest.mark.asyncio
+async def test_check_service_takes_the_port_from_the_override() -> None:
+    svc = {"protocol": "tcp", "service_name": "blog", "host": "blog.example.com:8443"}
+    assert await _captured_url(svc, "10.0.0.1") == "https://blog.example.com:8443"
+
+
+@pytest.mark.asyncio
+async def test_check_service_lets_the_service_port_beat_the_override_port() -> None:
+    svc = {"port": 3000, "protocol": "tcp", "service_name": "blog", "host": "blog.example.com:8443"}
+    assert await _captured_url(svc, "10.0.0.1") == "http://blog.example.com:3000"
+
+
+@pytest.mark.asyncio
+async def test_check_service_uses_the_first_host_of_a_comma_list_override() -> None:
+    svc = {
+        "port": 8080,
+        "protocol": "tcp",
+        "service_name": "blog",
+        "host": "blog.example.com, alt.example.com",
+    }
+    assert await _captured_url(svc, "10.0.0.1") == "http://blog.example.com:8080"
+
+
+@pytest.mark.asyncio
+async def test_check_service_brackets_an_ipv6_override() -> None:
+    svc = {"port": 80, "protocol": "tcp", "service_name": "http", "host": "[2001:db8::1]:8080"}
+    assert await _captured_url(svc, "10.0.0.1") == "http://[2001:db8::1]:80"
+
+
+@pytest.mark.asyncio
+async def test_check_service_skips_a_non_http_port_behind_an_override() -> None:
+    svc = {"port": 5432, "protocol": "tcp", "service_name": "postgres", "host": "db.example.com"}
+    with patch.object(status_checker, "_http_get", AsyncMock()) as mock:
+        assert await status_checker.check_service(svc, "10.0.0.1") == "unknown"
+    mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_services_echoes_the_host_override() -> None:
+    services = [
+        {"port": 443, "protocol": "tcp", "service_name": "blog", "host": "blog.example.com"}
+    ]
+    with (
+        patch.object(status_checker, "_http_get", AsyncMock(return_value=True)),
+        patch.object(status_checker, "_host_is_allowed", lambda *_: True),
+    ):
+        rows = await status_checker.check_services("10.0.0.1", services)
+    assert rows == [
+        {"port": 443, "protocol": "tcp", "host": "blog.example.com", "status": "online"},
     ]
 
 
