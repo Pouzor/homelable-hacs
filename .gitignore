@@ -20,6 +20,7 @@ npm-debug.log*
 # Frontend build output (regenerated each release)
 custom_components/homelable/frontend/homelable-panel-*
 custom_components/homelable/frontend/homelable-chunk-*
+custom_components/homelable/frontend/homelable-card-*
 !custom_components/homelable/frontend/.gitkeep
 
 # IDE
