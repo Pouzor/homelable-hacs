@@ -426,12 +426,6 @@ export const authApi = {
     notImplemented('authApi.login (HA handles auth)'),
 }
 
-// ─── LiveView (not part of HA build) ────────────────────────────────────────
-
-export const liveviewApi = {
-  load: async (_key: string) => notImplemented('liveviewApi (standalone-only)'),
-}
-
 // ─── Status subscription ────────────────────────────────────────────────────
 
 export interface StatusUpdate {
