@@ -178,3 +178,31 @@ def test_parse_http_server_missing_header() -> None:
 def test_parse_http_server_undecodable_bytes() -> None:
     payload = b"\x00\x01\x02non-http-garbage"
     assert tcp_scanner._parse_http_server(payload) == ""
+
+
+@pytest.mark.asyncio
+async def test_raw_print_port_is_never_written_to() -> None:
+    """9100 is raw print: opening proves it's up, writing prints a page (#87)."""
+    writers: list[_FakeWriter] = []
+
+    async def fake_open(host: str, port: int, *, ssl: Any = None, **_: Any):
+        writer = _FakeWriter()
+        writers.append(writer)
+        return _FakeReader(b""), writer
+
+    with patch.object(tcp_scanner.asyncio, "open_connection", fake_open):
+        result = await tcp_scanner.tcp_connect_scan(
+            {"ip": "10.0.0.1"}, [9100], connect_timeout=0.5, banner_timeout=0.5
+        )
+
+    assert len(result["open_ports"]) == 1
+    assert result["open_ports"][0]["port"] == 9100
+    assert result["open_ports"][0]["banner"] == ""
+    assert all(w.written == [] for w in writers)
+
+
+def test_printing_ports_absent_from_the_http_probe_set() -> None:
+    """No printing port may ever reach _grab_http_banner."""
+    for port in (515, 631, 9100, 9101, 9102):
+        assert port not in tcp_scanner._HTTP_PORTS
+        assert port not in tcp_scanner._TLS_PORTS

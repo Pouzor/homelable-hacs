@@ -397,3 +397,14 @@ async def test_http_get_no_verify_stays_false() -> None:
 @pytest.mark.asyncio
 async def test_check_services_empty() -> None:
     assert await status_checker.check_services("10.0.0.5", []) == []
+
+
+@pytest.mark.asyncio
+async def test_check_service_raw_print_port_is_unknown() -> None:
+    """A 9100 service stays grey — an HTTP check would print a page (#87)."""
+    for port in (515, 631, 9100, 9101, 9102):
+        svc = {"port": port, "protocol": "tcp", "service_name": "printer"}
+        with patch.object(status_checker, "_http_get", AsyncMock()) as mock:
+            status = await status_checker.check_service(svc, "10.0.0.5")
+        assert status == "unknown"
+        mock.assert_not_called()

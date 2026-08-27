@@ -307,9 +307,13 @@ async def _tcp_connect(host: str, port: int) -> bool:
 # grey (unknown) rather than going red. An open TCP socket doesn't prove the
 # service is healthy, and a closed one flaps red misleadingly (e.g. SSH on a
 # box that simply firewalls 22). Only HTTP(S)-reachable services are checked.
+# Printing ports (9100/9101/9102 raw print, 515 LPD, 631 IPP) are in this set
+# for safety: an HTTP GET to a raw-print socket is printed verbatim, so a
+# node on the canvas would eject a page every check interval.
 _NON_HTTP_PORTS = frozenset({
     22, 21, 23, 25, 465, 587, 53, 110, 143, 993, 995, 389, 636, 445, 514,
     1433, 3306, 5432, 5672, 6379, 9092, 11211, 27017, 27018,
+    515, 631, 9100, 9101, 9102,
 })
 _HTTPS_PORTS = frozenset({443, 8443})
 
