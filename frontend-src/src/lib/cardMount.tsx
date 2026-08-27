@@ -1,18 +1,23 @@
 /**
  * Lazy half of the Lovelace card: everything that pulls React, Tailwind and
- * the canvas in. `ha-card.tsx` imports this only once a card is actually on
+ * the canvas in. `ha-card.ts` imports this only once a card is actually on
  * the dashboard, so pages without one pay nothing beyond the tiny entry.
- *
- * Skeleton: the canvas itself lands next (see TODO-002 step 4).
  */
 import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { CardShell } from '@/components/card/CardShell'
 import { HassContext, setHass, type Hass } from './hass'
 import { ShadowRootContext } from './portal'
 import { injectShadowStyles } from './shadowCss'
+import type { HomelableCardConfig } from './cardConfig'
+
+export interface CardRenderState {
+  /** False when another Homelable card on the page already owns the store. */
+  primary: boolean
+}
 
 export interface CardMount {
-  render: (hass: Hass) => void
+  render: (hass: Hass, config: HomelableCardConfig, state: CardRenderState) => void
   unmount: () => void
 }
 
@@ -31,14 +36,14 @@ export function mountCard(shadow: ShadowRoot): CardMount {
   let root: Root | null = createRoot(point)
 
   return {
-    render(hass: Hass) {
+    render(hass, config, state) {
       // api/ha.ts calls through the module-level singleton, not through props.
       setHass(hass)
       root?.render(
         <StrictMode>
           <HassContext.Provider value={hass}>
             <ShadowRootContext.Provider value={point}>
-              <div />
+              <CardShell config={config} primary={state.primary} />
             </ShadowRootContext.Provider>
           </HassContext.Provider>
         </StrictMode>
