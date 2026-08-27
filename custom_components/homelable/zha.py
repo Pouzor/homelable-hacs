@@ -203,17 +203,34 @@ def build_topology(
     return nodes_list, edges_list
 
 
+def _entry_ieee(entry: dr.DeviceEntry) -> str | None:
+    """Return the ZHA IEEE of a registry entry, or None if it is not a ZHA one.
+
+    ``entry.identifiers`` is a ``set[tuple[str, ...]]``: nothing constrains an
+    integration to two elements, and the registry holds every integration's
+    devices, not only ZHA's. Unpacking before filtering on the domain crashes
+    the whole import on an unrelated device.
+    """
+    for identifier in entry.identifiers:
+        if len(identifier) != 2:
+            continue
+        domain, value = identifier
+        if domain == ZHA_DOMAIN:
+            return str(value)
+    return None
+
+
 def _registry_names(hass: HomeAssistant) -> dict[str, str]:
     """Map ZHA IEEE → the name the user gave the device in HA, if any."""
     registry = dr.async_get(hass)
     names: dict[str, str] = {}
     for entry in registry.devices.values():
-        for domain, identifier in entry.identifiers:
-            if domain != ZHA_DOMAIN:
-                continue
-            name = entry.name_by_user or entry.name
-            if name:
-                names[str(identifier)] = name
+        ieee = _entry_ieee(entry)
+        if ieee is None:
+            continue
+        name = entry.name_by_user or entry.name
+        if name:
+            names[ieee] = name
     return names
 
 
@@ -242,10 +259,7 @@ def _fallback_from_registry(
     nodes: list[dict[str, Any]] = []
     seen: set[str] = set()
     for entry in registry.devices.values():
-        ieee = next(
-            (str(i) for d, i in entry.identifiers if d == ZHA_DOMAIN),
-            None,
-        )
+        ieee = _entry_ieee(entry)
         if not ieee or ieee in seen:
             continue
         seen.add(ieee)

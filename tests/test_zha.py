@@ -289,6 +289,54 @@ async def test_fetch_prefers_user_given_registry_name(hass: HomeAssistant) -> No
     assert nodes[0]["friendly_name"] == "Desk lamp"
 
 
+async def _add_wide_identifier_device(hass: HomeAssistant) -> None:
+    """A non-ZHA device whose identifier tuple has more than two elements.
+
+    Nothing constrains an integration to ``(domain, id)``; the registry holds
+    every integration's devices, so ZHA's lookups meet these.
+    """
+    entry = MockConfigEntry(domain="other")
+    entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("other", "hub-1", "port-3"), ("other", "a", "b", "c")},
+        name="Something else",
+    )
+
+
+async def test_fetch_survives_foreign_wide_identifiers(hass: HomeAssistant) -> None:
+    """Issue #50: unpacking every identifier as a 2-tuple crashed the import."""
+    hass.config.components.add("zha")
+    await _add_wide_identifier_device(hass)
+    entry = MockConfigEntry(domain="zha")
+    entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("zha", END)},
+        name="Kitchen bulb",
+    )
+
+    with patch.object(zha, "_device_infos", return_value=[_info(END, "EndDevice")]):
+        nodes, _edges = await zha.fetch_zha_network(hass)
+    assert nodes[0]["label"] == "Kitchen bulb"
+
+
+async def test_registry_fallback_survives_foreign_wide_identifiers(
+    hass: HomeAssistant,
+) -> None:
+    """Same crash, reached through the gateway-less fallback path."""
+    hass.config.components.add("zha")
+    await _add_wide_identifier_device(hass)
+    await _add_zha_device(hass, END, "Kitchen bulb")
+
+    with patch.object(
+        zha, "_device_infos", side_effect=zha.ZhaNotReadyError("restructured")
+    ):
+        nodes, edges = await zha.fetch_zha_network(hass)
+    assert [n["ieee_address"] for n in nodes] == [END]
+    assert edges == []
+
+
 # ─── Coordinator ─────────────────────────────────────────────────────────────
 
 
