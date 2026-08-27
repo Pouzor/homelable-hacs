@@ -3,10 +3,19 @@ import type { NodeData } from '@/types'
 
 const EMPTY = '—'
 
+// Escape backslashes first, then pipes, so an input backslash can never
+// combine with the escape we add and turn a pipe back into a cell separator.
+// Newlines are collapsed to spaces: a raw one ends the table row.
+function escapeCell(v: string): string {
+  return v
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/[\r\n]+/g, ' ')
+}
+
 function cell(v: string | null | undefined): string {
   if (!v) return EMPTY
-  // Escape pipe chars so they don't break the table
-  return v.replace(/\|/g, '\\|')
+  return escapeCell(v)
 }
 
 export function generateMarkdownTable(nodes: Node<NodeData>[]): string {
@@ -18,7 +27,7 @@ export function generateMarkdownTable(nodes: Node<NodeData>[]): string {
         ? d.services.map((s) => {
           const port = s.port != null ? `:${s.port}` : ''
           const path = s.path?.trim() ? s.path.trim() : ''
-          return `${s.service_name ?? ''}${port}${path}`
+          return escapeCell(`${s.service_name ?? ''}${port}${path}`)
         }).join(', ')
         : EMPTY
       return [
