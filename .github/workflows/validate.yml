@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: "0 6 * * *"
 
+permissions:
+  contents: read
+
 jobs:
   hassfest:
     name: Hassfest
