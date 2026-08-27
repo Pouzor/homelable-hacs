@@ -26,8 +26,13 @@ _SIGNAL_HEADERS = ("Server", "X-Powered-By")
 _MAX_BODY_BYTES = 64 * 1024
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _PROBE_TIMEOUT = 3.0
-# Ports we never bother probing over HTTP (not web services).
-_NON_HTTP_PORTS = frozenset({22, 21, 23, 25, 53, 110, 143, 161, 162, 179, 445, 3306, 5432, 6379})
+# Ports we never probe over HTTP (not web services). The printing ports
+# (9100/9101/9102 raw print, 515 LPD, 631 IPP) are here for safety, not just
+# economy: a GET to a raw-print socket is printed verbatim as a job.
+_NON_HTTP_PORTS = frozenset({
+    22, 21, 23, 25, 53, 110, 143, 161, 162, 179, 445, 3306, 5432, 6379,
+    515, 631, 9100, 9101, 9102,
+})
 
 
 def _extract_title(body: str) -> str | None:

@@ -119,3 +119,12 @@ async def test_probe_open_ports_enriches_each_port() -> None:
     by_port = {p["port"]: p for p in result}
     assert by_port[8096]["http_signals"]["title"] == "Jellyfin"
     assert by_port[9999]["http_signals"] is None
+
+
+async def test_probe_port_skips_raw_print_ports() -> None:
+    """A GET to 9100 is printed verbatim by a JetDirect printer (#87)."""
+    get = AsyncMock()
+    with patch("httpx.AsyncClient.get", new=get):
+        for port in (515, 631, 9100, 9101, 9102):
+            assert await probe_port("10.0.0.5", port) is None
+    get.assert_not_called()

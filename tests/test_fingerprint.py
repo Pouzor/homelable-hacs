@@ -191,3 +191,17 @@ def test_fingerprint_ports_uses_http_signals() -> None:
         [{"port": 40000, "protocol": "tcp", "http_signals": {"title": "Grafana", "headers": {}}}]
     )
     assert result[0]["service_name"] == "Grafana"
+
+
+def test_port_9100_is_labelled_ambiguously() -> None:
+    """9100 is raw print far more often than node_exporter, and the two can't be
+    told apart without writing to the socket — which prints a page (#87)."""
+    sig = match_port(9100, "tcp")
+    assert sig is not None
+    assert sig["service_name"] == "Raw Print / Node Exporter"
+    assert sig["icon"] == "printer"
+
+
+def test_port_9100_suggests_no_node_type() -> None:
+    """A bare 9100 host stays generic rather than being guessed a server."""
+    assert suggest_node_type([{"port": 9100, "protocol": "tcp"}]) == "generic"

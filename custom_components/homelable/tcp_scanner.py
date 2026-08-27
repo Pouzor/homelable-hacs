@@ -25,10 +25,13 @@ _CONNECT_TIMEOUT = 1.5
 _BANNER_TIMEOUT = 1.0
 
 # Ports we expect to speak HTTP. We probe these with HEAD and parse Server:.
+# Raw-print ports (9100 JetDirect/AppSocket, 515 LPD) must never be here: a
+# printer treats anything written to the socket as a print job and ejects a
+# page. They stay in the scan list and are still reported open, connect-only.
 _HTTP_PORTS: frozenset[int] = frozenset({
     80, 3000, 3001, 5000, 5001, 5601, 6789, 6800, 6767, 7878, 8000, 8080,
     8081, 8086, 8088, 8090, 8096, 8112, 8123, 8200, 8291, 8428, 8686, 8789,
-    8880, 8971, 8989, 9000, 9001, 9090, 9091, 9092, 9093, 9100, 9117, 9200,
+    8880, 8971, 8989, 9000, 9001, 9090, 9091, 9092, 9093, 9117, 9200,
     9300, 9411, 9696, 16686, 34567, 1880,
 })
 

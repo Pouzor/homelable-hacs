@@ -79,7 +79,7 @@
   {"port": 3000,  "protocol": "tcp", "banner_regex": "[Gg]rafana",                      "service_name": "Grafana",                 "icon": "bar-chart-2", "category": "monitoring",    "suggested_node_type": "server"},
   {"port": 9090,  "protocol": "tcp", "banner_regex": null,                              "service_name": "Prometheus",              "icon": "activity",    "category": "monitoring",    "suggested_node_type": "server"},
   {"port": 9093,  "protocol": "tcp", "banner_regex": null,                              "service_name": "Alertmanager",            "icon": "bell",        "category": "monitoring",    "suggested_node_type": "server"},
-  {"port": 9100,  "protocol": "tcp", "banner_regex": null,                              "service_name": "Node Exporter",           "icon": "activity",    "category": "monitoring",    "suggested_node_type": "server"},
+  {"port": 9100,  "protocol": "tcp", "banner_regex": null,                              "service_name": "Raw Print / Node Exporter", "icon": "printer",   "category": "printer",       "suggested_node_type": null},
   {"port": 8086,  "protocol": "tcp", "banner_regex": null,                              "service_name": "InfluxDB",                "icon": "database",    "category": "monitoring",    "suggested_node_type": "server"},
   {"port": 3100,  "protocol": "tcp", "banner_regex": null,                              "service_name": "Grafana Loki",            "icon": "activity",    "category": "monitoring",    "suggested_node_type": "server"},
   {"port": 8428,  "protocol": "tcp", "banner_regex": null,                              "service_name": "VictoriaMetrics",         "icon": "activity",    "category": "monitoring",    "suggested_node_type": "server"},
