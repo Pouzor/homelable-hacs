@@ -19,6 +19,7 @@ import socket
 import subprocess
 import threading
 from collections.abc import Awaitable, Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -76,6 +77,47 @@ _HOST_CONCURRENCY = 5
 # Shared across every host in a phase, so the host x port product can no longer
 # multiply: this is the hard ceiling on open sockets for the whole scan.
 _SOCKET_CONCURRENCY = 100
+
+# ─── Off-loop work (issue #88) ───────────────────────────────────────────────
+# Blocking scan work used to ride HA's shared default executor through
+# `asyncio.to_thread`. Parking workers there costs every other integration:
+# `gethostbyaddr` on a host with no PTR record sits for as long as the system
+# resolver takes, and that latency lands on unrelated executor jobs. Ours now
+# runs on a pool we own, so the worst case stays inside the integration.
+_EXECUTOR_WORKERS = 4
+_executor: ThreadPoolExecutor | None = None
+_executor_lock = threading.Lock()
+
+# `gethostbyaddr` accepts no timeout and the system resolver's own can be tens
+# of seconds. Cap how long a scan waits on one. The worker may still be parked
+# when we give up — which is exactly why the pool above is ours and not HA's.
+_DNS_TIMEOUT = 2.0
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    """The integration's own thread pool, created on first use."""
+    global _executor
+    with _executor_lock:
+        if _executor is None:
+            _executor = ThreadPoolExecutor(
+                max_workers=_EXECUTOR_WORKERS, thread_name_prefix="homelable_scan"
+            )
+        return _executor
+
+
+async def _run_offloop(func: Callable[..., Any], *args: Any) -> Any:
+    """Run blocking `func` on our pool. Replaces `asyncio.to_thread`."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_get_executor(), func, *args)
+
+
+def shutdown_executor() -> None:
+    """Drop the scan thread pool. Called when the last config entry unloads."""
+    global _executor
+    with _executor_lock:
+        executor, _executor = _executor, None
+    if executor is not None:
+        executor.shutdown(wait=False)
 
 # Ping/ARP finding nothing means a full TCP sweep of the range — the common case
 # in a container without CAP_NET_RAW, or on an ICMP-blocked LAN. Sweeping all 87
@@ -188,6 +230,20 @@ def _resolve_hostname(ip: str) -> str | None:
         return None
 
 
+async def _resolve_hostname_async(ip: str) -> str | None:
+    """Reverse-DNS `ip`, giving up after `_DNS_TIMEOUT`.
+
+    A host with no PTR record is the common case on a homelab LAN, and waiting
+    out the resolver for every one of them is what makes a sweep last minutes.
+    """
+    try:
+        return await asyncio.wait_for(
+            _run_offloop(_resolve_hostname, ip), timeout=_DNS_TIMEOUT
+        )
+    except TimeoutError:
+        return None
+
+
 def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
     """Read OS ARP cache for hosts in the target network. Linux + macOS."""
     try:
@@ -280,12 +336,12 @@ async def _ping_sweep(
     alive_ips: set[str] = {ip for ip in ping_results if ip is not None}
     _LOGGER.info("[Phase 1] %d/%d hosts responded", len(alive_ips), len(all_ips))
 
-    arp_cache = await asyncio.to_thread(_arp_table_hosts, target)
+    arp_cache = await _run_offloop(_arp_table_hosts, target)
 
     alive: dict[str, dict[str, Any]] = {}
     for ip in alive_ips:
         mac = arp_cache.get(ip, {}).get("mac")
-        hostname = await asyncio.to_thread(_resolve_hostname, ip)
+        hostname = await _resolve_hostname_async(ip)
         host_dict = {
             "ip": ip,
             "mac": mac,
@@ -439,7 +495,7 @@ async def _scan_target(
         if not host.get("open_ports"):
             return
         if host.get("hostname") is None:
-            host["hostname"] = await asyncio.to_thread(_resolve_hostname, host["ip"])
+            host["hostname"] = await _resolve_hostname_async(host["ip"])
         if on_phase1_host is not None:
             await on_phase1_host(host)
         if on_phase2_host is not None:
@@ -611,7 +667,7 @@ async def run_scan(
     # Warm the fingerprint signature cache off the event loop. _enrich() runs
     # synchronously inside the async scan loop, so the first (blocking) file
     # read otherwise trips HA's blocking-call detector.
-    await asyncio.to_thread(preload_fingerprints)
+    await _run_offloop(preload_fingerprints)
 
     devices: list[dict[str, Any]] = []
     seen_ips: set[str] = set()

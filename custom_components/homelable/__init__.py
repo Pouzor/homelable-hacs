@@ -11,6 +11,7 @@ from .const import DOMAIN, PLATFORMS
 from .coordinator import HomelableCoordinator
 from .media import async_register_media
 from .panel import async_register_panel, async_unregister_panel
+from .scanner import shutdown_executor
 from .websocket import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +70,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         if not hass.data[DOMAIN]:
             async_unregister_panel(hass)
+            # Last entry gone: drop the scan thread pool with it (issue #88).
+            shutdown_executor()
 
     return unload_ok
 

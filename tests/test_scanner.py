@@ -6,6 +6,20 @@ import pytest
 from custom_components.homelable import scanner, tcp_scanner
 
 
+@pytest.fixture(autouse=True)
+def drain_scan_executor():
+    """Join the scanner's own thread pool so HA's leak check stays meaningful.
+
+    Production drops it with `wait=False` — never block the event loop on
+    unload — but a test must not hand its worker threads to the next one.
+    """
+    yield
+    executor = scanner._executor
+    scanner.shutdown_executor()
+    if executor is not None:
+        executor.shutdown(wait=True)
+
+
 @pytest.mark.asyncio
 async def test_run_scan_invalid_cidr_raises() -> None:
     """An invalid CIDR range surfaces as ValueError."""
@@ -512,3 +526,58 @@ def test_merge_ports_is_a_noop_without_extras() -> None:
     host = {"ip": "10.0.0.1", "open_ports": [{"port": 22, "protocol": "tcp"}]}
     scanner._merge_ports(host, [])
     assert host["open_ports"] == [{"port": 22, "protocol": "tcp"}]
+
+
+# ─── Off-loop work (issue #88) ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_offloop_work_runs_on_our_own_pool() -> None:
+    """Blocking scan work must not ride HA's shared default executor."""
+    import threading
+
+    name = await scanner._run_offloop(lambda: threading.current_thread().name)
+    assert name.startswith("homelable_scan")
+
+
+@pytest.mark.asyncio
+async def test_resolve_hostname_gives_up_on_a_slow_resolver() -> None:
+    """`gethostbyaddr` takes no timeout — a hung resolver must not stall a sweep."""
+    import time
+
+    def _hang(_ip: str) -> str:
+        time.sleep(0.3)
+        return "never.returned"
+
+    with (
+        patch.object(scanner, "_resolve_hostname", _hang),
+        patch.object(scanner, "_DNS_TIMEOUT", 0.05),
+    ):
+        started = time.monotonic()
+        hostname = await scanner._resolve_hostname_async("10.0.0.1")
+        elapsed = time.monotonic() - started
+
+    assert hostname is None
+    assert elapsed < 1.0
+
+
+@pytest.mark.asyncio
+async def test_resolve_hostname_returns_the_name_when_the_resolver_answers() -> None:
+    with patch.object(scanner, "_resolve_hostname", lambda _ip: "nas.lan"):
+        assert await scanner._resolve_hostname_async("10.0.0.1") == "nas.lan"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_executor_is_idempotent_and_the_pool_comes_back() -> None:
+    """Unloading the last config entry drops the pool; a later scan rebuilds it."""
+    await scanner._run_offloop(lambda: None)
+    first = scanner._executor
+    assert first is not None
+
+    scanner.shutdown_executor()
+    assert scanner._executor is None
+    scanner.shutdown_executor()  # no second entry to unload — must not raise
+
+    await scanner._run_offloop(lambda: None)
+    assert scanner._executor is not None
+    assert scanner._executor is not first
