@@ -105,6 +105,32 @@ After setup, a **Homelable** entry appears in the sidebar. From there:
 
 Scan history, hidden devices, and scan configuration live in the side panel.
 
+### Dashboard card
+
+The canvas can also be embedded in any Lovelace dashboard, read-only, as a
+custom card. Add it from the card picker ("Homelable Canvas") or in YAML:
+
+```yaml
+type: custom:homelable-canvas-card
+design_id: 3f2b1c4e-...   # optional — the first design when omitted
+title: Network            # optional card header
+height: 500               # px, default 400
+fit_view: true            # fit the canvas to the card on load, default true
+interactive: pan          # pan (default) or none to lock the view
+open_on_click: false      # click a node to open http://<its ip>, default off
+```
+
+The card shows live status the same way the panel does. Editing is disabled —
+build the canvas in the panel, then display it here.
+
+Two notes on its behaviour:
+
+- The mouse wheel scrolls the dashboard rather than zooming the canvas. Use
+  Ctrl+wheel, or the zoom buttons, to zoom.
+- **Only one Homelable card per dashboard view.** The canvas state is shared
+  process-wide, so a second card on the same view shows a notice instead of a
+  canvas. Put additional canvases on separate views.
+
 ---
 
 ## Scanner privileges
@@ -125,6 +151,7 @@ fallback — slower, and MAC addresses may be missing.
 
 ## Roadmap
 
+- Multiple Homelable cards on one dashboard view.
 - HA entities per canvas node (`sensor.homelable_<id>`, `binary_sensor.homelable_<id>_online`).
 - Device registry: one HA device per canvas node.
 - Services: `homelable.scan_now`, `homelable.approve_device`, `homelable.refresh_status`.
