@@ -4,7 +4,7 @@ import { type Node } from '@xyflow/react'
 
 const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 import { applyDagreLayout } from '@/utils/layout'
-import { serializeNode, serializeEdge, deserializeApiNode, deserializeApiEdge, migrateClusterHandles, type ApiNode, type ApiEdge } from '@/utils/canvasSerializer'
+import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { getCenteredPosition } from '@/utils/viewportCenter'
 import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
@@ -35,9 +35,10 @@ import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { canvasApi, designsApi } from '@/api/client'
+import { hydrateCanvasPayload } from '@/utils/canvasPayload'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
-import type { NodeData, EdgeData, CustomStyleDef, NodeType, FloorMapConfig } from '@/types'
+import type { NodeData, EdgeData, NodeType } from '@/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
@@ -101,25 +102,14 @@ export default function App() {
   const loadCanvasFromApi = useCallback(async (designId?: string) => {
     try {
       const res = await canvasApi.load(designId)
-      const { nodes: apiNodes, edges: apiEdges } = res.data
-      if (apiNodes.length > 0) {
-        const proxmoxContainerMap = new Map<string, boolean>(
-          (apiNodes as ApiNode[])
-            .filter((n) => n.type === 'group' || n.container_mode === true)
-            .map((n) => [n.id, true])
-        )
-        const { nodes: rfNodes, edges: rfEdges } = migrateClusterHandles(
-          (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap)),
-          (apiEdges as ApiEdge[]).map(deserializeApiEdge),
-        )
-        const savedTheme = res.data.viewport?.theme_id
-        if (savedTheme) setTheme(savedTheme)
-        if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+      const hydrated = hydrateCanvasPayload(res.data)
+      if (hydrated) {
+        if (hydrated.themeId) setTheme(hydrated.themeId)
+        if (hydrated.customStyle) setCustomStyle(hydrated.customStyle)
         // Clear when the target design has no floor plan, so it doesn't bleed
         // across canvases when switching designs.
-        const savedFloorMap = res.data.viewport?.floor_map as FloorMapConfig | undefined
-        setFloorMap(savedFloorMap ?? null)
-        loadCanvas(rfNodes, rfEdges)
+        setFloorMap(hydrated.floorMap)
+        loadCanvas(hydrated.nodes, hydrated.edges)
       } else {
         setFloorMap(null)
         loadCanvas(demoNodes, demoEdges)

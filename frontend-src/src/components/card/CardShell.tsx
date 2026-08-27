@@ -6,16 +6,14 @@
  * card surface is rebuilt from HA's own CSS custom properties — they pierce
  * the shadow boundary and keep the card in step with the active HA theme.
  *
- * The canvas itself lands next (see TODO-002 step 4).
  */
-import type { ReactNode } from 'react'
 import type { HomelableCardConfig } from '@/lib/cardConfig'
+import { ReadOnlyCanvas } from './ReadOnlyCanvas'
 
 interface CardShellProps {
   config: HomelableCardConfig
   /** False when another Homelable card already owns the canvas store. */
   primary: boolean
-  children?: ReactNode
 }
 
 const surface: React.CSSProperties = {
@@ -27,7 +25,7 @@ const surface: React.CSSProperties = {
   overflow: 'hidden',
 }
 
-export function CardShell({ config, primary, children }: CardShellProps) {
+export function CardShell({ config, primary }: CardShellProps) {
   return (
     <div style={surface}>
       {config.title ? (
@@ -44,7 +42,7 @@ export function CardShell({ config, primary, children }: CardShellProps) {
         </div>
       ) : null}
       <div style={{ height: `${config.height}px`, position: 'relative' }}>
-        {primary ? children : <SecondaryNotice />}
+        {primary ? <ReadOnlyCanvas config={config} /> : <SecondaryNotice />}
       </div>
     </div>
   )
