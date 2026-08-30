@@ -108,7 +108,10 @@ Scan history, hidden devices, and scan configuration live in the side panel.
 ### Dashboard card
 
 The canvas can also be embedded in any Lovelace dashboard, read-only, as a
-custom card. Add it from the card picker ("Homelable Canvas") or in YAML:
+custom card. Add it from the card picker ("Homelable Canvas") and configure it
+in the visual editor — the design is picked from a dropdown of your canvases.
+
+The same options in YAML:
 
 ```yaml
 type: custom:homelable-canvas-card

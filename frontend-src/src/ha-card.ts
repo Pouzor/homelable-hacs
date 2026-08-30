@@ -6,10 +6,10 @@
  * Tailwind, no canvas. Everything heavy lives behind the dynamic import in
  * `connectedCallback`, which only runs once a card is actually on a dashboard.
  * Keep it that way — a static import of anything under `lib/` other than the
- * config module and the types below would pull React back into every page load.
- *
- * Skeleton: the read-only canvas itself lands next (see TODO-002 step 4).
+ * config module, the editor and the types below would pull React back into
+ * every page load.
  */
+import { CARD_EDITOR_TYPE } from './card-editor'
 import { CARD_TYPE, cardSize, parseCardConfig, type HomelableCardConfig } from './lib/cardConfig'
 import type { Hass } from './lib/hass'
 import type { CardMount } from './lib/cardMount'
@@ -57,6 +57,15 @@ class HomelableCanvasCard extends HTMLElement {
 
   static getStubConfig(): Record<string, unknown> {
     return { type: `custom:${CARD_TYPE}` }
+  }
+
+  /**
+   * Lovelace calls this synchronously and expects a ready element, which is why
+   * the editor is imported statically. It is React-free — it renders HA's own
+   * <ha-form> — so it costs nothing on pages that never open it.
+   */
+  static getConfigElement(): HTMLElement {
+    return document.createElement(CARD_EDITOR_TYPE)
   }
 
   connectedCallback(): void {
