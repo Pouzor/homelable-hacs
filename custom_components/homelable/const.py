@@ -125,6 +125,15 @@ PANEL_TITLE = "Homelable"
 PANEL_ICON = "mdi:lan"
 PANEL_NAME = "homelable-panel"
 
+# The frontend directory is served once per process, whether the panel bundle,
+# the card bundle or both are present. Guards against a duplicate static route.
+FRONTEND_STATIC_KEY = f"{DOMAIN}_frontend_static_registered"
+
+# Lovelace card. Its bundle ships beside the panel one and is added to the HA
+# frontend's extra module URLs, so a dashboard can hold a <homelable-canvas-card>.
+# The stored value is the registered URL, needed to remove it again on unload.
+CARD_REGISTERED_KEY = f"{DOMAIN}_card_registered"
+
 # Media (floor-plan images and future raw image uploads) live on disk under the
 # HA config dir, served via a public static path. Filenames are server-generated
 # UUIDs (unguessable), so GET is public like the panel bundle; upload/delete

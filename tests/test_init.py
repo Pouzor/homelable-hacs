@@ -59,3 +59,18 @@ async def test_unload_drops_the_scan_pool_with_the_last_entry(
     assert scanner._executor is None
     unregister.assert_called_once()
     assert hass.data[DOMAIN] == {}
+
+
+async def test_unload_stops_serving_the_card_with_the_last_entry(
+    hass: HomeAssistant,
+) -> None:
+    """The card module is process-global: it goes when the last entry does."""
+    entry = _entry(hass)
+
+    with (
+        patch("custom_components.homelable.async_unregister_panel"),
+        patch("custom_components.homelable.async_unregister_card") as unregister_card,
+    ):
+        assert await async_unload_entry(hass, entry) is True
+
+    unregister_card.assert_called_once_with(hass)

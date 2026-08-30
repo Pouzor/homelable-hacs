@@ -20,18 +20,23 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      // HA mounts panels inside its own shadow DOM; document.head <style>
+      // HA mounts our elements inside its own shadow DOM; document.head <style>
       // never reaches us. Stash CSS-module output on window.__HOMELABLE_CSS__
-      // so ha-panel.tsx can inject it into our own shadow root.
+      // so lib/shadowCss.ts can inject it into our own shadow root.
       // (Tailwind + index.css/App.css are pulled in via `?inline` imports in
-      // ha-panel.tsx — @tailwindcss/vite emits CSS through a path this plugin
-      // doesn't intercept.)
+      // lib/shadowCss.ts — @tailwindcss/vite emits CSS through a path this
+      // plugin doesn't intercept.)
+      // Append rather than assign: the panel and the card are separate entries
+      // and HA loads the card module on every page, so both can run this on the
+      // same document. Skipping already-present CSS keeps repeat loads cheap.
       ...(isHaBuild
         ? [
             cssInjectedByJsPlugin({
               injectCodeFunction: function injectStashCode(cssCode: string) {
-                ;(window as unknown as Record<string, string>)
-                  .__HOMELABLE_CSS__ = cssCode
+                const w = window as unknown as Record<string, string | undefined>
+                const current = w.__HOMELABLE_CSS__ ?? ''
+                if (current.includes(cssCode)) return
+                w.__HOMELABLE_CSS__ = current + cssCode
               },
             }),
           ]
@@ -70,10 +75,19 @@ export default defineConfig(({ mode }) => {
       sourcemap: false,
       cssCodeSplit: false,
       rollupOptions: {
-        input: path.resolve(__dirname, 'src/main.tsx'),
+        // Two entries: the full panel (registered by panel.py as a `custom`
+        // panel) and the Lovelace card (loaded on every HA page through
+        // frontend.add_extra_js_url). Shared deps land in the chunks below.
+        input: {
+          panel: path.resolve(__dirname, 'src/main.tsx'),
+          card: path.resolve(__dirname, 'src/ha-card.ts'),
+        },
         output: {
           format: 'es',
-          entryFileNames: 'homelable-panel-[hash].js',
+          entryFileNames: (chunk) =>
+            chunk.name === 'card'
+              ? 'homelable-card-[hash].js'
+              : 'homelable-panel-[hash].js',
           chunkFileNames: 'homelable-chunk-[hash].js',
           assetFileNames: 'homelable-panel-[hash][extname]',
           manualChunks(id: string) {

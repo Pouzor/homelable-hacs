@@ -10,7 +10,12 @@ from homeassistant.helpers import config_validation as cv
 from .const import DOMAIN, PLATFORMS
 from .coordinator import HomelableCoordinator
 from .media import async_register_media
-from .panel import async_register_panel, async_unregister_panel
+from .panel import (
+    async_register_card,
+    async_register_panel,
+    async_unregister_card,
+    async_unregister_panel,
+)
 from .scanner import shutdown_executor
 from .websocket import async_register_websocket_commands
 
@@ -34,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async_register_websocket_commands(hass)
     await async_register_panel(hass)
+    await async_register_card(hass)
     await async_register_media(hass)
 
     if PLATFORMS:
@@ -70,6 +76,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         if not hass.data[DOMAIN]:
             async_unregister_panel(hass)
+            async_unregister_card(hass)
             # Last entry gone: drop the scan thread pool with it (issue #88).
             shutdown_executor()
 
