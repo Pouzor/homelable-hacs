@@ -8,6 +8,21 @@ import { render, screen, waitFor } from '@testing-library/react'
 import type { HomelableCardConfig } from '@/lib/cardConfig'
 
 const flowProps = vi.fn()
+const fitView = vi.fn()
+
+/** Captures the observer so a test can fire a resize by hand. */
+let resizeCallback: (() => void) | null = null
+
+class FakeResizeObserver {
+  constructor(callback: () => void) {
+    resizeCallback = callback
+  }
+  observe() {}
+  disconnect() {
+    resizeCallback = null
+  }
+}
+vi.stubGlobal('ResizeObserver', FakeResizeObserver)
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: (props: Record<string, unknown>) => {
@@ -19,7 +34,7 @@ vi.mock('@xyflow/react', () => ({
   Controls: () => null,
   BackgroundVariant: { Dots: 'dots' },
   ConnectionMode: { Loose: 'loose' },
-  useReactFlow: () => ({ fitView: vi.fn() }),
+  useReactFlow: () => ({ fitView }),
 }))
 
 vi.mock('@/components/canvas/FloorMapLayer', () => ({ FloorMapLayer: () => null }))
@@ -60,6 +75,7 @@ describe('ReadOnlyCanvas', () => {
   beforeEach(() => {
     load.mockReset()
     flowProps.mockClear()
+    fitView.mockClear()
     useCanvasStore.setState({ nodes: [], edges: [] })
     useThemeStore.setState({ activeTheme: 'default' })
   })
@@ -156,5 +172,67 @@ describe('ReadOnlyCanvas', () => {
 
     rerender(<ReadOnlyCanvas config={{ ...CONFIG, design_id: 'b' }} />)
     await waitFor(() => expect(load).toHaveBeenCalledWith('b'))
+  })
+})
+
+describe('ReadOnlyCanvas fitting', () => {
+  beforeEach(() => {
+    load.mockReset()
+    load.mockResolvedValue(PAYLOAD)
+    flowProps.mockClear()
+    fitView.mockClear()
+    useCanvasStore.setState({ nodes: [], edges: [] })
+  })
+
+  it("leaves the initial fit to React Flow, which knows when it has measured itself", async () => {
+    render(<ReadOnlyCanvas config={CONFIG} />)
+    await screen.findByTestId('flow')
+
+    const props = flowProps.mock.calls.at(-1)![0]
+    expect(props.fitView).toBe(true)
+    expect(props.fitViewOptions).toEqual({ padding: 0.12 })
+  })
+
+  it('does not ask React Flow to fit when fit_view is off', async () => {
+    render(<ReadOnlyCanvas config={{ ...CONFIG, fit_view: false }} />)
+    await screen.findByTestId('flow')
+    expect(flowProps.mock.calls.at(-1)![0].fitView).toBe(false)
+  })
+
+  it('refits on the frame after a resize, not during it', async () => {
+    render(<ReadOnlyCanvas config={CONFIG} />)
+    await screen.findByTestId('flow')
+    // Let the fit scheduled when the nodes landed run first.
+    await waitFor(() => expect(fitView).toHaveBeenCalled())
+    fitView.mockClear()
+
+    resizeCallback!()
+    // fitView reads the container size React Flow measured, which is stale
+    // until the browser has laid the resize out.
+    expect(fitView).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(fitView).toHaveBeenCalledWith({ padding: 0.12 }))
+  })
+
+  it('coalesces a burst of resizes into one fit', async () => {
+    render(<ReadOnlyCanvas config={CONFIG} />)
+    await screen.findByTestId('flow')
+    await waitFor(() => expect(fitView).toHaveBeenCalled())
+    fitView.mockClear()
+
+    resizeCallback!()
+    resizeCallback!()
+    resizeCallback!()
+
+    await waitFor(() => expect(fitView).toHaveBeenCalled())
+    expect(fitView).toHaveBeenCalledTimes(1)
+  })
+
+  it('observes nothing when fit_view is off', async () => {
+    render(<ReadOnlyCanvas config={{ ...CONFIG, fit_view: false }} />)
+    await screen.findByTestId('flow')
+
+    expect(resizeCallback).toBeNull()
+    expect(fitView).not.toHaveBeenCalled()
   })
 })

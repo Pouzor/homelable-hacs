@@ -37,6 +37,8 @@ import type { NodeData } from '@/types'
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'error'
 
+const FIT_VIEW_OPTIONS = { padding: 0.12 }
+
 interface ReadOnlyCanvasProps {
   config: HomelableCardConfig
 }
@@ -88,24 +90,44 @@ function CanvasBody({ config }: ReadOnlyCanvasProps) {
     }
   }, [config.design_id, haDarkMode, loadCanvas, setFloorMap, setTheme, setCustomStyle])
 
-  // Fit once the nodes are in, and again whenever the card is resized —
-  // dashboards reflow on every viewport change.
   const wrapperRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * `fitView` works off the container size React Flow has measured, which is
+   * still the old one during the frame a resize is reported in. Deferring to
+   * the next frame is what makes it correct in a Sections view, where the card
+   * only reaches its final width after the grid has laid itself out.
+   */
+  const refit = useCallback(() => {
+    const frame = requestAnimationFrame(() => fitView(FIT_VIEW_OPTIONS))
+    return () => cancelAnimationFrame(frame)
+  }, [fitView])
+
+  // Dashboards reflow on every viewport change, and a Sections card is resized
+  // by the grid well after it mounts. The initial fit is React Flow's own
+  // `fitView` prop, which runs once it has measured itself.
   useEffect(() => {
-    if (!config.fit_view || state !== 'ready' || nodes.length === 0) return
-    const refit = () => fitView({ padding: 0.12 })
-    const timer = setTimeout(refit, 50)
+    if (!config.fit_view || state !== 'ready') return
     const wrapper = wrapperRef.current
-    if (!wrapper || typeof ResizeObserver === 'undefined') {
-      return () => clearTimeout(timer)
-    }
-    const observer = new ResizeObserver(refit)
+    if (!wrapper || typeof ResizeObserver === 'undefined') return
+    let cancelFrame: (() => void) | undefined
+    const observer = new ResizeObserver(() => {
+      cancelFrame?.()
+      cancelFrame = refit()
+    })
     observer.observe(wrapper)
     return () => {
-      clearTimeout(timer)
+      cancelFrame?.()
       observer.disconnect()
     }
-  }, [config.fit_view, state, nodes.length, fitView])
+  }, [config.fit_view, state, refit])
+
+  // Switching design replaces the nodes under a canvas that is already mounted,
+  // so the `fitView` prop won't fire again.
+  useEffect(() => {
+    if (!config.fit_view || state !== 'ready' || nodes.length === 0) return
+    return refit()
+  }, [config.fit_view, state, nodes.length, refit])
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node<NodeData>) => {
@@ -142,6 +164,10 @@ function CanvasBody({ config }: ReadOnlyCanvasProps) {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={onNodeClick}
+        // React Flow fits once it has measured itself, which a timer of ours
+        // cannot reliably wait for; the observer above handles later resizes.
+        fitView={config.fit_view}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         nodesDraggable={false}
         nodesConnectable={false}
         nodesFocusable={false}

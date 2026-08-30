@@ -130,6 +130,8 @@ Two notes on its behaviour:
 
 - The mouse wheel scrolls the dashboard rather than zooming the canvas. Use
   Ctrl+wheel, or the zoom buttons, to zoom.
+- The canvas refits itself whenever the card is resized, so it follows a
+  Sections layout or a window resize without clipping.
 - **Only one Homelable card per dashboard view.** The canvas state is shared
   process-wide, so a second card on the same view shows a notice instead of a
   canvas. Put additional canvases on separate views.
