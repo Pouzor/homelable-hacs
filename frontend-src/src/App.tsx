@@ -10,7 +10,7 @@ import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { getCenteredPosition } from '@/utils/viewportCenter'
-import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
+import { resolveVirtualEdgeParent, needsVirtualEdge } from '@/utils/virtualEdgeParent'
 import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { ExportModal } from '@/components/modals/ExportModal'
@@ -295,7 +295,9 @@ export default function App() {
     // parent the LXC/VM stays a free node (linked by a virtual edge) — setting
     // extent:'parent' on a non-container would trap it inside the parent's tiny
     // bounding box with no way to drag it out (issue #205 follow-up).
-    const nestInParent = !!parentNode?.data.container_mode
+    // A visual group nests too, so it seeds its position the same way — mirrors
+    // the condition in the store's addNode, which is the authority here.
+    const nestInParent = !!parentNode?.data.container_mode || parentNode?.data.type === 'group'
     // Seed an ABSOLUTE position near the container's top-left; addNode converts
     // it to container-relative. addNode is the single authority for parentId /
     // extent, so we don't set them here.
@@ -484,11 +486,11 @@ export default function App() {
           )
           if (oldEdge) deleteEdge(oldEdge.id)
         }
-        // Create virtual edge only when parent is NOT in container mode
-        // (container mode shows containment visually — no edge needed)
+        // Create virtual edge only when the parent doesn't show containment
+        // itself (container mode and visual groups nest the child — no edge)
         if (newParentId) {
           const parentNode = nodes.find((n) => n.id === newParentId)
-          if (!parentNode?.data.container_mode) {
+          if (needsVirtualEdge(parentNode?.data)) {
             onConnect({ source: editNodeId, sourceHandle: 'top', target: newParentId, targetHandle: 'bottom', type: 'virtual' } as unknown as Connection)
           }
         }
