@@ -94,6 +94,9 @@ export function serializeNode(
         ...n.data.custom_colors,
         width: n.width ?? n.measured?.width ?? 360,
         height: n.height ?? n.measured?.height ?? 240,
+        // Collapse state rides in custom_colors so the stored node needs no
+        // new field. Hoisted back to `data.collapsed` on load.
+        collapsed: n.data.collapsed ?? false,
       },
     }
   }
@@ -120,7 +123,11 @@ export function serializeNode(
     notes: n.data.notes ?? null,
     parent_id: n.data.parent_id ?? null,
     container_mode: n.data.container_mode ?? false,
-    custom_colors: n.data.custom_colors ?? null,
+    // Collapse state rides in custom_colors (see the groupRect branch), for
+    // every node type — groups and container hosts collapse too.
+    custom_colors: n.data.collapsed !== undefined
+      ? { ...(n.data.custom_colors ?? {}), collapsed: n.data.collapsed }
+      : (n.data.custom_colors ?? null),
     custom_icon: n.data.custom_icon ?? null,
     cpu_count: n.data.cpu_count ?? null,
     cpu_model: n.data.cpu_model ?? null,
@@ -171,6 +178,8 @@ export function serializeEdge(e: Edge<EdgeData>): Record<string, unknown> {
 export function deserializeApiNode(
   rawNode: ApiNode,
   proxmoxContainerMap: Map<string, boolean>,
+  /** Ids of groupRect zones, which parent their contents without clamping them. */
+  zoneIds?: Set<string>,
 ): Node<NodeData> {
   // Defensive: most nodes are stored flat (top-level ip/services/pos_x), but a
   // node appended server-side (e.g. an approved scan device on older builds)
@@ -199,7 +208,7 @@ export function deserializeApiNode(
       id: n.id,
       type: 'groupRect',
       position: { x: n.pos_x, y: n.pos_y },
-      data: n as unknown as NodeData,
+      data: { ...(n as unknown as NodeData), collapsed: Boolean(n.custom_colors?.collapsed) },
       width: w,
       height: h,
       zIndex: z - 10,
@@ -207,6 +216,9 @@ export function deserializeApiNode(
     }
   }
   const parentIsContainer = n.parent_id ? (proxmoxContainerMap.get(n.parent_id) ?? false) : false
+  // A node dropped inside a zone is parented (so the zone moves it) but never
+  // extent-clamped — it must stay draggable back out.
+  const parentIsZone = n.parent_id ? (zoneIds?.has(n.parent_id) ?? false) : false
   return {
     id: n.id,
     type: normalizedType,
@@ -218,8 +230,14 @@ export function deserializeApiNode(
       bottom_handles: clampHandles('bottom', n.bottom_handles ?? 1),
       left_handles: clampHandles('left', n.left_handles ?? 0),
       right_handles: clampHandles('right', n.right_handles ?? 0),
+      // Hoisted from the custom_colors stash written by serializeNode.
+      collapsed: Boolean(n.custom_colors?.collapsed),
     } as unknown as NodeData,
-    ...(n.parent_id && parentIsContainer ? { parentId: n.parent_id, extent: 'parent' as const } : {}),
+    ...(n.parent_id && parentIsZone
+      ? { parentId: n.parent_id }
+      : n.parent_id && parentIsContainer
+        ? { parentId: n.parent_id, extent: 'parent' as const }
+        : {}),
     // Container hosts (Proxmox/VM/LXC/docker in container_mode) get a default
     // box if none was saved. Every other node — including LEAF vm/lxc/docker
     // nodes nested inside a container — restores its own saved width/height.

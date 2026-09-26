@@ -48,7 +48,7 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes, addToGroup, addToContainer, floorMap, setFloorMap } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes, addToGroup, addToContainer, addToZone, floorMap, setFloorMap } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
@@ -87,6 +87,7 @@ export default function App() {
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
   const [pendingGroupAdd, setPendingGroupAdd] = useState<{ nodeId: string; groupId: string } | null>(null)
   const [pendingContainerAdd, setPendingContainerAdd] = useState<{ nodeId: string; containerId: string } | null>(null)
+  const [pendingZoneAdd, setPendingZoneAdd] = useState<{ nodeId: string; zoneId: string } | null>(null)
   const [editEdgeId, setEditEdgeId] = useState<string | null>(null)
   const [scanConfigOpen, setScanConfigOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
@@ -639,6 +640,7 @@ export default function App() {
                     onNodeDragStart={snapshotHistory}
                     onRequestAddToGroup={setPendingGroupAdd}
                     onRequestAddToContainer={setPendingContainerAdd}
+                    onRequestAddToZone={setPendingZoneAdd}
                     onOpenPending={openPending}
                   />
                 </Suspense>
@@ -832,6 +834,18 @@ export default function App() {
             setPendingContainerAdd(null)
           }}
           onCancel={() => setPendingContainerAdd(null)}
+        />
+
+        <ConfirmAddToGroupModal
+          open={!!pendingZoneAdd}
+          variant="zone"
+          nodeLabel={pendingZoneAdd ? (nodes.find((n) => n.id === pendingZoneAdd.nodeId)?.data.label ?? '') : ''}
+          targetLabel={pendingZoneAdd ? (nodes.find((n) => n.id === pendingZoneAdd.zoneId)?.data.label ?? '') : ''}
+          onConfirm={() => {
+            if (pendingZoneAdd) addToZone(pendingZoneAdd.zoneId, pendingZoneAdd.nodeId)
+            setPendingZoneAdd(null)
+          }}
+          onCancel={() => setPendingZoneAdd(null)}
         />
 
         <ExportModal

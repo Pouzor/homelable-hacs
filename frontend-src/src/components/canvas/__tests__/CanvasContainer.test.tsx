@@ -161,6 +161,82 @@ describe('CanvasContainer', () => {
     expect(rfProps.onNodeDragStart).toBe(onNodeDragStart)
   })
 
+  // ── Drag onto a zone → onRequestAddToZone / detach ────────────────────────
+
+  function zoneNode(id: string): Node<NodeData> {
+    return { id, type: 'groupRect', position: { x: 0, y: 0 }, data: { label: id, type: 'groupRect', status: 'unknown', services: [] } }
+  }
+
+  it('fires onRequestAddToZone when a node is dropped over a zone', () => {
+    const onRequestAddToZone = vi.fn()
+    const node = makeNode('n1')
+    rf.intersecting = [zoneNode('z1')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeId: 'n1', zoneId: 'z1' })
+  })
+
+  it('prefers a group and a container over a zone when they overlap', () => {
+    const onRequestAddToZone = vi.fn()
+    const onRequestAddToContainer = vi.fn()
+    const node = makeNode('n1')
+    rf.intersecting = [zoneNode('z1'), containerNode('px1')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeId: 'n1', containerId: 'px1' })
+    expect(onRequestAddToZone).not.toHaveBeenCalled()
+  })
+
+  it('does not fire onRequestAddToZone when the dragged node is a zone itself', () => {
+    const onRequestAddToZone = vi.fn()
+    const node = zoneNode('z2')
+    rf.intersecting = [zoneNode('z1')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
+    expect(onRequestAddToZone).not.toHaveBeenCalled()
+  })
+
+  it('detaches a zone child dropped outside its zone', () => {
+    const zone = { ...zoneNode('z1'), position: { x: 100, y: 100 } }
+    const child = { ...makeNode('n1'), parentId: 'z1', position: { x: 20, y: 20 } }
+    useCanvasStore.setState({ nodes: [zone, child] })
+    rf.intersecting = []
+    render(<CanvasContainer />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, child, [child])
+    const after = useCanvasStore.getState().nodes.find((n) => n.id === 'n1')!
+    expect(after.parentId).toBeUndefined()
+    expect(after.position).toEqual({ x: 120, y: 120 })
+  })
+
+  it('keeps a zone child parented when it is dropped inside its zone', () => {
+    const zone = zoneNode('z1')
+    const child = { ...makeNode('n1'), parentId: 'z1' }
+    useCanvasStore.setState({ nodes: [zone, child] })
+    rf.intersecting = [zone]
+    render(<CanvasContainer />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, child, [child])
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'n1')?.parentId).toBe('z1')
+  })
+
+  // ── Collapse ──────────────────────────────────────────────────────────────
+
+  it('hides the children of a collapsed node and rewires their edges onto it', () => {
+    const group: Node<NodeData> = {
+      id: 'g1', type: 'group', position: { x: 0, y: 0 },
+      data: { label: 'g1', type: 'group', status: 'unknown', services: [], collapsed: true },
+    }
+    const child = { ...makeNode('c1'), parentId: 'g1' }
+    useCanvasStore.setState({
+      nodes: [group, child, makeNode('n2')],
+      edges: [{ ...makeEdge('e1'), source: 'c1', target: 'n2' }],
+    })
+    render(<CanvasContainer />)
+    expect((rfProps.nodes as Node[]).map((n) => n.id)).toEqual(['g1', 'n2'])
+    const edges = rfProps.edges as Edge[]
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({ source: 'g1', target: 'n2' })
+  })
+
   // ── Canvas settings ───────────────────────────────────────────────────────
 
   it('enables snapToGrid', () => {

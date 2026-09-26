@@ -58,4 +58,14 @@ describe('hydrateCanvasPayload', () => {
     })
     expect(hydrated?.nodes).toHaveLength(3)
   })
+
+  it('restores a zone child parented to its zone, without clamping it', () => {
+    const hydrated = hydrateCanvasPayload({
+      nodes: [node('z', { type: 'groupRect' }), node('n', { parent_id: 'z' })],
+      edges: [],
+    })
+    const child = hydrated?.nodes.find((n) => n.id === 'n')
+    expect(child?.parentId).toBe('z')
+    expect(child?.extent).toBeUndefined()
+  })
 })
