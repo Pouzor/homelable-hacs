@@ -155,6 +155,14 @@ describe('BaseNode — properties rendering', () => {
     expect(screen.getByText(/32 GB/)).toBeDefined()
   })
 
+  it('renders a value-less property as a bare label', () => {
+    renderBaseNode({
+      properties: [{ key: 'Rented', value: '', icon: null, visible: true }],
+    })
+    expect(screen.getByText('Rented')).toBeDefined()
+    expect(screen.queryByText(/^·/)).toBeNull()
+  })
+
   it('does not render properties with visible=false', () => {
     renderBaseNode({
       properties: [
