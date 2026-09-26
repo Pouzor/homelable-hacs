@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { parseYamlToCanvas } from '../importYaml'
 import { exportCanvasToYaml } from '../exportYaml'
+import { serializeNode } from '../canvasSerializer'
 import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData } from '@/types'
 
@@ -65,13 +66,31 @@ describe('parseYamlToCanvas', () => {
     expect(d.cpu_count).toBe(16)
     expect(d.ram_gb).toBe(64)
     expect(d.disk_gb).toBe(2000)
-    expect(d.show_hardware).toBe(true)
+    // A node draws its properties, so the specs become properties — the
+    // structured fields above only serve the export round trip.
+    expect(d.properties).toEqual([
+      { key: 'CPU Model', value: 'Intel Xeon', icon: 'Cpu', visible: true },
+      { key: 'CPU Cores', value: '16', icon: 'Cpu', visible: true },
+      { key: 'RAM', value: '64 GB', icon: 'MemoryStick', visible: true },
+      { key: 'Disk', value: '2000 GB', icon: 'HardDrive', visible: true },
+    ])
+    expect(d.show_hardware).toBeUndefined()
   })
 
-  it('sets show_hardware only when hardware fields present', () => {
+  it('mints no hardware properties when the YAML has no specs', () => {
     const yaml = `- nodeType: server\n  label: "NoHW"\n`
     const { nodes } = parseYamlToCanvas(yaml, empty, emptyEdges)
+    expect(nodes[0].data.properties).toBeUndefined()
     expect(nodes[0].data.show_hardware).toBeUndefined()
+  })
+
+  it('keeps imported hardware through a save round trip', () => {
+    // The specs used to show until the first save, then vanish: the serializer
+    // sends `properties: []` and the node drew nothing else.
+    const yaml = `- nodeType: server\n  label: "HW"\n  ram: 32\n`
+    const { nodes } = parseYamlToCanvas(yaml, empty, emptyEdges)
+    const saved = serializeNode(nodes[0])
+    expect(saved.properties).toEqual([{ key: 'RAM', value: '32 GB', icon: 'MemoryStick', visible: true }])
   })
 
   it('links edges have bottom→top-t handles', () => {

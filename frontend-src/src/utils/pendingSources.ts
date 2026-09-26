@@ -5,9 +5,9 @@
  * raw list to the UI's filter/badge buckets so a merged device shows under each
  * matching filter and renders one badge per source.
  */
-import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
+import type { PendingDevice } from '@/types'
 
-export type SourceBucket = 'ip' | 'zigbee' | 'zwave' | 'proxmox' | 'rack'
+export type SourceBucket = 'ip' | 'zigbee' | 'zwave' | 'proxmox' | 'rack' | 'canvas'
 
 export const SOURCE_META: Record<SourceBucket, { color: string; label: string }> = {
   zigbee: { color: '#00d4ff', label: 'ZIGBEE' },
@@ -15,10 +15,12 @@ export const SOURCE_META: Record<SourceBucket, { color: string; label: string }>
   proxmox: { color: '#e57000', label: 'PROXMOX' },
   ip: { color: '#a855f7', label: 'IP' },
   rack: { color: '#39d353', label: 'RACK' },
+  // Documented straight on a canvas — no scan ever saw it.
+  canvas: { color: '#8b949e', label: 'CANVAS' },
 }
 
 // Stable badge order (IP first — it's the primary discovery path).
-const SOURCE_ORDER: SourceBucket[] = ['ip', 'proxmox', 'zigbee', 'zwave', 'rack']
+const SOURCE_ORDER: SourceBucket[] = ['ip', 'proxmox', 'zigbee', 'zwave', 'rack', 'canvas']
 
 /** Map a raw source tag to its filter bucket. Handles both the short flags
  *  (zigbee/zwave/proxmox) and the gateway-named discovery_source values
@@ -30,6 +32,8 @@ function classify(s: string): SourceBucket {
   // Created from a rack canvas: inventory gear that never lands on a logical
   // canvas.
   if (s === 'rack') return 'rack'
+  // Drawn on a canvas rather than discovered.
+  if (s === 'canvas') return 'canvas'
   return 'ip' // arp / mdns / tcp / anything else → IP scan
 }
 

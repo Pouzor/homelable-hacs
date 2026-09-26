@@ -720,6 +720,15 @@ async def test_run_service_checks_dispatches_per_node(hass) -> None:  # noqa: AN
 @pytest.mark.asyncio
 async def test_list_pending_inventory_includes_approved_with_canvas_count(coord) -> None:  # noqa: ANN001
     """The inventory view returns approved devices badged with their canvas count."""
+    pending = await coord._get_pending()
+    pending["devices"].append(
+        {"id": "pd-1", "ip": "10.0.0.5", "status": "approved", "services": []}
+    )
+    pending["devices"].append(
+        {"id": "pd-2", "ip": "10.0.0.9", "status": "pending", "services": []}
+    )
+    await coord._save_pending()
+    # The node joins the row that already describes its host.
     await coord.save_canvas(
         {
             "nodes": [
@@ -730,14 +739,6 @@ async def test_list_pending_inventory_includes_approved_with_canvas_count(coord)
             "viewport": {"x": 0, "y": 0, "zoom": 1},
         }
     )
-    pending = await coord._get_pending()
-    pending["devices"].append(
-        {"id": "pd-1", "ip": "10.0.0.5", "status": "approved", "services": []}
-    )
-    pending["devices"].append(
-        {"id": "pd-2", "ip": "10.0.0.9", "status": "pending", "services": []}
-    )
-    await coord._save_pending()
 
     inventory = await coord.list_pending()
     by_id = {d["id"]: d for d in inventory}
@@ -992,9 +993,13 @@ async def test_list_pending_node_timestamps_null_without_node(coord) -> None:  #
 
 @pytest.mark.asyncio
 async def test_list_pending_aggregates_node_timestamps_across_matches(coord) -> None:  # noqa: ANN001
-    """Two canvas nodes share the device ip: created = oldest, last_scan = newest."""
+    """Two canvases draw one device: created = oldest node, modified = newest
+    node; last_scan / last_seen are the device's own, read off its row."""
     pending = await coord._get_pending()
-    pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "approved"})
+    pending["devices"].append({
+        "id": "pd-1", "ip": "192.168.1.100", "status": "approved",
+        "last_scan": "2026-06-01T00:00:00Z", "last_seen": "2026-06-02T00:00:00Z",
+    })
     await coord._save_pending()
 
     await coord._ensure_loaded()
@@ -1003,24 +1008,23 @@ async def test_list_pending_aggregates_node_timestamps_across_matches(coord) -> 
     # Seed nodes directly to control the timestamps precisely.
     coord._canvases[default]["nodes"] = [
         {
-            "id": "a", "ip": "192.168.1.100",
-            "created_at": "2026-01-01T00:00:00Z", "last_scan": "2026-03-01T00:00:00Z",
-            "updated_at": "2026-03-01T00:00:00Z", "last_seen": None,
+            "id": "a", "device_id": "pd-1",
+            "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-03-01T00:00:00Z",
         }
     ]
     coord._canvases[d2["id"]]["nodes"] = [
         {
-            "id": "b", "ip": "192.168.1.100",
-            "created_at": "2026-05-01T00:00:00Z", "last_scan": "2026-06-01T00:00:00Z",
-            "updated_at": "2026-06-01T00:00:00Z", "last_seen": None,
+            "id": "b", "device_id": "pd-1",
+            "created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-06-01T00:00:00Z",
         }
     ]
 
     d = (await coord.list_pending())[0]
     assert d["canvas_count"] == 2
     assert d["node_created_at"].startswith("2026-01-01")  # oldest
-    assert d["node_last_scan"].startswith("2026-06-01")   # newest
     assert d["node_last_modified"].startswith("2026-06-01")  # newest
+    assert d["node_last_scan"].startswith("2026-06-01")  # the row's
+    assert d["node_last_seen"].startswith("2026-06-02")  # the row's
 
 
 @pytest.mark.asyncio
@@ -1189,24 +1193,26 @@ async def test_approve_pending_no_conflict_on_ip_substring(coord) -> None:  # no
 
 
 @pytest.mark.asyncio
-async def test_list_pending_canvas_count_matches_ip_in_comma_list(coord) -> None:  # noqa: ANN001
-    """A node's ip holds several comma-separated addresses (IPv6 added first);
-    the device scanned as the plain IPv4 must still correlate (issue #258)."""
+async def test_backfill_links_node_by_ip_in_comma_list(coord) -> None:  # noqa: ANN001
+    """A legacy node's ip holds several comma-separated addresses (IPv6 added
+    first); the device scanned as the plain IPv4 is the row it links to (#258)."""
     pending = await coord._get_pending()
     pending["devices"].append({"id": "pd-1", "ip": "192.168.1.100", "status": "approved"})
     await coord._save_pending()
     await coord._ensure_loaded()
     default = coord._designs[0]["id"]
     coord._canvases[default]["nodes"] = [{"id": "a", "ip": "fe80::1, 192.168.1.100"}]
+    await coord._link_nodes_to_inventory()
 
+    assert coord._canvases[default]["nodes"][0]["device_id"] == "pd-1"
     d = (await coord.list_pending())[0]
     assert d["canvas_count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_list_pending_canvas_count_correlates_by_mac(coord) -> None:  # noqa: ANN001
-    """Node's ip differs entirely (user edited it) but the MAC still matches:
-    the device is recognised as on the canvas (issue #258)."""
+async def test_backfill_links_node_by_mac(coord) -> None:  # noqa: ANN001
+    """A legacy node's ip differs entirely (user edited it) but the MAC still
+    matches: it links to that row rather than minting a second (#258)."""
     pending = await coord._get_pending()
     pending["devices"].append(
         {"id": "pd-1", "ip": "192.168.1.55", "mac": "aa:bb:cc:dd:ee:ff", "status": "approved"}
@@ -1215,9 +1221,12 @@ async def test_list_pending_canvas_count_correlates_by_mac(coord) -> None:  # no
     await coord._ensure_loaded()
     default = coord._designs[0]["id"]
     coord._canvases[default]["nodes"] = [{"id": "a", "ip": "10.9.9.9", "mac": "aa:bb:cc:dd:ee:ff"}]
+    await coord._link_nodes_to_inventory()
 
     d = (await coord.list_pending())[0]
     assert d["canvas_count"] == 1
+    # The node's edit is the most recent word on the ip.
+    assert d["ip"] == "10.9.9.9"
 
 
 @pytest.mark.asyncio
@@ -1311,7 +1320,10 @@ async def test_async_update_data_bounds_check_concurrency(coord) -> None:  # noq
 
 @pytest.mark.asyncio
 async def test_status_refresh_persists_last_seen_debounced(coord) -> None:  # noqa: ANN001
-    """The first online poll queues a *delayed* canvas write, never a direct one."""
+    """The first online poll queues a *delayed* inventory write, never a direct one.
+
+    last_seen is an observation of the device, so it lands on the row.
+    """
     await coord.save_canvas(
         {
             "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
@@ -1320,8 +1332,9 @@ async def test_status_refresh_persists_last_seen_debounced(coord) -> None:  # no
         }
     )
     with (
-        patch.object(coord.canvas_store, "async_delay_save") as delayed,
-        patch.object(coord.canvas_store, "async_save", AsyncMock()) as immediate,
+        patch.object(coord.pending_store, "async_delay_save") as delayed,
+        patch.object(coord.pending_store, "async_save", AsyncMock()) as immediate,
+        patch.object(coord.canvas_store, "async_save", AsyncMock()) as canvas_write,
         patch(
             "custom_components.homelable.coordinator.status_checker.check_node",
             AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
@@ -1331,8 +1344,9 @@ async def test_status_refresh_persists_last_seen_debounced(coord) -> None:  # no
 
     assert delayed.call_count == 1
     assert delayed.call_args[0][1] == LAST_SEEN_SAVE_DELAY
-    assert delayed.call_args[0][0]() == {"canvases": coord._canvases}
+    assert delayed.call_args[0][0]() is coord._pending
     assert immediate.call_count == 0
+    assert canvas_write.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -1351,7 +1365,7 @@ async def test_status_refresh_skips_write_while_last_seen_is_fresh(coord) -> Non
     )
     check = AsyncMock(return_value={"status": "online", "response_time_ms": 5})
     with (
-        patch.object(coord.canvas_store, "async_delay_save") as delayed,
+        patch.object(coord.pending_store, "async_delay_save") as delayed,
         patch(
             "custom_components.homelable.coordinator.status_checker.check_node",
             check,
@@ -1378,12 +1392,10 @@ async def test_status_refresh_rewrites_last_seen_once_stale(coord) -> None:  # n
             "viewport": {},
         }
     )
-    await coord._ensure_loaded()
-    design_id = coord._designs[0]["id"]
-    coord._canvases[design_id]["nodes"][0]["last_seen"] = "2020-01-01T00:00:00Z"
+    (await coord._get_pending())["devices"][0]["last_seen"] = "2020-01-01T00:00:00Z"
 
     with (
-        patch.object(coord.canvas_store, "async_delay_save") as delayed,
+        patch.object(coord.pending_store, "async_delay_save") as delayed,
         patch(
             "custom_components.homelable.coordinator.status_checker.check_node",
             AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
@@ -1545,7 +1557,7 @@ async def test_last_seen_keeps_advancing_across_intervals(coord) -> None:  # noq
 
     async def _poll_at(moment):
         with (
-            patch.object(coord.canvas_store, "async_delay_save") as delayed,
+            patch.object(coord.pending_store, "async_delay_save") as delayed,
             patch(
                 "custom_components.homelable.coordinator._utc_now",
                 return_value=moment,

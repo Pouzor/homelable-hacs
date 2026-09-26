@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
-  Globe, Router, Server, Layers, Box, Container, HardDrive, Cpu, Wifi, Circle, Network,
+  Server, Layers,
   Search, RefreshCw, X, CheckCircle2, EyeOff, Trash2, Loader2, ServerCog,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -9,6 +9,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { resolveNodeColors } from '@/utils/nodeColors'
+import { NODE_TYPE_DEFAULT_ICONS } from '@/utils/nodeIcons'
 import { toast } from 'sonner'
 import { PendingDeviceModal, type PendingDevice } from '@/components/modals/PendingDeviceModal'
 import type { NodeType, ServiceInfo } from '@/types'
@@ -72,24 +73,19 @@ function serviceColor(port: number | null | undefined, category?: string | null)
   return '#8b949e'
 }
 
-const TYPE_ICONS: Record<string, React.ElementType> = {
-  isp: Globe,
-  router: Router,
-  server: Server,
-  proxmox: Layers,
-  vm: Box,
-  lxc: Container,
-  nas: HardDrive,
-  iot: Cpu,
-  ap: Wifi,
-  switch: Network,
-  generic: Circle,
-}
-
 type SourceFilter = 'all' | SourceBucket
 type StatusFilter = 'pending' | 'hidden'
 
 const COMMON_PORTS = new Set([22, 80, 443])
+
+/**
+ * What the device is. The curated `type` wins over the discovery guess: a
+ * device drawn on a canvas only ever has the former, and an edit that retypes a
+ * scanned row must not keep reading the scanner's opinion.
+ */
+function deviceType(d: PendingDevice): NodeType | null {
+  return ((d.type ?? d.suggested_type) as NodeType) ?? null
+}
 
 function specialServiceName(d: PendingDevice): string | undefined {
   const candidates = (d.services ?? []).filter(
@@ -100,7 +96,8 @@ function specialServiceName(d: PendingDevice): string | undefined {
 }
 
 function deviceLabel(d: PendingDevice): string {
-  return d.friendly_name ?? d.hostname ?? specialServiceName(d) ?? d.ip ?? d.ieee_address ?? 'device'
+  // Same precedence as the detail modal — the name the user gave it first.
+  return d.label ?? d.friendly_name ?? d.hostname ?? specialServiceName(d) ?? d.ip ?? d.ieee_address ?? 'device'
 }
 
 /** Server auto-edge as returned by approve/bulkApprove (camelCase handles). */
@@ -190,7 +187,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
 
   const distinctTypes = useMemo(() => {
     const set = new Set<string>()
-    devices.forEach((d) => { if (d.suggested_type) set.add(d.suggested_type) })
+    devices.forEach((d) => { const t = deviceType(d); if (t) set.add(t) })
     return [...set].sort()
   }, [devices])
 
@@ -200,7 +197,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       // A device merged across sources (e.g. IP scan + Proxmox) matches every
       // filter for a source that has seen it.
       if (sourceFilter !== 'all' && !sourceBuckets(d).has(sourceFilter)) return false
-      if (typeFilter !== 'all' && d.suggested_type !== typeFilter) return false
+      if (typeFilter !== 'all' && deviceType(d) !== typeFilter) return false
       // Inventory-only: optionally hide devices already placed on a canvas.
       if (statusFilter === 'pending' && !showOnCanvas && (d.canvas_count ?? 0) > 0) return false
       if (withServicesOnly && (d.services?.length ?? 0) === 0) return false
@@ -304,7 +301,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       return
     }
     const fallbackLabel = deviceLabel(device)
-    const type = (device.suggested_type ?? 'generic') as NodeType
+    const type = deviceType(device) ?? 'generic'
     const zwave = isZwaveType(type)
     const wireless = isZigbeeType(type) || zwave
     const nodeData = {
@@ -341,7 +338,12 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
         id: nodeId,
         type: nodeData.type,
         position: getCenteredPosition(),
-        data: { ...nodeData, status: wireless ? ('online' as const) : ('unknown' as const) },
+        data: {
+          ...nodeData,
+          status: wireless ? ('online' as const) : ('unknown' as const),
+          // The row this node draws — lets an inventory edit reach it on screen.
+          device_id: res.data.node?.device_id ?? device.id,
+        },
       })
       injectAutoEdges(res.data.edges)
       const created = res.data.edges_created ?? 0
@@ -382,8 +384,14 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       await scanApi.ignore(device.id)
       setDevices((prev) => prev.filter((d) => d.id !== device.id))
       setSelected(null)
-    } catch {
-      toast.error('Failed to remove device')
+    } catch (err) {
+      // The row holds the facts of the nodes drawing it, so the integration
+      // refuses to drop it while one does.
+      if ((err as { code?: string } | null)?.code === 'in_use') {
+        toast.error('This device is on a canvas — delete its node or hide it instead')
+      } else {
+        toast.error('Failed to remove device')
+      }
     }
   }
 
@@ -408,7 +416,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       approvedDevices.forEach((d, i) => {
         const nodeId = deviceToNode[d.id]
         if (!nodeId) return
-        const type = (d.suggested_type ?? 'generic') as NodeType
+        const type = deviceType(d) ?? 'generic'
         const zwave = isZwaveType(type)
         const wireless = isZigbeeType(type) || zwave
         addNode({
@@ -418,6 +426,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
           data: {
             label: deviceLabel(d),
             type,
+            device_id: d.id,
             ip: d.ip ?? undefined,
             mac: d.mac ?? undefined,
             hostname: d.hostname ?? undefined,
@@ -579,6 +588,13 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
                 title="Gear created from a rack canvas"
               >
                 Rack devices
+              </button>
+              <button
+                onClick={() => setSourceFilter('canvas')}
+                className={`px-2.5 py-1.5 transition-colors border-l border-border ${sourceFilter === 'canvas' ? 'bg-[#8b949e]/20 text-foreground' : 'bg-[#0d1117] text-muted-foreground hover:text-foreground'}`}
+                title="Documented directly on a canvas — no scan ever saw it"
+              >
+                Canvas
               </button>
             </div>
             <select
@@ -779,11 +795,19 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       </Dialog>
 
       <PendingDeviceModal
+        // A fresh form per device: the grid stays mounted across card clicks.
+        key={selected?.id ?? 'none'}
         device={selected}
         onClose={() => setSelected(null)}
         onApprove={handleApprove}
         onHide={handleHide}
         onIgnore={handleIgnore}
+        onSaved={(saved) => {
+          // Patch in place rather than refetch: the grid keeps its scroll
+          // position and the open detail modal keeps showing the same device.
+          setDevices((prev) => prev.map((d) => (d.id === saved.id ? saved : d)))
+          setSelected(saved)
+        }}
       />
     </>
   )
@@ -799,8 +823,8 @@ interface DeviceCardProps {
 }
 
 function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRef }: DeviceCardProps) {
-  const roleType = (device.suggested_type ?? 'generic') as NodeType
-  const Icon = TYPE_ICONS[roleType] ?? Circle
+  const roleType = deviceType(device) ?? 'generic'
+  const Icon = NODE_TYPE_DEFAULT_ICONS[roleType] ?? NODE_TYPE_DEFAULT_ICONS.generic
   const activeTheme = useThemeStore((s) => s.activeTheme)
   // Colour the role badge with the same accent the node uses on the canvas
   // (from the active theme / style section), instead of a flat grey.
@@ -880,12 +904,12 @@ function DeviceCard({ device, selected, selectMode, highlighted, onClick, cardRe
                 {SOURCE_META[bucket].label}
               </span>
             ))}
-            {device.suggested_type && (
+            {roleType !== 'generic' && (
               <span
                 className="text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
                 style={{ background: `${roleColor}22`, color: roleColor }}
               >
-                {device.suggested_type}
+                {roleType}
               </span>
             )}
             {device.lqi != null && (

@@ -14,6 +14,7 @@ import { generateUUID } from '@/utils/uuid'
 import { normalizeHandle, removedHandleIds, handleCountField, sideDefault, handleId, SIDES } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
 import { CONTAINER_MODE_TYPES } from '@/utils/virtualEdgeParent'
+import { changedFactFields, factsBaselineOf, factsBaselines, type FactsBaseline } from '@/utils/deviceFacts'
 
 type HistoryEntry = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
 
@@ -143,6 +144,19 @@ interface CanvasState {
   removeFromGroup: (groupId: string, childId: string) => void
   markSaved: () => void
   markUnsaved: () => void
+  /**
+   * The device facts as this canvas received them, per node id. A save diffs
+   * against it to tell the integration what *this* canvas edited, so a save
+   * made for nothing but a moved node cannot push a stale snapshot over an edit
+   * made meanwhile in the Device Inventory. Refreshed on load and on save.
+   */
+  factsBaseline: Record<string, FactsBaseline>
+  /**
+   * Apply an inventory row's facts to every node drawing that device, and
+   * rebase them. Not an edit — the row is already persisted — so it leaves
+   * hasUnsavedChanges alone.
+   */
+  applyDeviceFacts: (deviceId: string, facts: Partial<NodeData>) => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
   fitViewPending: boolean
   clearFitViewPending: () => void
@@ -165,6 +179,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   editingTextId: null,
   hideIp: false,
   scanEventTs: 0,
+  factsBaseline: {},
   serviceStatuses: {},
   floorMap: null,
   floorMapEditNonce: 0,
@@ -734,7 +749,40 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
     }),
 
-  markSaved: () => set({ hasUnsavedChanges: false }),
+  // The save just became the integration's truth, so it is the new baseline:
+  // the next save reports only what is edited from here on.
+  markSaved: () => set((state) => ({ hasUnsavedChanges: false, factsBaseline: factsBaselines(state.nodes) })),
+
+  applyDeviceFacts: (deviceId, facts) =>
+    set((state) => {
+      let changed = false
+      const factsBaseline = { ...state.factsBaseline }
+      const nodes = state.nodes.map((n) => {
+        if (n.data.device_id !== deviceId) return n
+        const previous = state.factsBaseline[n.id]
+        // A fact this canvas has already edited but not saved is the user's
+        // work in progress — the row does not get to overwrite it on screen.
+        const pending = new Set<string>(changedFactFields(n.data, previous))
+        const applied = Object.fromEntries(
+          Object.entries(facts).filter(([field]) => !pending.has(field)),
+        )
+        if (Object.keys(applied).length === 0) return n
+        changed = true
+        const data = { ...n.data, ...applied }
+        // Rebase only what was applied: an untouched pending edit stays
+        // reported as this canvas' change so the next save still writes it.
+        const rebased = factsBaselineOf(data)
+        for (const field of pending) {
+          if (previous?.[field] !== undefined) rebased[field] = previous[field]
+        }
+        factsBaseline[n.id] = rebased
+        return { ...n, data }
+      })
+      // No hasUnsavedChanges: the row already holds this, the canvas is catching
+      // up. Rebasing alongside keeps the next save from claiming the
+      // inventory's own edit as a canvas edit.
+      return changed ? { nodes, factsBaseline } : {}
+    }),
 
   markUnsaved: () => set({ hasUnsavedChanges: true }),
 
@@ -766,7 +814,18 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     // React Flow requires parents before children in the array
     const parents = nodes.filter((n) => !n.parentId)
     const children = nodes.filter((n) => !!n.parentId)
-    set({ nodes: [...parents, ...children], edges, hasUnsavedChanges: false, selectedNodeId: null, past: [], future: [], clipboard: [], fitViewPending: true })
+    set({
+      nodes: [...parents, ...children],
+      edges,
+      hasUnsavedChanges: false,
+      selectedNodeId: null,
+      past: [],
+      future: [],
+      clipboard: [],
+      fitViewPending: true,
+      // What the integration just gave us: the reference a save diffs against.
+      factsBaseline: factsBaselines(nodes),
+    })
   },
 
   clearFitViewPending: () => set({ fitViewPending: false }),

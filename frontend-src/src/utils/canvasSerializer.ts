@@ -2,6 +2,7 @@ import type { Node, Edge } from '@xyflow/react'
 import type { NodeData, EdgeData, Waypoint } from '@/types'
 import { normalizeHandle, clampHandles, handleId, handleCountField, type Side } from '@/utils/handleUtils'
 import { normalizeMarker } from '@/utils/edgeMarkers'
+import { changedFactFields, type FactsBaseline } from '@/utils/deviceFacts'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -9,6 +10,8 @@ export interface ApiNode extends Record<string, unknown> {
   id: string
   type: string
   label: string
+  /** Device Inventory row this node draws; absent for canvas furniture. */
+  device_id?: string | null
   pos_x: number
   pos_y: number
   status: string
@@ -62,12 +65,17 @@ export interface ApiEdge {
 
 // ── Serialization (RF node → API save payload) ───────────────────────────────
 
-export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
+export function serializeNode(
+  n: Node<NodeData>,
+  factsBaseline?: FactsBaseline,
+): Record<string, unknown> {
   if (n.data.type === 'groupRect') {
     return {
       id: n.id,
       type: 'groupRect',
       label: n.data.label,
+      // A zone is canvas furniture — it never points at an inventory row.
+      device_id: null,
       hostname: null,
       ip: null,
       mac: null,
@@ -93,6 +101,14 @@ export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
     id: n.id,
     type: n.data.type,
     label: n.data.label,
+    // The Device Inventory row this node draws. Round-tripped so a save keeps
+    // the link; the device fields below are routed to that row by the
+    // integration.
+    device_id: n.data.device_id ?? null,
+    // Which of those fields this canvas actually edited since it loaded them.
+    // The row is shared, so without this the integration cannot tell an edit
+    // from a stale copy and a moved node would revert someone else's change.
+    changed_facts: changedFactFields(n.data, factsBaseline),
     hostname: n.data.hostname ?? null,
     ip: n.data.ip ?? null,
     mac: n.data.mac ?? null,

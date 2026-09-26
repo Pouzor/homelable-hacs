@@ -108,9 +108,79 @@ export interface NodeProperty {
   visible: boolean
 }
 
+/**
+ * A Device Inventory row, as `homelable/scan/pending` returns it.
+ *
+ * The inventory row — not the canvas node — owns what a device *is*: its
+ * addresses, services, properties, notes and hardware. A node describes how
+ * that device is drawn on one canvas (`NodeData.device_id`). Re-exported from
+ * `components/modals/PendingDeviceModal` for the call sites that predate this
+ * home.
+ */
+export interface PendingDevice {
+  id: string
+  ip: string | null
+  mac: string | null
+  hostname: string | null
+  os: string | null
+  services: ServiceInfo[]
+  suggested_type: string | null
+  /** Inventory lifecycle: pending / approved / hidden. Not reachability. */
+  status: string
+  discovery_source: string | null
+  /** Every source that has observed this device (e.g. ["arp", "proxmox"]);
+   *  drives the inventory source filter + badges. Falls back to
+   *  [discovery_source]. */
+  discovery_sources?: string[] | null
+  source?: 'scan' | 'zigbee' | 'zwave' | 'proxmox' | null
+  ieee_address?: string | null
+  friendly_name?: string | null
+  device_subtype?: string | null
+  model?: string | null
+  vendor?: string | null
+  lqi?: number | null
+  /** Property rows the device carries (e.g. Proxmox VMID / CPU / RAM / Disk). */
+  properties?: NodeProperty[] | null
+  discovered_at: string
+  /** Curated facts, editable from the device detail modal. `label` / `type`
+   *  supersede friendly_name / suggested_type once the user has named it. */
+  label?: string | null
+  type?: string | null
+  notes?: string | null
+  cpu_count?: number | null
+  cpu_model?: string | null
+  ram_gb?: number | null
+  disk_gb?: number | null
+  show_hardware?: boolean
+  check_method?: CheckMethod | null
+  check_target?: string | null
+  /** Live reachability from the status checker — distinct from `status`. */
+  status_live?: string
+  last_seen?: string | null
+  last_scan?: string | null
+  response_time_ms?: number | null
+  updated_at?: string | null
+  /** How many canvases (designs) draw this device. Computed server-side. */
+  canvas_count?: number
+  /** Timestamps of the canvas nodes drawing it (created = oldest, modified =
+   *  newest); last_scan / last_seen are the device's own. Null when the device
+   *  is on no canvas. */
+  node_created_at?: string | null
+  node_last_scan?: string | null
+  node_last_modified?: string | null
+  node_last_seen?: string | null
+}
+
 export interface NodeData extends Record<string, unknown> {
   label: string
   type: NodeType
+  /**
+   * The Device Inventory row this node draws. The row owns the device facts
+   * below (ip, services, properties, notes…) — they arrive hydrated from it and
+   * a save routes them back to it. Absent for canvas furniture
+   * (group / groupRect / text), which describes nothing physical.
+   */
+  device_id?: string | null
   hostname?: string
   ip?: string
   mac?: string
