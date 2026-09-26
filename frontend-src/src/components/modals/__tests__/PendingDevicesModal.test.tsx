@@ -486,3 +486,57 @@ describe('PendingDevicesModal — rackable filter and picker mode', () => {
     expect(screen.queryByRole('button', { name: /Approve \(/ })).not.toBeInTheDocument()
   })
 })
+
+describe('PendingDevicesModal — the inventory row owns the device (homelable #339)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockHidden.mockResolvedValue({ data: [] } as never)
+  })
+
+  it('shows the curated type and label over the discovery guess', async () => {
+    mockPending.mockResolvedValue({
+      data: [{ ...DEVICE_IP, label: 'Big NAS', type: 'nas', suggested_type: 'server' }],
+    } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    const card = await screen.findByTestId('pending-card-dev-a')
+    expect(within(card).getByText('Big NAS')).toBeInTheDocument()
+    expect(within(card).getByText('nas')).toBeInTheDocument()
+    expect(within(card).queryByText('server')).toBeNull()
+  })
+
+  it('filters on the Canvas source', async () => {
+    mockPending.mockResolvedValue({
+      data: [DEVICE_IP, { ...DEVICE_NOSVC, discovery_source: 'canvas', discovery_sources: ['canvas'] }],
+    } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    await screen.findByTestId('pending-card-dev-a')
+    fireEvent.click(screen.getByRole('button', { name: 'Canvas' }))
+    await waitFor(() => expect(screen.queryByTestId('pending-card-dev-a')).toBeNull())
+    expect(screen.getByTestId('pending-card-dev-b')).toBeInTheDocument()
+  })
+
+  it('links the approved node to its inventory row', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP] } as never)
+    mockApprove.mockResolvedValue({
+      data: { node_id: 'n-new', node: { id: 'n-new', type: 'server', data: {}, device_id: 'dev-a' }, edges: [], edges_created: 0 },
+    } as never)
+    render(<PendingDevicesModal {...baseProps} />)
+    fireEvent.click(await screen.findByTestId('pending-card-dev-a'))
+    fireEvent.click(await screen.findByRole('button', { name: /^Approve/ }))
+    await waitFor(() => expect(mockAddNode).toHaveBeenCalled())
+    expect(mockAddNode.mock.calls[0][0].data.device_id).toBe('dev-a')
+  })
+
+  it('explains why a device drawn on a canvas cannot be deleted', async () => {
+    mockPending.mockResolvedValue({ data: [DEVICE_IP] } as never)
+    vi.mocked(scanApi.ignore).mockRejectedValue({ code: 'in_use', message: 'drawn' })
+    render(<PendingDevicesModal {...baseProps} />)
+    fireEvent.click(await screen.findByTestId('pending-card-dev-a'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
+    await waitFor(() =>
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith(
+        'This device is on a canvas — delete its node or hide it instead',
+      ),
+    )
+  })
+})

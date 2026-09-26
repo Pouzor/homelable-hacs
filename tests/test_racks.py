@@ -364,7 +364,8 @@ async def test_inventory_resolves_the_canvas_node_and_its_status(coord) -> None:
     design_id = await _rack_design(coord)
 
     item = (await coord.rack_inventory(design_id))[0]
-    assert item["label"] == "nas"
+    # One device, one set of facts: the node's hostname edit landed on the row.
+    assert item["label"] == "nas.lan"
     assert item["node_id"] == "n1"
     assert item["node_status"] == "online"
     assert item["node_label"] == "Synology"

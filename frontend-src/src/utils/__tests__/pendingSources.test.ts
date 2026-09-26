@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { sourceBuckets, orderedSources, isRackDevice } from '../pendingSources'
-import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
+import type { PendingDevice } from '@/types'
 
 function device(overrides: Partial<PendingDevice> = {}): PendingDevice {
   return {
@@ -73,5 +73,17 @@ describe('isRackDevice', () => {
 
   it('badges a rack row after the other sources', () => {
     expect(orderedSources(device({ discovery_sources: ['rack', 'arp'] }))).toEqual(['ip', 'rack'])
+  })
+})
+
+describe('canvas source', () => {
+  it('files a device documented on a canvas under its own bucket', () => {
+    const d = device({ discovery_source: 'canvas', discovery_sources: ['canvas'] })
+    expect([...sourceBuckets(d)]).toEqual(['canvas'])
+  })
+
+  it('orders the canvas badge after every discovery source', () => {
+    const d = device({ discovery_sources: ['canvas', 'arp'] })
+    expect(orderedSources(d)).toEqual(['ip', 'canvas'])
   })
 })

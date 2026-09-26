@@ -69,6 +69,16 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [sidebarForceView, setSidebarForceView] = useState<'pending' | undefined>(undefined)
   const [highlightPendingId, setHighlightPendingId] = useState<string | undefined>(undefined)
+  // Open the Device Inventory on one device. Reset first so re-opening the
+  // same id still re-triggers the Sidebar's forced view.
+  const openPending = useCallback((deviceId: string) => {
+    setHighlightPendingId(undefined)
+    setSidebarForceView(undefined)
+    setTimeout(() => {
+      setHighlightPendingId(deviceId)
+      setSidebarForceView('pending')
+    }, 0)
+  }, [])
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [addNodeOpen, setAddNodeOpen] = useState(false)
   const [addGroupRectOpen, setAddGroupRectOpen] = useState(false)
@@ -102,12 +112,17 @@ export default function App() {
         toast.success('Canvas saved')
         return true
       }
-      const nodesToSave = nodes.map(serializeNode)
+      // Read the baseline at save time (not through the render-time destructure)
+      // so a device edited in the inventory a moment ago is already rebased.
+      const factsBaseline = useCanvasStore.getState().factsBaseline
+      const nodesToSave = nodes.map((n) => serializeNode(n, factsBaseline[n.id]))
       const edgesToSave = edges.map(serializeEdge)
       const viewport: Record<string, unknown> = { theme_id: activeTheme }
       if (floorMap) viewport.floor_map = floorMap
       await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport, custom_style: customStyle, design_id: saveDesignId })
-      markSaved()
+      // What was sent, not what the store holds now: an edit made while the
+      // save was in flight is not in the payload and must stay pending.
+      markSaved({ nodes, edges })
       toast.success('Canvas saved')
       return true
     } catch {
@@ -624,14 +639,7 @@ export default function App() {
                     onNodeDragStart={snapshotHistory}
                     onRequestAddToGroup={setPendingGroupAdd}
                     onRequestAddToContainer={setPendingContainerAdd}
-                    onOpenPending={(deviceId) => {
-                      setHighlightPendingId(undefined)
-                      setSidebarForceView(undefined)
-                      setTimeout(() => {
-                        setHighlightPendingId(deviceId)
-                        setSidebarForceView('pending')
-                      }, 0)
-                    }}
+                    onOpenPending={openPending}
                   />
                 </Suspense>
                 )}
@@ -641,7 +649,7 @@ export default function App() {
                   double-click, so it gets the rail. */}
               {isRackDesign
                 ? <Suspense fallback={null}><RackCablePanel /></Suspense>
-                : (selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
+                : (selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} onOpenInventory={openPending} />}
             </div>
           </div>
         </div>
@@ -799,14 +807,7 @@ export default function App() {
         <SearchModal
           open={searchOpen}
           onClose={() => setSearchOpen(false)}
-          onOpenPending={(deviceId) => {
-            setHighlightPendingId(undefined)
-            setSidebarForceView(undefined)
-            setTimeout(() => {
-              setHighlightPendingId(deviceId)
-              setSidebarForceView('pending')
-            }, 0)
-          }}
+          onOpenPending={openPending}
         />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 

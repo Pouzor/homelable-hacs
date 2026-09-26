@@ -57,6 +57,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_racks_save)
     websocket_api.async_register_command(hass, ws_racks_inventory)
     websocket_api.async_register_command(hass, ws_scan_add_pending)
+    websocket_api.async_register_command(hass, ws_scan_update_pending)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -583,10 +584,23 @@ async def ws_scan_hide_batch(
 async def ws_scan_ignore(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Remove a pending or hidden device from the store (permanently drop)."""
+    """Remove a pending or hidden device from the store (permanently drop).
+
+    Refused while a canvas node draws the device: the row holds that node's
+    facts (ip, services, notes…), so dropping it would blank the node. Hide it,
+    or delete the node first.
+    """
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
+        return
+    await coord._ensure_loaded()  # is_drawn reads every canvas
+    if coord.is_drawn(msg["device_id"]):
+        connection.send_error(
+            msg["id"],
+            "in_use",
+            "This device is drawn on a canvas; delete its node or hide it instead",
+        )
         return
     ok = await coord.remove_pending(msg["device_id"])
     if not ok:
@@ -1004,6 +1018,37 @@ async def ws_racks_inventory(
     connection.send_result(msg["id"], {"items": items})
 
 
+# Curated device facts a client may send on add / update. Types are loose on
+# purpose (a cleared field arrives as null); the coordinator whitelists keys.
+# The curated node type travels as `node_type`: `type` is the WS command name.
+_DEVICE_FIELDS_SCHEMA: dict[Any, Any] = {
+    vol.Optional(key): vol.Any(str, None)
+    for key in (
+        "os", "label", "node_type", "friendly_name", "device_subtype", "model",
+        "vendor", "notes", "cpu_model", "check_method", "check_target",
+    )
+}
+_DEVICE_FIELDS_SCHEMA.update(
+    {
+        vol.Optional("cpu_count"): vol.Any(int, None),
+        vol.Optional("ram_gb"): vol.Any(int, float, None),
+        vol.Optional("disk_gb"): vol.Any(int, float, None),
+        vol.Optional("show_hardware"): vol.Any(bool, None),
+        vol.Optional("services"): vol.Any([dict], None),
+        vol.Optional("properties"): vol.Any([dict], None),
+    }
+)
+_DEVICE_FIELDS_SCHEMA_KEYS = tuple(str(k) for k in _DEVICE_FIELDS_SCHEMA)
+
+
+def _device_fields(msg: dict[str, Any], extra: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The device facts in a WS message, keyed as the inventory row stores them."""
+    fields = {k: msg[k] for k in (*_DEVICE_FIELDS_SCHEMA_KEYS, *extra) if k in msg}
+    if "node_type" in fields:
+        fields["type"] = fields.pop("node_type")
+    return fields
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "homelable/scan/add_pending",
@@ -1014,6 +1059,7 @@ async def ws_racks_inventory(
         vol.Optional("discovery_source", default="manual"): vol.In(
             ("manual", racks.RACK_SOURCE)
         ),
+        **_DEVICE_FIELDS_SCHEMA,
     }
 )
 @websocket_api.require_admin
@@ -1021,7 +1067,12 @@ async def ws_racks_inventory(
 async def ws_scan_add_pending(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Add a Device Inventory entry by hand, for hardware no scan can find."""
+    """Add a Device Inventory entry by hand, for hardware no scan can find.
+
+    Carries the curated facts the edit modal shows, so a hand-made entry needs
+    no create-then-update round trip. A host already known by ip or mac is
+    filled in rather than split into a second row.
+    """
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
@@ -1032,5 +1083,40 @@ async def ws_scan_add_pending(
         mac=msg.get("mac"),
         suggested_type=msg.get("suggested_type"),
         discovery_source=msg["discovery_source"],
+        fields=_device_fields(msg),
     )
+    connection.send_result(msg["id"], device)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/update_pending",
+        vol.Required("device_id"): str,
+        vol.Optional("ip"): vol.Any(str, None),
+        vol.Optional("mac"): vol.Any(str, None),
+        vol.Optional("hostname"): vol.Any(str, None),
+        vol.Optional("suggested_type"): vol.Any(str, None),
+        **_DEVICE_FIELDS_SCHEMA,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_update_pending(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Edit a Device Inventory row — the write half of the device detail modal.
+
+    Partial: only the keys sent are applied, so editing one field never clears
+    the rest. Lifecycle and discovery bookkeeping are not editable here. Every
+    canvas drawing the device reads the new facts. Returns the updated row.
+    """
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    fields = _device_fields(msg, ("ip", "mac", "hostname", "suggested_type"))
+    device = await coord.update_pending(msg["device_id"], fields)
+    if device is None:
+        connection.send_error(msg["id"], "not_found", "Device not found")
+        return
     connection.send_result(msg["id"], device)

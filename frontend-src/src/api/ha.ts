@@ -54,7 +54,7 @@ export const canvasApi = {
 
 // ─── Designs (multiple canvases) ─────────────────────────────────────────────
 
-import type { Design } from '@/types'
+import type { Design, PendingDevice } from '@/types'
 
 export const designsApi = {
   list: async () => {
@@ -162,6 +162,21 @@ export interface DuplicateNodeConflict {
   value: string
 }
 
+/** The inventory row fields a client may write (`scan/update_pending`). */
+export type PendingDeviceEdit = Partial<Pick<PendingDevice,
+  | 'ip' | 'mac' | 'hostname' | 'os' | 'label' | 'type' | 'suggested_type'
+  | 'friendly_name' | 'device_subtype' | 'model' | 'vendor' | 'services'
+  | 'properties' | 'notes' | 'cpu_count' | 'cpu_model' | 'ram_gb' | 'disk_gb'
+  | 'show_hardware' | 'check_method' | 'check_target'
+>>
+
+/** A device edit as the WS API spells it: the curated `type` travels as
+ *  `node_type`, because `type` is the command name on the HA socket. */
+function toDeviceWire<T extends PendingDeviceEdit>(data: T): Record<string, unknown> {
+  const { type, ...rest } = data
+  return type === undefined ? rest : { ...rest, node_type: type }
+}
+
 export const scanApi = {
   /** Start a scan. Optional deep-scan options are a per-scan override (extra
    *  port ranges + HTTP probe); they are not persisted. */
@@ -193,7 +208,7 @@ export const scanApi = {
     // `duplicate` conflict so the caller can ask the user. `node`/`node_id` are
     // absent in the duplicate case.
     const result = await wsCall<{
-      node?: { id: string; type: string; data: object }
+      node?: { id: string; type: string; data: object; device_id?: string | null }
       node_id?: string
       edges?: Array<{
         id: string
@@ -234,7 +249,9 @@ export const scanApi = {
     })
     return toAxiosLike(result)
   },
-  /** Add an inventory entry by hand, for hardware no scan can discover. */
+  /** Add an inventory entry by hand, for hardware no scan can discover. May
+   *  carry the curated facts the edit modal shows; a host already known by ip
+   *  or mac is filled in rather than split into a second row. */
   createPending: async (data: {
     hostname: string
     ip?: string | null
@@ -242,11 +259,23 @@ export const scanApi = {
     suggested_type?: string | null
     /** "manual" (default) or "rack" for gear created from a rack canvas. */
     discovery_source?: 'manual' | 'rack'
-  }) => {
+  } & PendingDeviceEdit) => {
     const result = await wsCall<{ id: string; hostname: string | null }>(
       'homelable/scan/add_pending',
-      data
+      toDeviceWire(data)
     )
+    return toAxiosLike(result)
+  },
+  /**
+   * Edit an inventory row. Partial: only the keys sent are applied, so a caller
+   * touching one field never clears the rest. Lifecycle (`status`) and
+   * discovery bookkeeping are not editable — approve / hide own those.
+   */
+  updatePending: async (id: string, data: PendingDeviceEdit) => {
+    const result = await wsCall<PendingDevice>('homelable/scan/update_pending', {
+      device_id: id,
+      ...toDeviceWire(data),
+    })
     return toAxiosLike(result)
   },
   restore: async (id: string) => {
