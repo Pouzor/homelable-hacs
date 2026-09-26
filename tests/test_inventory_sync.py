@@ -208,11 +208,14 @@ def test_backfill_converges_two_canvases_on_one_row() -> None:
     row = devices[0]
     assert row["os"] == "DSM 7"
     assert [p["key"] for p in row["properties"]] == ["Rack", "CPU"]
+    # Each canvas keeps showing only what it drew: the union is on the row.
     assert newer == {
         "id": "b", "type": "nas", "label": "NAS",
         "updated_at": "2026-02-01T00:00:00Z", "device_id": row["id"],
+        "display_view": {"services": [], "properties": [{"key": "cpu", "visible": True}]},
     }
     assert older["device_id"] == row["id"]
+    assert older["display_view"]["properties"] == [{"key": "rack", "visible": True}]
 
 
 def test_backfill_links_to_an_existing_scanned_row() -> None:
@@ -308,3 +311,103 @@ def test_a_dangling_link_is_relinked() -> None:
     sync.backfill_node_devices(_canvases(d1=[node]), devices, now=NOW)
     assert node["device_id"] == devices[0]["id"]
     assert devices[0]["label"] == "Box"
+
+
+# ─── Per-node view (homelable #357) ──────────────────────────────────────────
+
+SSH = {"port": 22, "protocol": "tcp", "service_name": "ssh"}
+KUMA = {"port": 3001, "protocol": "tcp", "service_name": "Uptime Kuma"}
+
+
+def test_a_view_orders_the_rows_services_and_hides_what_it_does_not_list() -> None:
+    row = _row(services=[SSH, KUMA])
+    node = {"id": "a", "type": "server", "device_id": "pd-1",
+            "display_view": {"services": [{"key": "3001|tcp|uptime kuma", "visible": True}],
+                             "properties": []}}
+    hydrated = sync.hydrate_node(node, row)
+    # Not listed means "this canvas does not show it" — hidden, not dropped.
+    assert hydrated["services"] == [KUMA, {**SSH, "visible": False}]
+    assert "display_view" not in hydrated
+    assert row["services"] == [SSH, KUMA]
+
+
+def test_a_node_without_a_view_still_shows_everything() -> None:
+    """No view — a node linked before views existed — is not "hide all"."""
+    row = _row(services=[SSH, KUMA], properties=[{"key": "Rack", "value": "A1", "visible": True}])
+    hydrated = sync.hydrate_node({"id": "a", "type": "server", "device_id": "pd-1"}, row)
+    assert hydrated["services"] == [SSH, KUMA]
+    assert hydrated["properties"] == row["properties"]
+
+
+def test_the_view_is_keyed_on_identity_not_on_values() -> None:
+    """Editing a property's value or a service's path keeps it where it was."""
+    row = _row(
+        services=[{**SSH, "path": "/admin"}],
+        properties=[{"key": "RACK", "value": "B2", "visible": True}],
+    )
+    node = {"id": "a", "type": "server", "device_id": "pd-1", "display_view": {
+        "services": [{"key": "22|tcp|ssh", "visible": False}],
+        "properties": [{"key": "rack", "visible": True}],
+    }}
+    hydrated = sync.hydrate_node(node, row)
+    assert hydrated["services"] == [{**SSH, "path": "/admin", "visible": False}]
+    assert hydrated["properties"] == [{"key": "RACK", "value": "B2", "visible": True}]
+
+
+def test_a_first_view_reads_an_empty_list_as_nothing_to_say() -> None:
+    """A node drawn for an already-scanned device sends no services."""
+    view = sync.next_view(None, {"services": []}, _row(services=[SSH]))
+    assert view == {"services": [{"key": "22|tcp|ssh", "visible": True}], "properties": []}
+
+
+def test_a_strict_first_view_keeps_an_empty_list() -> None:
+    """The backfill: that canvas drew no service, so it keeps drawing none."""
+    view = sync.next_view(None, {"services": []}, _row(services=[SSH]), strict=True)
+    assert view["services"] == []
+
+
+def test_a_later_write_keeps_the_lists_it_did_not_carry() -> None:
+    current = {"services": [{"key": "22|tcp|ssh", "visible": False}], "properties": []}
+    view = sync.next_view(current, {"properties": []}, _row(services=[SSH, KUMA]))
+    assert view["services"] == current["services"]
+
+
+def test_link_facts_records_the_view_even_when_no_fact_changed() -> None:
+    """`changed_fields` guards the shared row, not the node's own view."""
+    row = _row(ip="10.0.0.5", services=[SSH, KUMA])
+    node = {"id": "a", "type": "server", "device_id": "pd-1"}
+    sync.link_facts(
+        [row], node, {"ip": "10.0.0.5", "services": [SSH, {**KUMA, "visible": False}]},
+        now=NOW, replace_lists=True, only_changed=True, changed_fields=[],
+    )
+    assert row["services"] == [SSH, KUMA]
+    assert node["display_view"]["services"] == [
+        {"key": "22|tcp|ssh", "visible": True},
+        {"key": "3001|tcp|uptime kuma", "visible": False},
+    ]
+
+
+def test_backfill_keeps_a_node_that_drew_no_service_drawing_none() -> None:
+    scanned = _row(id="pd-scan", ip="10.0.0.5", services=[KUMA])
+    node = {"id": "a", "type": "nas", "label": "NAS", "ip": "10.0.0.5", "services": []}
+    sync.backfill_node_devices(_canvases(d1=[node]), [scanned], now=NOW)
+    assert sync.hydrate_node(node, scanned)["services"] == [{**KUMA, "visible": False}]
+
+
+def test_seed_gives_a_linked_node_without_a_view_the_rows_lists() -> None:
+    row = _row(services=[SSH])
+    node = {"id": "a", "type": "server", "device_id": "pd-1"}
+    group = {"id": "g", "type": "groupRect", "label": "Zone"}
+    dangling = {"id": "b", "type": "server", "device_id": "pd-gone"}
+    canvases = _canvases(d1=[node, group, dangling])
+
+    assert sync.seed_node_views(canvases, [row]) == 1
+    assert node["display_view"] == {"services": [{"key": "22|tcp|ssh", "visible": True}],
+                                    "properties": []}
+    assert "display_view" not in group
+    assert "display_view" not in dangling
+    assert sync.seed_node_views(canvases, [row]) == 0
+
+    # What the row gains after the seed stays off this canvas.
+    row["services"].append(KUMA)
+    assert sync.hydrate_node(node, row)["services"] == [SSH, {**KUMA, "visible": False}]

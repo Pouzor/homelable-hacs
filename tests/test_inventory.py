@@ -483,3 +483,143 @@ async def test_ws_add_pending_carries_curated_fields(hass, hass_ws_client, setup
     assert device["type"] == "ups"
     assert device["notes"] == "basement"
     assert device["check_method"] == "none"
+
+
+# ─── Per-node view (homelable #357) ──────────────────────────────────────────
+
+SSH = {"port": 22, "protocol": "tcp", "service_name": "ssh"}
+KUMA = {"port": 3001, "protocol": "tcp", "service_name": "Uptime Kuma"}
+
+
+async def _drawn_twice(coord: HomelableCoordinator, **row: object) -> tuple[str, str]:
+    """One device, approved onto the default design and onto a second one."""
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", **row})
+    default = (await coord.list_designs())[0]["id"]
+    other = (await coord.create_design("Lab"))["id"]
+    await coord.approve_pending("pd-1", {"design_id": default})
+    await coord.approve_pending("pd-1", {"design_id": other})
+    return default, other
+
+
+async def test_hiding_a_service_on_one_node_leaves_the_other_alone(coord) -> None:  # noqa: ANN001
+    default, other = await _drawn_twice(coord, services=[SSH, KUMA])
+
+    canvas = await coord.get_canvas(default)
+    canvas["nodes"][0]["services"] = [SSH, {**KUMA, "visible": False}]
+    canvas["nodes"][0]["changed_facts"] = []  # the panel does not call hiding an edit
+    await coord.save_canvas(canvas, default)
+
+    assert (await coord.get_canvas(default))["nodes"][0]["services"] == [SSH, {**KUMA, "visible": False}]
+    assert (await coord.get_canvas(other))["nodes"][0]["services"] == [SSH, KUMA]
+    assert (await coord._get_pending())["devices"][0]["services"] == [SSH, KUMA]
+
+
+async def test_the_order_is_per_node_too(coord) -> None:  # noqa: ANN001
+    default, other = await _drawn_twice(coord, services=[SSH, KUMA])
+
+    canvas = await coord.get_canvas(default)
+    canvas["nodes"][0]["services"] = [KUMA, SSH]
+    canvas["nodes"][0]["changed_facts"] = []
+    await coord.save_canvas(canvas, default)
+
+    assert (await coord.get_canvas(default))["nodes"][0]["services"] == [KUMA, SSH]
+    assert (await coord.get_canvas(other))["nodes"][0]["services"] == [SSH, KUMA]
+
+
+async def test_a_service_the_row_gains_later_stays_off_the_canvas(coord) -> None:  # noqa: ANN001
+    """The leak this port exists to stop: a scan must not redraw every canvas."""
+    await _add_rows(coord, {"id": "pd-1", "ip": "192.168.1.5", "services": [SSH]})
+    await coord.approve_pending("pd-1")
+    scanned = {
+        "ip": "192.168.1.5", "mac": None, "hostname": None, "os": None, "open_ports": [],
+        "services": [SSH, KUMA], "suggested_type": None, "discovery_source": "arp",
+    }
+    with patch(
+        "custom_components.homelable.coordinator.scanner.run_scan",
+        AsyncMock(return_value=[scanned]),
+    ):
+        await coord.trigger_scan()
+        await coord.hass.async_block_till_done(wait_background_tasks=True)
+
+    assert (await coord._get_pending())["devices"][0]["services"] == [SSH, KUMA]
+    assert (await coord.get_canvas())["nodes"][0]["services"] == [SSH, {**KUMA, "visible": False}]
+
+
+async def test_removing_a_service_removes_it_from_the_device(coord) -> None:  # noqa: ANN001
+    """Delete is device-wide — hiding is what a single canvas does."""
+    default, other = await _drawn_twice(coord, services=[SSH, KUMA])
+
+    canvas = await coord.get_canvas(default)
+    canvas["nodes"][0]["services"] = [SSH]
+    canvas["nodes"][0]["changed_facts"] = ["services"]
+    await coord.save_canvas(canvas, default)
+
+    assert (await coord.get_canvas(other))["nodes"][0]["services"] == [SSH]
+
+
+async def test_a_new_node_shows_what_the_row_already_holds(coord) -> None:  # noqa: ANN001
+    """A node that says nothing about the lists gets its first view off the row."""
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", "services": [SSH]})
+    await coord.save_canvas({"nodes": [
+        {"id": "n1", "type": "server", "label": "Box", "ip": "10.0.0.5"},
+    ], "edges": []})
+    assert (await coord.get_canvas())["nodes"][0]["services"] == [SSH]
+
+
+async def test_a_view_sent_by_the_panel_is_ignored(coord) -> None:  # noqa: ANN001
+    """The view is derived from the lists the payload carries, never accepted."""
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", "services": [SSH]})
+    await coord.approve_pending("pd-1")
+
+    canvas = await coord.get_canvas()
+    canvas["nodes"][0]["display_view"] = {"services": [], "properties": []}
+    canvas["nodes"][0]["changed_facts"] = []
+    await coord.save_canvas(canvas)
+    assert (await coord.get_canvas())["nodes"][0]["services"] == [SSH]
+
+
+async def test_a_save_that_leaves_a_list_out_keeps_its_view(coord) -> None:  # noqa: ANN001
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", "services": [SSH, KUMA]})
+    await coord.approve_pending("pd-1")
+    canvas = await coord.get_canvas()
+    canvas["nodes"][0]["services"] = [SSH, {**KUMA, "visible": False}]
+    canvas["nodes"][0]["changed_facts"] = []
+    await coord.save_canvas(canvas)
+
+    node = (await coord.get_canvas())["nodes"][0]
+    await coord.save_canvas({"nodes": [
+        {"id": node["id"], "type": node["type"], "label": node["label"], "pos_x": 5},
+    ], "edges": []})
+    assert (await coord.get_canvas())["nodes"][0]["services"] == [SSH, {**KUMA, "visible": False}]
+
+
+async def test_approve_gives_the_new_node_a_view_of_the_row(coord) -> None:  # noqa: ANN001
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", "services": [SSH]})
+    await coord.approve_pending("pd-1")
+    stored = coord._canvases[(await coord.list_designs())[0]["id"]]["nodes"][0]
+    assert stored["display_view"]["services"] == [{"key": "22|tcp|ssh", "visible": True}]
+
+
+async def test_load_keeps_each_canvas_showing_what_it_drew(hass, hass_storage) -> None:  # noqa: ANN001
+    """The migration must not redraw a canvas with another canvas' services."""
+    _seed_legacy(hass_storage, {
+        "net": [{"id": "a", "type": "nas", "label": "NAS", "ip": "10.0.0.5",
+                 "services": [{"port": 5000, "protocol": "tcp", "service_name": "dsm"}]}],
+        "lab": [{"id": "b", "type": "nas", "label": "NAS", "ip": "10.0.0.5", "services": []}],
+    })
+    coord = HomelableCoordinator(hass, _mock_entry())
+    dsm = {"port": 5000, "protocol": "tcp", "service_name": "dsm"}
+    assert (await coord.get_canvas("net"))["nodes"][0]["services"] == [dsm]
+    assert (await coord.get_canvas("lab"))["nodes"][0]["services"] == [{**dsm, "visible": False}]
+
+
+async def test_load_seeds_a_view_for_a_node_linked_without_one(hass, hass_storage) -> None:  # noqa: ANN001
+    _seed_legacy(
+        hass_storage,
+        {"net": [{"id": "a", "type": "server", "label": "Box", "device_id": "pd-1"}]},
+        rows=[{"id": "pd-1", "status": "approved", "ip": "10.0.0.5", "services": [SSH]}],
+    )
+    coord = HomelableCoordinator(hass, _mock_entry())
+    assert (await coord.get_canvas("net"))["nodes"][0]["services"] == [SSH]
+    stored = hass_storage[STORAGE_KEY_CANVAS]["data"]["canvases"]["net"]["nodes"][0]
+    assert stored["display_view"]["services"] == [{"key": "22|tcp|ssh", "visible": True}]

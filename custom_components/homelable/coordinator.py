@@ -597,6 +597,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 stats["linked"], stats["created"], stats["merged"],
                 stats["filled"], stats["skipped"],
             )
+        seeded = inventory_sync.seed_node_views(self._canvases, pending["devices"])
+        if seeded:
+            _LOGGER.info("Seeded the service/property view of %d node(s)", seeded)
         if pending["devices"] != before_rows:
             await self._save_pending()
         if self._canvases != before_nodes:
@@ -1139,6 +1142,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
             for n in (prior or {}).get("nodes", [])
             if n.get("id") and n.get("device_id")
         }
+        prior_views = {
+            n.get("id"): n[inventory_sync.VIEW_KEY]
+            for n in (prior or {}).get("nodes", [])
+            if n.get("id") and inventory_sync.VIEW_KEY in n
+        }
         devices = (await self._get_pending())["devices"]
         now = _utc_now_iso()
         edited: set[str] = set()
@@ -1150,6 +1158,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
             # A client that did not round-trip the link keeps the one on record.
             if not node.get("device_id") and node.get("id") in prior_links:
                 node["device_id"] = prior_links[node["id"]]
+            # The view is derived, never accepted: it is read back out of the
+            # services and properties the payload carries, on top of the one on
+            # record for a list the payload left out.
+            node.pop(inventory_sync.VIEW_KEY, None)
+            if node.get("id") in prior_views:
+                node[inventory_sync.VIEW_KEY] = copy.deepcopy(prior_views[node["id"]])
             facts = inventory_sync.facts_of_node(node)
             # The panel never authors observations: last_seen / last_scan /
             # response_time_ms belong to the checker and the scanner, so a
@@ -1775,6 +1789,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
             "updated_at": now,
         }
         inventory_sync.strip_facts(node)
+        # A new node shows what the row holds today; whatever a later scan adds
+        # arrives hidden instead of appearing on it unasked.
+        node[inventory_sync.VIEW_KEY] = inventory_sync.view_of_device(device)
 
         canvas = await self._stored_canvas(design_id)
         canvas.setdefault("nodes", []).append(node)
