@@ -72,6 +72,22 @@ describe('<homelable-canvas-card-editor>', () => {
     })
   })
 
+  it('leaves rack designs out — the card draws the logical canvas only', async () => {
+    sendMessagePromise.mockResolvedValue({
+      designs: [
+        { id: 'a', name: 'Home', design_type: 'network' },
+        { id: 'r', name: 'Lab rack', design_type: 'rack' },
+      ],
+    })
+    const { form } = await mount()
+    await vi.waitFor(() => {
+      const design = form.schema!.find((entry) => entry.name === 'design_id')!
+      expect(design.selector.select).toMatchObject({
+        options: [{ value: 'a', label: 'Home' }],
+      })
+    })
+  })
+
   it('falls back to a text field when the design list cannot be loaded', async () => {
     sendMessagePromise.mockRejectedValue(new Error('ws down'))
     const { form } = await mount()

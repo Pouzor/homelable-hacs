@@ -22,6 +22,7 @@ Here's what Homelable can do inside Home Assistant. One line on what each featur
 12. [Live Status Monitoring](#12-live-status-monitoring)
 13. [Export (PNG / SVG / YAML / Markdown)](#13-export)
 14. [Settings & Shortcuts](#14-settings--shortcuts)
+15. [Rack Canvas](#15-rack-canvas)
 
 ---
 
@@ -152,6 +153,7 @@ Nodes: `proxmox` (host) / `vm` / `lxc`, linked host→guest by a `virtual` edge;
 - Sidebar → **Device Inventory**. Each entry shows IP, MAC, hostname, and any OS and services detected.
 - Per device: **Approve** to drop a typed node on the canvas, **Hide** to stash it (you can get it back), or **Ignore** to dismiss it.
 - **Hidden Devices** is the sidebar entry where you review and restore anything you've hidden.
+- **Rack devices** filters the gear created from a rack canvas (patch panels, PDUs, shelves…). Those entries are inventory like any other, but they have no **Approve**: a mount is not a host to put on a logical canvas. **Rackable** narrows the list to hardware you could screw into a rack.
 
 ---
 
@@ -196,6 +198,25 @@ Nodes: `proxmox` (host) / `vm` / `lxc`, linked host→guest by a `virtual` edge;
 - Sidebar → **Settings** for app-level config.
 - **Search** to find nodes fast.
 - Open the **Shortcuts** modal for the full key list (Save `Ctrl/Cmd+S`, undo/redo, and the rest).
+
+---
+
+## 15. Rack Canvas
+
+**What:** The physical side of the lab: racks, the gear mounted in them, and the patch cables between ports. A rack canvas is a canvas of its own kind, next to your network diagrams in the canvas switcher.
+
+**Use:**
+- **Canvas switcher → New Canvas → Kind: Rack.** The kind is fixed once created; copying a rack canvas copies its racks, mounts and cables.
+- Toolbar → **+ Rack** adds a rack. Double-click its chassis for its settings: name, location, height in U, 19" or 10", numbering direction, colours.
+- Sidebar → **Add Device** mounts gear: pick an entry from the **Device Inventory**, create a new device (it lands in the inventory, under **Rack devices**), or drop in an accessory. Accessories (blanks, shelves, cable managers) can also be dragged from the sidebar tray onto a rack.
+- Drag a mounted device to move it; it snaps to the nearest free slot. A 12-column grid lets two or three machines share one U.
+- Double-click a device to edit it: label, faceplate (a visual catalog of servers, switches, patch panels, UPS, PDUs, NAS…), size, colour, ports and where they sit on the plate, and when its ports show. The **Linked device** panel shows what the logical canvas knows about the same box.
+- The faceplate, size, colour and ports belong to the inventory entry, so the same device looks the same in every rack you mount it in.
+- **Status:** a fixed colour, or **Check device** — the mount then follows the status check of the matching node on your network canvases. The rack runs no check of its own.
+- **Patch:** toolbar → **Patch**, then drag from a port to another. Click a cable to select it (label, type, colour, properties); Delete or **Unplug** removes it. The cable menu next to it picks when cables show: on hover, always, or never.
+- **Import links** turns the ethernet/fibre links already drawn on your network canvases into patches between the racked devices. Running it again only adds what is missing.
+- **Save Rack** stores the canvas — saves are explicit, like everywhere else. **PNG** export works on a rack canvas too.
+- Not there yet: rear view, 0U side PDUs, power budgeting, undo/redo on a rack canvas, and a dashboard card for rack canvases (the card's picker only lists network canvases).
 
 ---
 

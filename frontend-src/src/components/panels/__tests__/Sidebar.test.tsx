@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Sidebar } from '../Sidebar'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
+import { useRackStore } from '@/rack/store'
 import type { Node } from '@xyflow/react'
 import type { Design, NodeData } from '@/types'
 
@@ -320,3 +321,54 @@ describe('Sidebar', () => {
 // removed in favour of PendingDevicesModal. Coverage for batch select +
 // live updates belongs in tests targeting PendingDevicesModal directly
 // (tracked as a follow-up, see PR description).
+
+describe('Sidebar — rack canvas', () => {
+  const rackDesign: Design = {
+    id: 'r1', name: 'Lab rack', icon: 'server', design_type: 'rack',
+    created_at: '', updated_at: '',
+  }
+
+  beforeEach(() => {
+    mockStore()
+    vi.clearAllMocks()
+    useRackStore.getState().reset()
+    useDesignStore.setState({ designs: [rackDesign], activeDesignId: 'r1', activeDesignType: 'rack' })
+  })
+
+  afterEach(() => {
+    useDesignStore.setState({ designs: [], activeDesignId: null, activeDesignType: null })
+    useRackStore.getState().reset()
+  })
+
+  it('swaps the canvas actions for the rack ones', () => {
+    render(<Sidebar {...defaultProps} />)
+    expect(screen.getByText('Add Device')).toBeInTheDocument()
+    expect(screen.getByText('Save Rack')).toBeInTheDocument()
+    expect(screen.getByText('Rack view')).toBeInTheDocument()
+    expect(screen.queryByText('Add Node')).not.toBeInTheDocument()
+    expect(screen.queryByText('Scan Network')).not.toBeInTheDocument()
+    expect(screen.queryByText('Add Floorplan')).not.toBeInTheDocument()
+  })
+
+  it('opens the rack device editor from Add Device', () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Add Device'))
+    expect(useRackStore.getState().deviceEditor).toEqual({ deviceId: null })
+  })
+
+  it('shows the accessory tray and rack capacity', () => {
+    useRackStore.getState().addRack({ uHeight: 12 })
+    render(<Sidebar {...defaultProps} />)
+    expect(screen.getByText('Accessories')).toBeInTheDocument()
+    expect(screen.getByText('12U / 12U')).toBeInTheDocument()
+  })
+
+  it('badges Save from the rack store, not the logical canvas', () => {
+    mockStore({ hasUnsavedChanges: true })
+    const { rerender } = render(<Sidebar {...defaultProps} />)
+    expect(screen.getByText('Save Rack').closest('button')?.querySelector('.rounded-full')).toBeNull()
+    useRackStore.setState({ hasUnsavedChanges: true })
+    rerender(<Sidebar {...defaultProps} />)
+    expect(screen.getByText('Save Rack').closest('button')?.querySelector('.rounded-full')).not.toBeNull()
+  })
+})

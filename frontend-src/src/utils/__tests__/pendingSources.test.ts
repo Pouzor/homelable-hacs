@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sourceBuckets, orderedSources } from '../pendingSources'
+import { sourceBuckets, orderedSources, isRackDevice } from '../pendingSources'
 import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
 
 function device(overrides: Partial<PendingDevice> = {}): PendingDevice {
@@ -50,5 +50,28 @@ describe('sourceBuckets', () => {
 describe('orderedSources', () => {
   it('renders IP before Proxmox regardless of input order', () => {
     expect(orderedSources(device({ discovery_sources: ['proxmox', 'arp'] }))).toEqual(['ip', 'proxmox'])
+  })
+})
+
+describe('isRackDevice', () => {
+  it('recognises gear created from a rack canvas', () => {
+    expect(isRackDevice(device({ discovery_sources: ['rack'] }))).toBe(true)
+    expect(isRackDevice(device({ discovery_source: 'rack' }))).toBe(true)
+  })
+
+  it('leaves scanned and hand-added devices alone', () => {
+    expect(isRackDevice(device({ discovery_sources: ['arp'] }))).toBe(false)
+    expect(isRackDevice(device({ discovery_source: 'manual' }))).toBe(false)
+    expect(isRackDevice(device())).toBe(false)
+  })
+
+  it('does not fold rack into the ip bucket', () => {
+    // Rack gear has to be filterable on its own — that is the point of the
+    // "Rack devices" section in the inventory.
+    expect([...sourceBuckets(device({ discovery_source: 'rack' }))]).toEqual(['rack'])
+  })
+
+  it('badges a rack row after the other sources', () => {
+    expect(orderedSources(device({ discovery_sources: ['rack', 'arp'] }))).toEqual(['ip', 'rack'])
   })
 })

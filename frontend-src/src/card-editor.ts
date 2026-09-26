@@ -29,7 +29,7 @@ interface HaFormElement extends HTMLElement {
 }
 
 interface DesignsResult {
-  designs?: Array<{ id: string; name: string }>
+  designs?: Array<{ id: string; name: string; design_type?: string }>
 }
 
 /** HA's hass object exposes callWS; our own bridge type only knows connection. */
@@ -72,7 +72,10 @@ class HomelableCanvasCardEditor extends HTMLElement {
       const result = this._hass.callWS
         ? await this._hass.callWS<DesignsResult>(message)
         : await this._hass.connection.sendMessagePromise<DesignsResult>(message)
-      this._designs = (result?.designs ?? []).map((d) => ({ id: d.id, name: d.name }))
+      // The card draws the logical canvas only; a rack design would show empty.
+      this._designs = (result?.designs ?? [])
+        .filter((d) => d.design_type !== 'rack')
+        .map((d) => ({ id: d.id, name: d.name }))
     } catch {
       this._designs = null
     }

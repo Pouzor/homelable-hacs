@@ -16,7 +16,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from . import proxmox, scanner, status_checker, zha, zigbee, zwave
+from . import proxmox, racks, scanner, status_checker, zha, zigbee, zwave
 from .const import (
     CONF_PROXMOX_HOST,
     CONF_PROXMOX_PORT,
@@ -66,10 +66,12 @@ from .const import (
     STORAGE_KEY_CANVAS,
     STORAGE_KEY_DESIGNS,
     STORAGE_KEY_PENDING,
+    STORAGE_KEY_RACKS,
     STORAGE_KEY_RUNS,
     STORAGE_VERSION_CANVAS,
     STORAGE_VERSION_DESIGNS,
     STORAGE_VERSION_PENDING,
+    STORAGE_VERSION_RACKS,
     STORAGE_VERSION_RUNS,
     ZIGBEE_SOURCE_Z2M,
     ZIGBEE_SOURCE_ZHA,
@@ -234,6 +236,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self.runs_store: Store = Store(
             hass, STORAGE_VERSION_RUNS, STORAGE_KEY_RUNS
         )
+        self.racks_store: Store = Store(
+            hass, STORAGE_VERSION_RACKS, STORAGE_KEY_RACKS
+        )
         # Multi-design canvas: `_canvases` maps design_id -> canvas dict;
         # `_designs` is the ordered list of design metadata. Both are loaded
         # (and legacy single-canvas data migrated) lazily via _ensure_loaded.
@@ -241,6 +246,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._canvases: dict[str, dict[str, Any]] | None = None
         self._pending: dict[str, Any] | None = None
         self._runs: list[dict[str, Any]] | None = None
+        # Rack canvases, design_id -> {racks, devices, cables, viewport}.
+        self._racks: dict[str, dict[str, Any]] | None = None
         self._scan_run_id: str | None = None
         self._service_check_unsub: Callable[[], None] | None = None
         self._periodic_scan_unsub: Callable[[], None] | None = None
@@ -624,6 +631,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._canvases[design["id"]] = new_canvas
         await self._save_designs()
         await self._save_canvases()
+        # Copy the rack canvas, if the source has one, under fresh ids.
+        rack_states = await self._get_racks()
+        if source_id in rack_states:
+            rack_states[design["id"]] = racks.copy_state(rack_states[source_id])
+            await self._save_racks()
         return design
 
     async def create_design(
@@ -677,7 +689,203 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._canvases.pop(design_id, None)
         await self._save_designs()
         await self._save_canvases()
+        rack_states = await self._get_racks()
+        if rack_states.pop(design_id, None) is not None:
+            await self._save_racks()
         return "ok"
+
+    # ─── Rack canvases ───────────────────────────────────────────────────────
+
+    async def _get_racks(self) -> dict[str, dict[str, Any]]:
+        if self._racks is None:
+            raw = await self.racks_store.async_load()
+            designs = raw.get("designs") if isinstance(raw, dict) else None
+            self._racks = dict(designs) if isinstance(designs, dict) else {}
+        return self._racks
+
+    async def _save_racks(self) -> None:
+        if self._racks is not None:
+            await self.racks_store.async_save({"designs": self._racks})
+
+    async def _design_exists(self, design_id: str) -> bool:
+        await self._ensure_loaded()
+        assert self._designs is not None
+        return any(d["id"] == design_id for d in self._designs)
+
+    async def get_racks(self, design_id: str) -> dict[str, Any] | None:
+        """Rack state of a design, with each device's inventory plate applied.
+
+        The inventory row owns the front panel (plate, size, colour, ports), so
+        it wins over the mount's own copy. Returns None for an unknown design.
+        """
+        if not await self._design_exists(design_id):
+            return None
+        state = (await self._get_racks()).get(design_id) or racks.empty_state()
+        pending = await self._get_pending()
+        inventory = {d["id"]: d for d in pending["devices"]}
+        return racks.overlay_models(state, inventory)
+
+    async def save_racks(
+        self, design_id: str, payload: dict[str, Any]
+    ) -> bool:
+        """Persist the full rack state of one design, replacing what was there.
+
+        Raises ``ValueError`` on an invalid payload. Returns False for an
+        unknown design. Each mount's front panel is written through onto the
+        inventory row it stands for.
+        """
+        if not await self._design_exists(design_id):
+            return False
+        state = racks.clean_save(payload)
+        rack_states = await self._get_racks()
+        previous = {
+            d["id"]: d for d in (rack_states.get(design_id) or {}).get("devices", [])
+        }
+        pending = await self._get_pending()
+        inventory = {d["id"]: d for d in pending["devices"]}
+        if racks.write_through(state["devices"], previous, inventory):
+            await self._save_pending()
+        rack_states[design_id] = state
+        await self._save_racks()
+        return True
+
+    def _node_status(self, node: dict[str, Any]) -> str | None:
+        """Live status of a canvas node: the last check, else what is stored."""
+        live = (self.data or {}).get(node.get("id") or "") or {}
+        data = node.get("data") or {}
+        return live.get("status") or node.get("status") or data.get("status")
+
+    async def rack_inventory(self, design_id: str) -> list[dict[str, Any]] | None:
+        """Device Inventory entries that can be racked, for the rack tray.
+
+        Each entry is flagged with whether it is already mounted in this design
+        and resolved to a logical-canvas node — the one a mount pinned by hand,
+        else the first match by IEEE, then MAC, then IP — so a mount can follow
+        that node's status and print what the logical view knows about it.
+        Returns None for an unknown design.
+        """
+        if not await self._design_exists(design_id):
+            return None
+        assert self._designs is not None
+        state = (await self._get_racks()).get(design_id) or racks.empty_state()
+        mounts = state.get("devices", [])
+        mounted = {m["device_id"] for m in mounts if m.get("device_id")}
+        # A mount can name its canvas node itself, when the user linked one.
+        # That beats the IEEE/MAC/IP guess below.
+        pinned = {
+            m["device_id"]: m["node_id"]
+            for m in mounts
+            if m.get("device_id") and m.get("node_id")
+        }
+        design_names = {d["id"]: d.get("name") for d in self._designs}
+        nodes_by_id: dict[str, tuple[str, dict[str, Any]]] = {}
+        for did, canvas in (self._canvases or {}).items():
+            for n in canvas.get("nodes", []):
+                if n.get("id"):
+                    nodes_by_id.setdefault(n["id"], (did, n))
+        by_ip, by_mac, by_ieee = self._canvas_node_index()
+
+        pending = await self._get_pending()
+        items: list[dict[str, Any]] = []
+        for raw in pending["devices"]:
+            if raw.get("status") not in ("pending", "approved"):
+                continue
+            device = self._flatten_pending(raw)
+            if device.get("suggested_type") in racks.UNRACKABLE_TYPES:
+                continue
+            linked = nodes_by_id.get(pinned.get(device["id"]) or "")
+            if linked is None:
+                candidates: list[tuple[str, dict[str, Any]]] = []
+                if device.get("ieee_address"):
+                    candidates += by_ieee.get(device["ieee_address"], [])
+                if device.get("mac"):
+                    candidates += by_mac.get(device["mac"], [])
+                for tok in _ip_tokens(device.get("ip")):
+                    candidates += by_ip.get(tok, [])
+                linked = candidates[0] if candidates else None
+            node_design, node = linked if linked else (None, None)
+            nd = (node or {}).get("data") or {}
+
+            def _nv(key: str, _n: dict[str, Any] | None = node, _d: dict[str, Any] = nd) -> Any:
+                if _n is None:
+                    return None
+                return _n.get(key) or _d.get(key)
+
+            items.append(
+                {
+                    "id": device["id"],
+                    "label": racks.device_label(device),
+                    "suggested_type": device.get("suggested_type"),
+                    "ip": device.get("ip"),
+                    "status": device.get("status"),
+                    "discovery_source": device.get("discovery_source"),
+                    "mac": device.get("mac") or device.get("ieee_address"),
+                    "hostname": device.get("hostname"),
+                    "os": device.get("os"),
+                    "services": racks.services(
+                        device.get("services") or _nv("services")
+                    ),
+                    "node_id": node.get("id") if node else None,
+                    "node_status": self._node_status(node) if node else None,
+                    "node_label": _nv("label"),
+                    "node_type": _nv("type"),
+                    "node_ip": _nv("ip"),
+                    "node_mac": _nv("mac") or _nv("ieee_address"),
+                    "node_hostname": _nv("hostname"),
+                    "node_os": _nv("os"),
+                    "node_check_method": _nv("check_method"),
+                    "node_design_id": node_design,
+                    "node_design_name": design_names.get(node_design) if node_design else None,
+                    "node_last_seen": _nv("last_seen"),
+                    "racked": device["id"] in mounted,
+                    "rack_faceplate_id": device.get("rack_faceplate_id"),
+                    "rack_u_height": device.get("rack_u_height"),
+                    "rack_col_span": device.get("rack_col_span"),
+                    "rack_color": device.get("rack_color"),
+                    "rack_ports": [
+                        p
+                        for p in (device.get("rack_ports") or [])
+                        if isinstance(p, dict) and p.get("id")
+                    ],
+                }
+            )
+        return items
+
+    async def add_manual_pending(
+        self,
+        *,
+        hostname: str,
+        ip: str | None = None,
+        mac: str | None = None,
+        suggested_type: str | None = None,
+        discovery_source: str = "manual",
+    ) -> dict[str, Any]:
+        """Add an inventory entry by hand, for hardware no scan can discover.
+
+        Lands as ``status="pending"`` like a discovery would, so the existing
+        hide / restore / ignore flows apply unchanged. ``discovery_source``
+        ``"rack"`` marks gear created from a rack canvas, which is never
+        approved onto a logical canvas.
+        """
+        store = await self._get_pending()
+        device = {
+            "id": f"pd-{uuid.uuid4().hex[:8]}",
+            "ip": ip or None,
+            # Canonical form, like the scan: dedup compares MACs by equality.
+            "mac": proxmox.normalize_mac(mac),
+            "hostname": hostname,
+            "os": None,
+            "open_ports": [],
+            "services": [],
+            "suggested_type": suggested_type or None,
+            "status": "pending",
+            "discovery_source": discovery_source,
+            "discovery_sources": [discovery_source],
+            "discovered_at": _utc_now_iso(),
+        }
+        store["devices"].append(device)
+        await self._save_pending()
+        return device
 
     # ─── Canvas ──────────────────────────────────────────────────────────────
 
@@ -1191,6 +1399,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         )
         if device is None:
             return None
+        # Rack gear documents a mount, not a host: it belongs to a rack canvas
+        # and is never placed on a logical one.
+        if racks.is_rack_only(device):
+            return {"rack_only": True}
 
         overrides = node_overrides or {}
         # Approve onto the active design (falls back to the default design).
@@ -1360,6 +1572,15 @@ class HomelableCoordinator(DataUpdateCoordinator):
             device = by_id.get(device_id)
             if device is None:
                 not_found.append(device_id)
+                continue
+            # Rack-only gear belongs to a rack canvas, never to a logical one.
+            if racks.is_rack_only(device):
+                skipped.append(device_id)
+                skipped_devices.append({
+                    "device_id": device_id, "label": _label(device),
+                    "match": "rack", "value": "rack device",
+                    "existing_node_id": None,
+                })
                 continue
             ip = device.get("ip")
             mac = device.get("mac")

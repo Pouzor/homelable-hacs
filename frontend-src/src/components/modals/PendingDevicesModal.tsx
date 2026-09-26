@@ -14,7 +14,8 @@ import { PendingDeviceModal, type PendingDevice } from '@/components/modals/Pend
 import type { NodeType, ServiceInfo } from '@/types'
 import { buildZigbeeProperties, isZigbeeType } from '@/utils/zigbeeProperties'
 import { buildZwaveProperties, isZwaveType } from '@/utils/zwaveProperties'
-import { sourceBuckets, orderedSources, SOURCE_META, type SourceBucket } from '@/utils/pendingSources'
+import { sourceBuckets, orderedSources, isRackDevice, SOURCE_META, type SourceBucket } from '@/utils/pendingSources'
+import { isRackable } from '@/utils/rackable'
 import { buildMacProperty } from '@/utils/macProperty'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
 import { getCenteredPosition } from '@/utils/viewportCenter'
@@ -27,6 +28,14 @@ interface PendingDevicesModalProps {
   onClose: () => void
   highlightId?: string
   initialStatus?: 'pending' | 'hidden'
+  /**
+   * Picker mode. Clicking a card hands the device back instead of opening its
+   * detail modal, so another feature (the rack canvas) can reuse this list —
+   * search, filters, badges and all — rather than reimplementing a `<select>`.
+   */
+  onPick?: (device: PendingDevice) => void
+  /** Start with the Rackable filter on (what the rack picker wants). */
+  initialRackableOnly?: boolean
 }
 
 const PORT_COLORS: Record<number, string> = {
@@ -126,7 +135,7 @@ function injectAutoEdges(edges: ServerAutoEdge[] | undefined) {
   })
 }
 
-export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending' }: PendingDevicesModalProps) {
+export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending', onPick, initialRackableOnly = false }: PendingDevicesModalProps) {
   const [devices, setDevices] = useState<PendingDevice[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<PendingDevice | null>(null)
@@ -140,6 +149,9 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   const [showOnCanvas, setShowOnCanvas] = useState(true)
   // Optionally restrict to devices that have at least one detected service.
   const [withServicesOnly, setWithServicesOnly] = useState(false)
+  // Hardware only — what a rack can hold. On by default when the rack canvas
+  // opens the inventory to pick a mount.
+  const [rackableOnly, setRackableOnly] = useState(initialRackableOnly)
   const { addNode, scanEventTs } = useCanvasStore()
   const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
   const activeDesignId = useDesignStore((s) => s.activeDesignId)
@@ -170,8 +182,11 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       setSearch('')
     } else {
       setStatusFilter(initialStatus)
+      // Reopening from the rack picker must re-arm the filter even if the user
+      // turned it off during the previous visit.
+      setRackableOnly(initialRackableOnly)
     }
-  }, [open, initialStatus])
+  }, [open, initialStatus, initialRackableOnly])
 
   const distinctTypes = useMemo(() => {
     const set = new Set<string>()
@@ -189,6 +204,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       // Inventory-only: optionally hide devices already placed on a canvas.
       if (statusFilter === 'pending' && !showOnCanvas && (d.canvas_count ?? 0) > 0) return false
       if (withServicesOnly && (d.services?.length ?? 0) === 0) return false
+      if (rackableOnly && !isRackable(d)) return false
       if (q) {
         const hay = [
           d.friendly_name, d.hostname, d.ip, d.mac, d.ieee_address, d.vendor, d.model,
@@ -198,7 +214,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       }
       return true
     })
-  }, [devices, search, sourceFilter, typeFilter, statusFilter, showOnCanvas, withServicesOnly])
+  }, [devices, search, sourceFilter, typeFilter, statusFilter, showOnCanvas, withServicesOnly, rackableOnly])
 
   useEffect(() => {
     if (!highlightId || loading || !open) return
@@ -214,6 +230,9 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   }
 
   const handleCardClick = (d: PendingDevice) => {
+    // Picker mode wins over everything else: the caller opened this list to get
+    // one device back, not to approve or hide anything.
+    if (onPick) { onPick(d); return }
     if (selectMode) { toggleSelect(d.id); return }
     if (statusFilter === 'hidden') { handleRestore(d); return }
     setSelected(d)
@@ -278,6 +297,12 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   // on this design (the backend otherwise returns a `duplicate` conflict so we
   // can ask instead of silently doubling the card).
   const approveDevice = async (device: PendingDevice, force = false) => {
+    // Rack gear documents a mount, not a host: it stays out of logical canvases.
+    // The backend refuses it too — this is the friendly half of the guard.
+    if (isRackDevice(device)) {
+      toast.error('Rack devices belong to a rack canvas, not a logical one')
+      return
+    }
     const fallbackLabel = deviceLabel(device)
     const type = (device.suggested_type ?? 'generic') as NodeType
     const zwave = isZwaveType(type)
@@ -363,7 +388,14 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   }
 
   const handleBulkApprove = async () => {
-    const ids = [...selectedIds]
+    const rackIds = new Set(devices.filter(isRackDevice).map((d) => d.id))
+    const ids = [...selectedIds].filter((id) => !rackIds.has(id))
+    const skippedRack = selectedIds.size - ids.length
+    if (skippedRack > 0) {
+      toast.error(
+        `${skippedRack} rack device${skippedRack > 1 ? 's' : ''} skipped — they belong to a rack canvas`,
+      )
+    }
     if (ids.length === 0) return
     try {
       const res = await scanApi.bulkApprove(ids, {}, activeDesignId)
@@ -449,6 +481,9 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
       }
       if (inField) return
       if (e.key === '/') { e.preventDefault(); searchRef.current?.focus() }
+      // Bulk actions are meaningless in picker mode — the card click returns a
+      // device, so select mode must stay unreachable from the keyboard too.
+      else if (onPick) return
       else if (e.key.toLowerCase() === 's') { e.preventDefault(); if (selectMode) exitSelectMode(); else enterSelectMode() }
       else if (e.key.toLowerCase() === 'a' && selectMode) { e.preventDefault(); selectAllVisible() }
       else if (e.key === 'Enter' && selectMode && selectedIds.size > 0) { e.preventDefault(); handleBulkApprove() }
@@ -456,7 +491,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, selectMode, selectedIds, filtered])
+  }, [open, selectMode, selectedIds, filtered, onPick])
 
   return (
     <>
@@ -468,7 +503,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
           <DialogHeader className="px-4 py-3 border-b border-border shrink-0">
             <div className="flex items-center justify-between gap-3">
               <DialogTitle className="text-base font-semibold flex items-center gap-2">
-                {statusFilter === 'pending' ? 'Device Inventory' : 'Hidden Devices'}
+                {onPick ? 'Pick a Device' : statusFilter === 'pending' ? 'Device Inventory' : 'Hidden Devices'}
                 <span className="text-muted-foreground font-normal text-xs">
                   ({filtered.length}{filtered.length !== devices.length && ` of ${devices.length}`})
                 </span>
@@ -477,7 +512,8 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
                 <button onClick={load} className="text-muted-foreground hover:text-foreground p-1.5 rounded transition-colors" title="Refresh">
                   <RefreshCw size={14} />
                 </button>
-                {statusFilter === 'pending' && devices.length > 0 && (
+                {/* Never offer a destructive bulk clear from a picker. */}
+                {!onPick && statusFilter === 'pending' && devices.length > 0 && (
                   <button
                     onClick={handleClearAll}
                     className="text-muted-foreground hover:text-[#f85149] p-1.5 rounded transition-colors"
@@ -537,6 +573,13 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
                   Proxmox
                 </button>
               )}
+              <button
+                onClick={() => setSourceFilter('rack')}
+                className={`px-2.5 py-1.5 transition-colors border-l border-border ${sourceFilter === 'rack' ? 'bg-[#39d353]/20 text-[#39d353]' : 'bg-[#0d1117] text-muted-foreground hover:text-foreground'}`}
+                title="Gear created from a rack canvas"
+              >
+                Rack devices
+              </button>
             </div>
             <select
               value={typeFilter}
@@ -582,12 +625,23 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
               With services
             </button>
             <button
-              onClick={() => selectMode ? exitSelectMode() : enterSelectMode()}
-              className={`text-xs px-2.5 py-1.5 rounded border transition-colors ${selectMode ? 'bg-[#00d4ff]/20 text-[#00d4ff] border-[#00d4ff]/50' : 'bg-[#0d1117] text-muted-foreground border-border hover:text-foreground'}`}
-              title="Toggle select mode (s)"
+              onClick={() => setRackableOnly((v) => !v)}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border transition-colors ${rackableOnly ? 'bg-[#39d353]/20 text-[#39d353] border-[#39d353]/50' : 'bg-[#0d1117] text-muted-foreground border-border hover:text-foreground'}`}
+              title="Only show hardware you could mount in a rack (no VMs, containers or mesh devices)"
+              aria-pressed={rackableOnly}
             >
-              {selectMode ? 'Exit select' : 'Select mode'}
+              <Server size={12} />
+              Rackable
             </button>
+            {!onPick && (
+              <button
+                onClick={() => selectMode ? exitSelectMode() : enterSelectMode()}
+                className={`text-xs px-2.5 py-1.5 rounded border transition-colors ${selectMode ? 'bg-[#00d4ff]/20 text-[#00d4ff] border-[#00d4ff]/50' : 'bg-[#0d1117] text-muted-foreground border-border hover:text-foreground'}`}
+                title="Toggle select mode (s)"
+              >
+                {selectMode ? 'Exit select' : 'Select mode'}
+              </button>
+            )}
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto p-4">

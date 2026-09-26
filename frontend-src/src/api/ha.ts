@@ -87,6 +87,27 @@ export const designsApi = {
   },
 }
 
+// ─── Racks (rack canvas designs) ─────────────────────────────────────────────
+
+import type { ApiInventoryItem, ApiRackState, RackSavePayload } from '@/utils/rackSerializer'
+
+export const racksApi = {
+  load: async (designId: string) => {
+    const result = await wsCall<ApiRackState>('homelable/racks/get', { design_id: designId })
+    return toAxiosLike(result)
+  },
+  save: async (payload: RackSavePayload) => {
+    const result = await wsCall<{ saved: boolean }>('homelable/racks/save', { ...payload })
+    return toAxiosLike(result)
+  },
+  inventory: async (designId: string) => {
+    const result = await wsCall<{ items: ApiInventoryItem[] }>('homelable/racks/inventory', {
+      design_id: designId,
+    })
+    return toAxiosLike(result)
+  },
+}
+
 // ─── Media (floor-plan images) ────────────────────────────────────────────────
 
 export const mediaApi = {
@@ -203,6 +224,29 @@ export const scanApi = {
     const result = await wsCall<{ ok: boolean }>('homelable/scan/ignore', {
       device_id: id,
     })
+    return toAxiosLike(result)
+  },
+  /** Drop an inventory row for good — the rack canvas discarding a placeholder
+   *  it created. Same WS command as `ignore`. */
+  deletePending: async (id: string) => {
+    const result = await wsCall<{ ok: boolean }>('homelable/scan/ignore', {
+      device_id: id,
+    })
+    return toAxiosLike(result)
+  },
+  /** Add an inventory entry by hand, for hardware no scan can discover. */
+  createPending: async (data: {
+    hostname: string
+    ip?: string | null
+    mac?: string | null
+    suggested_type?: string | null
+    /** "manual" (default) or "rack" for gear created from a rack canvas. */
+    discovery_source?: 'manual' | 'rack'
+  }) => {
+    const result = await wsCall<{ id: string; hostname: string | null }>(
+      'homelable/scan/add_pending',
+      data
+    )
     return toAxiosLike(result)
   },
   restore: async (id: string) => {

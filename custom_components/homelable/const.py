@@ -15,9 +15,20 @@ STORAGE_VERSION_DESIGNS = 1
 DEFAULT_DESIGN_NAME = "Network Topology"
 DEFAULT_DESIGN_ICON = "network"
 DEFAULT_DESIGN_TYPE = "network"
+# "network" and "electrical" render the same React Flow canvas and differ only
+# by palette and node set. "rack" is a different renderer (racks, mounted gear,
+# port-to-port patching) persisted in its own Store. Kept in sync with
+# DesignType in frontend-src/src/types/index.ts.
+DESIGN_TYPES = ("network", "electrical", "rack")
+RACK_DESIGN_TYPE = "rack"
 
 STORAGE_KEY_PENDING = f"{DOMAIN}_pending_devices"
 STORAGE_VERSION_PENDING = 1
+
+# Rack canvases: {"designs": {design_id: {racks, devices, cables, viewport}}}.
+# Kept apart from the canvas Store — racks are not React Flow nodes.
+STORAGE_KEY_RACKS = f"{DOMAIN}_racks"
+STORAGE_VERSION_RACKS = 1
 
 STORAGE_KEY_RUNS = f"{DOMAIN}_scan_runs"
 STORAGE_VERSION_RUNS = 1

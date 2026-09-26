@@ -3,6 +3,9 @@ import { ReactFlowProvider, type Connection, type Edge } from '@xyflow/react'
 import { type Node } from '@xyflow/react'
 
 const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
+// The rack renderer (React Flow, faceplate artwork) only loads for rack designs.
+const RackCanvas = lazy(() => import('@/rack/components/RackCanvas').then((m) => ({ default: m.RackCanvas })))
+const RackCablePanel = lazy(() => import('@/rack/components/RackCablePanel').then((m) => ({ default: m.RackCablePanel })))
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
@@ -38,7 +41,8 @@ import { canvasApi, designsApi } from '@/api/client'
 import { hydrateCanvasPayload } from '@/utils/canvasPayload'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
-import type { NodeData, EdgeData, NodeType } from '@/types'
+import { useRackStore } from '@/rack/store'
+import type { NodeData, EdgeData, NodeType, DesignType } from '@/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
@@ -48,7 +52,15 @@ export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
-  const { activeDesignId, setDesigns, setActiveDesign } = useDesignStore()
+  const { activeDesignId, activeDesignType, setDesigns, setActiveDesign } = useDesignStore()
+  const isRackDesign = activeDesignType === 'rack'
+
+  /** Kind of a design by id, read straight from the store (no stale closure). */
+  const designTypeOf = useCallback(
+    (id: string | null | undefined): DesignType =>
+      useDesignStore.getState().designs.find((d) => d.id === id)?.design_type ?? 'network',
+    [],
+  )
 
   useStatusPolling()
 
@@ -75,6 +87,15 @@ export default function App() {
   const handleSave = useCallback(async (designIdOverride?: string): Promise<boolean> => {
     try {
       const saveDesignId = designIdOverride ?? activeDesignId
+      // Rack canvases own their own state and persistence path.
+      if (designTypeOf(saveDesignId) === 'rack') {
+        // Named explicitly: the design-switch flow saves the *old* design, and
+        // the store refuses rather than writing under whichever one it holds.
+        const ok = await useRackStore.getState().save(saveDesignId)
+        if (ok) toast.success('Rack canvas saved')
+        else toast.error('Save failed')
+        return ok
+      }
       if (STANDALONE) {
         localStorage.setItem(STANDALONE_STORAGE_KEY, JSON.stringify({ nodes, edges, theme_id: activeTheme, custom_style: customStyle }))
         markSaved()
@@ -93,7 +114,7 @@ export default function App() {
       toast.error('Save failed')
       return false
     }
-  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId, floorMap])
+  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId, floorMap, designTypeOf])
 
   // Keep a ref so the keydown handler always calls the latest version
   const handleSaveRef = useRef(handleSave)
@@ -120,6 +141,15 @@ export default function App() {
     }
   }, [loadCanvas, setTheme, setCustomStyle, setFloorMap])
 
+  /**
+   * Load whichever canvas the design holds. Rack designs bypass the node/edge
+   * canvas entirely — different store, different WS commands.
+   */
+  const loadAnyDesign = useCallback(async (designId: string) => {
+    if (designTypeOf(designId) === 'rack') await useRackStore.getState().loadDesign(designId)
+    else await loadCanvasFromApi(designId)
+  }, [designTypeOf, loadCanvasFromApi])
+
   const loadDesignsAndCanvas = useCallback(async () => {
     if (STANDALONE) return
     try {
@@ -128,7 +158,7 @@ export default function App() {
       const targetId = activeDesignId ?? designs[0]?.id
       if (targetId) {
         setActiveDesign(targetId)
-        await loadCanvasFromApi(targetId)
+        await loadAnyDesign(targetId)
       } else {
         loadCanvas(demoNodes, demoEdges)
       }
@@ -136,7 +166,7 @@ export default function App() {
       // If the WS call fails, fall back to demo data so the canvas isn't blank.
       loadCanvas(demoNodes, demoEdges)
     }
-  }, [setDesigns, setActiveDesign, loadCanvasFromApi, activeDesignId, loadCanvas])
+  }, [setDesigns, setActiveDesign, loadAnyDesign, activeDesignId, loadCanvas])
 
   // Load canvas on auth (or immediately in standalone mode)
   useEffect(() => {
@@ -187,7 +217,7 @@ export default function App() {
         const targetId = activeDesignId
         handleSave(oldId).then((ok) => {
           if (ok) {
-            loadCanvasFromApi(targetId)
+            loadAnyDesign(targetId)
           } else {
             // Save failed: keep the unsaved canvas on screen by reverting the
             // selection back to the old design.
@@ -197,7 +227,7 @@ export default function App() {
           }
         })
       } else {
-        loadCanvasFromApi(activeDesignId)
+        loadAnyDesign(activeDesignId)
       }
     }
     if (activeDesignId) {
@@ -226,6 +256,10 @@ export default function App() {
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
 
       if (ctrl && e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
+      // History and clipboard belong to the logical canvas; on a rack canvas
+      // they would act on a canvas that is not on screen.
+      const onRack = useDesignStore.getState().activeDesignType === 'rack'
+      if (onRack && ctrl && ['z', 'y', 'c', 'v'].includes(e.key.toLowerCase())) return
       if (ctrl && e.key === 'z') { e.preventDefault(); undoRef.current(); return }
       if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redoRef.current(); return }
       if (ctrl && e.key === 'k') { e.preventDefault(); setSearchOpen(true); return }
@@ -575,6 +609,11 @@ export default function App() {
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
+                {isRackDesign ? (
+                  <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">Loading rack…</div>}>
+                    <RackCanvas />
+                  </Suspense>
+                ) : (
                 <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">Loading canvas…</div>}>
                   <LazyCanvas
                     onConnect={handleEdgeConnect}
@@ -593,8 +632,14 @@ export default function App() {
                     }}
                   />
                 </Suspense>
+                )}
               </div>
-              {(selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
+              {/* Rack designs keep the full width for mounted gear — a mount is
+                  edited in its own modal — but a selected cable has no plate to
+                  double-click, so it gets the rail. */}
+              {isRackDesign
+                ? <Suspense fallback={null}><RackCablePanel /></Suspense>
+                : (selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} />}
             </div>
           </div>
         </div>

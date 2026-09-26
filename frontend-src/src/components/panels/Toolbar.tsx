@@ -3,6 +3,9 @@ import { Save, LayoutDashboard, Download, Palette, Undo2, Redo2, HelpCircle, Tab
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/ui/Logo'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
+import { useRackStore } from '@/rack/store'
+import { RackToolbarActions } from './RackToolbarActions'
 
 interface ToolbarProps {
   onSave: () => void
@@ -18,7 +21,10 @@ interface ToolbarProps {
 }
 
 export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo, onRedo, onShortcuts, onExportMd, onExportYaml, onImportYaml }: ToolbarProps) {
-  const { hasUnsavedChanges, past, future } = useCanvasStore()
+  const { hasUnsavedChanges: canvasDirty, past, future } = useCanvasStore()
+  const isRack = useDesignStore((s) => s.activeDesignType) === 'rack'
+  const rackDirty = useRackStore((s) => s.hasUnsavedChanges)
+  const hasUnsavedChanges = isRack ? rackDirty : canvasDirty
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -37,25 +43,33 @@ export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo,
     <header className="flex items-center gap-2 px-4 py-2 border-b border-border bg-[#161b22] shrink-0">
       <Logo size={28} showText={true} />
       <div className="flex-1" />
-      <Button
-        size="sm" variant="ghost"
-        className="gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer hover:bg-[#21262d]"
-        onClick={onUndo}
-        disabled={past.length === 0}
-        title="Undo (Ctrl+Z)"
-      >
-        <Undo2 size={14} />
-      </Button>
-      <Button
-        size="sm" variant="ghost"
-        className="gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer hover:bg-[#21262d]"
-        onClick={onRedo}
-        disabled={future.length === 0}
-        title="Redo (Ctrl+Y)"
-      >
-        <Redo2 size={14} />
-      </Button>
+      {/* Undo/redo are canvas history; the rack canvas has none yet. */}
+      {!isRack && (
+        <>
+          <Button
+            size="sm" variant="ghost"
+            className="gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer hover:bg-[#21262d]"
+            onClick={onUndo}
+            disabled={past.length === 0}
+            title="Undo (Ctrl+Z)"
+          >
+            <Undo2 size={14} />
+          </Button>
+          <Button
+            size="sm" variant="ghost"
+            className="gap-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer hover:bg-[#21262d]"
+            onClick={onRedo}
+            disabled={future.length === 0}
+            title="Redo (Ctrl+Y)"
+          >
+            <Redo2 size={14} />
+          </Button>
+        </>
+      )}
       <div className="w-px h-4 bg-border mx-1" />
+      {isRack && <RackToolbarActions />}
+      {!isRack && (
+      <>
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onAutoLayout}>
         <LayoutDashboard size={14} /> Auto Layout
       </Button>
@@ -75,12 +89,17 @@ export function Toolbar({ onSave, onAutoLayout, onExport, onChangeStyle, onUndo,
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onExportYaml} title="Export canvas as YAML">
         <Download size={14} /> Export
       </Button>
+      </>
+      )}
+      {/* PNG capture is DOM-based, so it works for both canvas kinds. */}
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onExport} title="Download canvas as PNG">
         <FileDown size={14} /> PNG
       </Button>
-      <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onExportMd} title="Copy inventory as Markdown table">
-        <Table2 size={14} /> MD
-      </Button>
+      {!isRack && (
+        <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onExportMd} title="Copy inventory as Markdown table">
+          <Table2 size={14} /> MD
+        </Button>
+      )}
       <Button size="sm" variant="ghost" className="gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]" onClick={onShortcuts} title="Keyboard shortcuts (?)">
         <HelpCircle size={14} />
       </Button>
