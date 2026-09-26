@@ -1,4 +1,6 @@
 """Tests for the fingerprint module."""
+import pytest
+
 from custom_components.homelable import fingerprint
 from custom_components.homelable.fingerprint import (
     fingerprint_ports,
@@ -205,3 +207,42 @@ def test_port_9100_is_labelled_ambiguously() -> None:
 def test_port_9100_suggests_no_node_type() -> None:
     """A bare 9100 host stays generic rather than being guessed a server."""
     assert suggest_node_type([{"port": 9100, "protocol": "tcp"}]) == "generic"
+
+
+def test_suggest_node_type_kvm_from_http_title() -> None:
+    """An IP-KVM answers on 443 like any web app; only the probed title identifies it."""
+    result = suggest_node_type([
+        {"port": 443, "protocol": "tcp", "http_signals": {"title": "PiKVM", "headers": {}}},
+    ])
+    assert result == "kvm"
+
+
+def test_suggest_node_type_priority_kvm_over_server() -> None:
+    """The same host also answers on 80 (→ server); the KVM signal outranks it."""
+    result = suggest_node_type([
+        {"port": 80, "protocol": "tcp"},
+        {"port": 443, "protocol": "tcp", "http_signals": {"title": "PiKVM", "headers": {}}},
+    ])
+    assert result == "kvm"
+
+
+def test_suggest_node_type_ignores_port_agnostic_sig_without_probe() -> None:
+    """No http_signals (probe disabled) → port-agnostic entries can't match and the
+    port-only guess stands, unchanged from pre-probe behaviour."""
+    assert suggest_node_type([{"port": 443, "protocol": "tcp"}]) == "server"
+
+
+def test_suggest_node_type_uses_port_agnostic_nas_signature() -> None:
+    """Regression: suggest_node_type used match_port, which drops the probe signals,
+    so no port:null signature (Unraid, OMV, …) could ever influence the type."""
+    result = suggest_node_type([
+        {"port": 443, "protocol": "tcp", "http_signals": {"title": "Unraid", "headers": {}}},
+    ])
+    assert result == "nas"
+
+
+@pytest.mark.parametrize("title", ["PiKVM", "TinyPilot", "JetKVM", "NanoKVM"])
+def test_ip_kvm_titles_suggest_kvm_node_type(title: str) -> None:
+    sig = match_service(80, "tcp", banner=None, http_signals={"title": title, "headers": {}})
+    assert sig is not None
+    assert sig["suggested_node_type"] == "kvm"
