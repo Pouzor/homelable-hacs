@@ -462,6 +462,22 @@ describe('DetailPanel', () => {
       expect(updateNode.mock.calls[0][1].services[0].port).toBeUndefined()
     })
 
+    it('links a service badge to its host override rather than the node IP', () => {
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({ ip: '192.168.1.10', services: [{ port: 443, protocol: 'tcp', service_name: 'blog', host: 'blog.example.com' }] })],
+        selectedNodeId: 'n1',
+        selectedNodeIds: [],
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode: vi.fn(),
+        snapshotHistory: vi.fn(),
+        createGroup: vi.fn(),
+        ungroup: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+      expect(screen.getByRole('link', { name: 'blog' }).getAttribute('href')).toBe('https://blog.example.com:443')
+    })
+
     it('calls updateNode without the removed service when X is clicked', () => {
       const updateNode = vi.fn()
       const svc = { port: 80, protocol: 'tcp' as const, service_name: 'nginx' }
