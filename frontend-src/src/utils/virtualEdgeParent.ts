@@ -25,6 +25,31 @@ export function getValidParentTypes(childType: NodeType): NodeType[] {
   return []
 }
 
+/** Can `parent` hold a child of `childType`?
+ *
+ *  A visual group holds any node type — the type rules above only govern
+ *  virtual (container) nesting, so they'd wrongly reject a grouped node and
+ *  drop it out of its group on the next edit. Groups and zones are excluded as
+ *  children, matching what the drag-onto-a-group path accepts.
+ */
+export function isValidParentNode(
+  childType: NodeType,
+  parent: { type: NodeType; container_mode?: boolean },
+): boolean {
+  if (parent.type === 'group') return childType !== 'group' && childType !== 'groupRect'
+  return getValidParentTypes(childType).includes(parent.type) || parent.container_mode === true
+}
+
+/** Does linking a child to `parent` need a virtual edge?
+ *
+ *  Only when the parent shows no containment itself: a container-mode host and
+ *  a visual group both draw the child inside them, so an edge would be a stray
+ *  duplicate — and the drag-into-a-group path never creates one.
+ */
+export function needsVirtualEdge(parent: { type: NodeType; container_mode?: boolean } | undefined): boolean {
+  return !parent?.container_mode && parent?.type !== 'group'
+}
+
 export function resolveVirtualEdgeParent(
   source: VirtualEdgeEndpoint,
   target: VirtualEdgeEndpoint,

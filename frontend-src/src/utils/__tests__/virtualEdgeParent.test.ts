@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveVirtualEdgeParent, getValidParentTypes } from '../virtualEdgeParent'
+import { resolveVirtualEdgeParent, getValidParentTypes, isValidParentNode, needsVirtualEdge } from '../virtualEdgeParent'
 
 describe('getValidParentTypes', () => {
   it('returns container-mode types for lxc', () => {
@@ -19,6 +19,44 @@ describe('getValidParentTypes', () => {
     expect(getValidParentTypes('router')).toEqual([])
     expect(getValidParentTypes('proxmox')).toEqual([])
     expect(getValidParentTypes('docker_host')).toEqual([])
+  })
+})
+
+describe('isValidParentNode', () => {
+  it('accepts a group for any child type', () => {
+    expect(isValidParentNode('server', { type: 'group' })).toBe(true)
+    expect(isValidParentNode('router', { type: 'group' })).toBe(true)
+    expect(isValidParentNode('lxc', { type: 'group' })).toBe(true)
+  })
+
+  it('accepts a container-mode node for any child type', () => {
+    expect(isValidParentNode('server', { type: 'proxmox', container_mode: true })).toBe(true)
+  })
+
+  it('accepts a type-rule parent', () => {
+    expect(isValidParentNode('lxc', { type: 'proxmox' })).toBe(true)
+  })
+
+  it('rejects a group or a zone as the child of a group', () => {
+    expect(isValidParentNode('group', { type: 'group' })).toBe(false)
+    expect(isValidParentNode('groupRect', { type: 'group' })).toBe(false)
+  })
+
+  it('rejects a non-container node that no type rule allows', () => {
+    expect(isValidParentNode('server', { type: 'proxmox', container_mode: false })).toBe(false)
+    expect(isValidParentNode('server', { type: 'groupRect' })).toBe(false)
+  })
+})
+
+describe('needsVirtualEdge', () => {
+  it('links a child to a plain parent with a virtual edge', () => {
+    expect(needsVirtualEdge({ type: 'proxmox' })).toBe(true)
+    expect(needsVirtualEdge({ type: 'proxmox', container_mode: false })).toBe(true)
+  })
+
+  it('skips the edge when the parent nests the child visually', () => {
+    expect(needsVirtualEdge({ type: 'proxmox', container_mode: true })).toBe(false)
+    expect(needsVirtualEdge({ type: 'group' })).toBe(false)
   })
 })
 
