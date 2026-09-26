@@ -7,17 +7,18 @@
  */
 import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
 
-export type SourceBucket = 'ip' | 'zigbee' | 'zwave' | 'proxmox'
+export type SourceBucket = 'ip' | 'zigbee' | 'zwave' | 'proxmox' | 'rack'
 
 export const SOURCE_META: Record<SourceBucket, { color: string; label: string }> = {
   zigbee: { color: '#00d4ff', label: 'ZIGBEE' },
   zwave: { color: '#ff6e00', label: 'Z-WAVE' },
   proxmox: { color: '#e57000', label: 'PROXMOX' },
   ip: { color: '#a855f7', label: 'IP' },
+  rack: { color: '#39d353', label: 'RACK' },
 }
 
 // Stable badge order (IP first — it's the primary discovery path).
-const SOURCE_ORDER: SourceBucket[] = ['ip', 'proxmox', 'zigbee', 'zwave']
+const SOURCE_ORDER: SourceBucket[] = ['ip', 'proxmox', 'zigbee', 'zwave', 'rack']
 
 /** Map a raw source tag to its filter bucket. Handles both the short flags
  *  (zigbee/zwave/proxmox) and the gateway-named discovery_source values
@@ -26,6 +27,9 @@ function classify(s: string): SourceBucket {
   if (s === 'zwave' || s === 'zwavejs2mqtt') return 'zwave'
   if (s === 'zigbee' || s === 'zigbee2mqtt' || s === 'zha') return 'zigbee'
   if (s === 'proxmox' || s === 'proxmox_cluster') return 'proxmox'
+  // Created from a rack canvas: inventory gear that never lands on a logical
+  // canvas.
+  if (s === 'rack') return 'rack'
   return 'ip' // arp / mdns / tcp / anything else → IP scan
 }
 
@@ -49,6 +53,15 @@ export function sourceBuckets(d: PendingDevice): Set<SourceBucket> {
     else buckets.add('ip')
   }
   return buckets
+}
+
+/**
+ * Created from a rack canvas. Such an entry describes a mount (a chassis, a
+ * patch panel, a shelf), so it is never placed on a logical canvas — the
+ * approve paths refuse it on both sides of the wire.
+ */
+export function isRackDevice(d: PendingDevice): boolean {
+  return sourceBuckets(d).has('rack')
 }
 
 /** Ordered bucket list for badge rendering. */

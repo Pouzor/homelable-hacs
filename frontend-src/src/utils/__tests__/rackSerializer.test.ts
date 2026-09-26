@@ -1,0 +1,392 @@
+import { describe, it, expect } from 'vitest'
+import {
+  buildSavePayload,
+  fromCable,
+  fromRack,
+  fromRackDevice,
+  toCable,
+  toInventoryDevice,
+  toRack,
+  toRackDevice,
+  type ApiRack,
+  type ApiRackCable,
+  type ApiRackDevice,
+} from '../rackSerializer'
+import { DEFAULT_RACK_STYLE } from '@/rack/rackDefaults'
+import { RACK_COLUMNS } from '@/types'
+import type { Cable, Rack, RackDevice } from '@/types'
+
+const apiRack: ApiRack = {
+  id: 'r1',
+  design_id: 'd1',
+  name: 'Main',
+  u_height: 24,
+  width_standard: '10',
+  numbering: 'top-down',
+  location: 'garage',
+  style: { frame: '#111111', showNumbers: false },
+  pos_x: 40,
+  pos_y: 60,
+}
+
+const apiDevice: ApiRackDevice = {
+  id: 'dev1',
+  design_id: 'd1',
+  rack_id: 'r1',
+  device_id: 'inv1',
+  node_id: 'node1',
+  label: 'sw-24',
+  u_start: 10,
+  u_height: 1,
+  col_start: 0,
+  col_span: 12,
+  faceplate_id: 'switch-24',
+  color: null,
+  status: 'online',
+  ports: [{ id: 'p1', label: '1', type: 'sfp+', x: 0.4, y: 0.5 }],
+}
+
+const apiCable: ApiRackCable = {
+  id: 'c1',
+  design_id: 'd1',
+  from_device_id: 'dev1',
+  from_port_id: 'p1',
+  to_device_id: 'dev2',
+  to_port_id: 'p2',
+  type: 'fiber',
+  color: '#f0a500',
+  label: 'SAN',
+  label_visible: true,
+  properties: [{ key: 'Length', value: '3 m', icon: null, visible: true }],
+}
+
+describe('API → domain', () => {
+  it('maps a rack, nesting the position', () => {
+    const rack = toRack(apiRack)
+    expect(rack).toMatchObject({
+      id: 'r1',
+      uHeight: 24,
+      widthStandard: '10',
+      numbering: 'top-down',
+      location: 'garage',
+      position: { x: 40, y: 60 },
+    })
+  })
+
+  it('fills style keys the server never wrote', () => {
+    const { style } = toRack(apiRack)
+    expect(style.frame).toBe('#111111')
+    expect(style.showNumbers).toBe(false)
+    expect(style.rail).toBe(DEFAULT_RACK_STYLE.rail)
+    expect(style.enclosed).toBe(DEFAULT_RACK_STYLE.enclosed)
+  })
+
+  it('falls back on unknown enum values rather than trusting the wire', () => {
+    const rack = toRack({ ...apiRack, width_standard: '23', numbering: 'sideways' })
+    expect(rack.widthStandard).toBe('19')
+    expect(rack.numbering).toBe('bottom-up')
+  })
+
+  it('maps a device with both inventory and node links', () => {
+    const device = toRackDevice(apiDevice)
+    expect(device).toMatchObject({
+      rackId: 'r1',
+      deviceId: 'inv1',
+      nodeId: 'node1',
+      uStart: 10,
+      faceplateId: 'switch-24',
+      status: 'online',
+    })
+    expect(device.ports[0].type).toBe('sfp+')
+  })
+
+  it('drops ports that are not usable and defaults unknown port types', () => {
+    const device = toRackDevice({
+      ...apiDevice,
+      ports: [null, { label: 'no id' }, { id: 'p9', type: 'usb', x: 0.1, y: 0.2 }],
+    })
+    expect(device.ports).toHaveLength(1)
+    expect(device.ports[0]).toMatchObject({ id: 'p9', label: 'p9', type: 'rj45' })
+  })
+
+  it('treats an unknown device status as unknown', () => {
+    expect(toRackDevice({ ...apiDevice, status: 'exploded' }).status).toBe('unknown')
+  })
+
+  it('keeps a mount that follows its node check on auto', () => {
+    // `auto` is a mount-only value — an inventory row never carries it, so only
+    // the device mapper widens the narrowing.
+    expect(toRackDevice({ ...apiDevice, status: 'auto' }).status).toBe('auto')
+    expect(fromRackDevice(toRackDevice({ ...apiDevice, status: 'auto' })).status).toBe('auto')
+  })
+
+  it('carries a port visibility override, and treats anything else as auto', () => {
+    // The column is newer than the table: a legacy row reads back NULL, and
+    // `auto` is the absence of an override rather than a stored value.
+    expect(toRackDevice({ ...apiDevice, port_visibility: 'hover' }).portVisibility).toBe('hover')
+    expect(toRackDevice({ ...apiDevice, port_visibility: 'always' }).portVisibility).toBe('always')
+    expect(toRackDevice({ ...apiDevice, port_visibility: null }).portVisibility).toBeUndefined()
+    expect(toRackDevice({ ...apiDevice, port_visibility: 'sometimes' }).portVisibility).toBeUndefined()
+    expect(toRackDevice(apiDevice).portVisibility).toBeUndefined()
+  })
+
+  it('sends auto for a mount with no port visibility override', () => {
+    expect(fromRackDevice(toRackDevice(apiDevice)).port_visibility).toBe('auto')
+    expect(
+      fromRackDevice(toRackDevice({ ...apiDevice, port_visibility: 'always' })).port_visibility,
+    ).toBe('always')
+  })
+
+  it('maps a cable into nested endpoints', () => {
+    expect(toCable(apiCable)).toMatchObject({
+      type: 'fiber',
+      label: 'SAN',
+      labelVisible: true,
+      properties: [{ key: 'Length', value: '3 m', icon: null, visible: true }],
+      from: { deviceId: 'dev1', portId: 'p1' },
+      to: { deviceId: 'dev2', portId: 'p2' },
+    })
+  })
+
+  it('fills the annotations a cable saved before the feature has no columns for', () => {
+    // Legacy rows read back without the two new keys; the mapper must not
+    // produce `undefined.filter` fodder for the overlay.
+    const legacy = { ...apiCable } as Partial<ApiRackCable>
+    delete legacy.label_visible
+    delete legacy.properties
+
+    const cable = toCable(legacy as ApiRackCable)
+    expect(cable.labelVisible).toBe(false)
+    expect(cable.properties).toEqual([])
+  })
+
+  it('drops cable properties that carry no key', () => {
+    const cable = toCable({
+      ...apiCable,
+      properties: [
+        { key: '', value: 'x', icon: null, visible: true },
+        { key: 'VLAN', value: '20', icon: null, visible: false },
+      ],
+    })
+    expect(cable.properties).toEqual([{ key: 'VLAN', value: '20', icon: null, visible: false }])
+  })
+
+  it('takes inventory status from the linked node, not the inventory row', () => {
+    const item = toInventoryDevice({
+      id: 'inv1',
+      label: 'nas',
+      suggested_type: 'nas',
+      ip: '192.168.1.9',
+      status: 'approved',
+      discovery_source: 'arp',
+      node_id: 'node1',
+      node_status: 'online',
+      racked: false,
+    })
+    expect(item.status).toBe('online')
+    expect(item.nodeId).toBe('node1')
+    expect(item.suggestedFaceplateId).toBe('nas-2u')
+  })
+
+  it('leaves an inventory entry with no canvas node as unknown', () => {
+    const item = toInventoryDevice({
+      id: 'inv2',
+      label: 'patch panel',
+      suggested_type: null,
+      ip: null,
+      status: 'pending',
+      discovery_source: 'manual',
+      node_id: null,
+      node_status: null,
+      racked: true,
+    })
+    expect(item.status).toBe('unknown')
+    expect(item.racked).toBe(true)
+  })
+
+  it('reads back the rack modelisation the inventory row owns', () => {
+    const item = toInventoryDevice({
+      id: 'inv4',
+      label: 'sw-01',
+      suggested_type: 'switch',
+      ip: null,
+      status: 'approved',
+      discovery_source: 'manual',
+      node_id: null,
+      node_status: null,
+      racked: true,
+      rack_faceplate_id: 'switch-24',
+      rack_u_height: 1,
+      rack_col_span: 12,
+      rack_color: '#ff6e00',
+      rack_ports: [
+        { id: 'p1', label: 'uplink', type: 'sfp', x: 0.9, y: 0.4 },
+        // No id: not a port, and nothing can cable it.
+        { label: 'ghost', type: 'rj45', x: 0.1, y: 0.1 },
+      ],
+    })
+    expect(item.rackModel).toEqual({
+      faceplateId: 'switch-24',
+      uHeight: 1,
+      colSpan: 12,
+      color: '#ff6e00',
+      ports: [{ id: 'p1', label: 'uplink', type: 'sfp', x: 0.9, y: 0.4 }],
+    })
+  })
+
+  it('reports no modelisation for a device that has never been racked', () => {
+    const item = toInventoryDevice({
+      id: 'inv5',
+      label: 'nas',
+      suggested_type: 'nas',
+      ip: null,
+      status: 'pending',
+      discovery_source: 'arp',
+      node_id: null,
+      node_status: null,
+      racked: false,
+    })
+    // An older backend sends none of the rack_* fields at all.
+    expect(item.rackModel).toBeNull()
+    expect(item.suggestedFaceplateId).toBe('nas-2u')
+  })
+
+  it('carries the linked node detail the rack prints beside a mount', () => {
+    const item = toInventoryDevice({
+      id: 'inv3',
+      label: 'nas',
+      suggested_type: 'nas',
+      ip: '192.168.1.9',
+      status: 'approved',
+      discovery_source: 'arp',
+      mac: 'aa:bb:cc:dd:ee:ff',
+      hostname: 'nas.lan',
+      os: 'TrueNAS',
+      services: [
+        { port: 445, name: 'smb' },
+        // Neither a port nor a name: nothing to print.
+        { port: null, name: null },
+      ],
+      node_id: 'node1',
+      node_status: 'online',
+      node_label: 'nas-truenas',
+      node_type: 'nas',
+      node_ip: '192.168.1.9',
+      node_mac: 'aa:bb:cc:dd:ee:ff',
+      node_hostname: 'nas.lan',
+      node_os: 'TrueNAS SCALE',
+      node_check_method: 'http',
+      node_design_id: 'd1',
+      node_design_name: 'Network',
+      node_last_seen: '2026-08-08T10:00:00Z',
+      racked: false,
+    })
+
+    expect(item.mac).toBe('aa:bb:cc:dd:ee:ff')
+    expect(item.hostname).toBe('nas.lan')
+    expect(item.services).toEqual([{ port: 445, name: 'smb' }])
+    expect(item.node).toMatchObject({
+      id: 'node1',
+      label: 'nas-truenas',
+      os: 'TrueNAS SCALE',
+      checkMethod: 'http',
+      designName: 'Network',
+      lastSeen: '2026-08-08T10:00:00Z',
+    })
+  })
+
+  it('reports no linked node when the backend matched none', () => {
+    // An older backend sends none of the node_* fields at all; the panel must
+    // read that as "not on a canvas", never as an empty node.
+    const item = toInventoryDevice({
+      id: 'inv4',
+      label: 'pdu',
+      suggested_type: null,
+      ip: null,
+      status: 'pending',
+      discovery_source: 'rack',
+      node_id: null,
+      node_status: null,
+      racked: false,
+    })
+    expect(item.node).toBeNull()
+    expect(item.services).toEqual([])
+  })
+})
+
+describe('domain → API', () => {
+  it('round-trips a rack', () => {
+    expect(fromRack(toRack(apiRack))).toMatchObject({
+      id: 'r1',
+      u_height: 24,
+      width_standard: '10',
+      pos_x: 40,
+      pos_y: 60,
+    })
+  })
+
+  it('round-trips a device', () => {
+    const back = fromRackDevice(toRackDevice(apiDevice))
+    expect(back).toMatchObject({ id: 'dev1', rack_id: 'r1', device_id: 'inv1', u_start: 10 })
+  })
+
+  it('round-trips a cable', () => {
+    expect(fromCable(toCable(apiCable))).toMatchObject({
+      from_device_id: 'dev1',
+      to_port_id: 'p2',
+      type: 'fiber',
+      label_visible: true,
+      properties: [{ key: 'Length', value: '3 m', icon: null, visible: true }],
+    })
+  })
+
+  it('sends explicit defaults for a cable that was never annotated', () => {
+    const bare = { ...toCable(apiCable), labelVisible: undefined, properties: undefined }
+    expect(fromCable(bare)).toMatchObject({ label_visible: false, properties: [] })
+  })
+
+  it('clamps a device back into the column grid', () => {
+    const device = { ...toRackDevice(apiDevice), colStart: 99, colSpan: 99 }
+    const back = fromRackDevice(device)
+    expect(back.col_start).toBe(11)
+    // Clamped against the start, not the grid alone: 11 + 12 would span to
+    // column 23 of 12 and the backend 422s the whole save over it.
+    expect(back.col_span).toBe(1)
+    expect(back.col_start + back.col_span).toBeLessThanOrEqual(RACK_COLUMNS)
+  })
+
+  it('keeps a legal column run untouched', () => {
+    const device = { ...toRackDevice(apiDevice), colStart: 6, colSpan: 6 }
+    const back = fromRackDevice(device)
+    expect(back.col_start).toBe(6)
+    expect(back.col_span).toBe(6)
+  })
+})
+
+describe('buildSavePayload', () => {
+  const rack: Rack = toRack(apiRack)
+  const device: RackDevice = toRackDevice(apiDevice)
+  const viewport = { x: 1, y: 2, zoom: 1.5 }
+
+  it('carries racks, devices, cables and the viewport', () => {
+    const other: RackDevice = { ...device, id: 'dev2', ports: [{ id: 'p2', label: '2', type: 'rj45', x: 0.5, y: 0.5 }] }
+    const cable: Cable = toCable(apiCable)
+    const payload = buildSavePayload('d1', [rack], [device, other], [cable], viewport)
+    expect(payload.design_id).toBe('d1')
+    expect(payload.devices).toHaveLength(2)
+    expect(payload.cables).toHaveLength(1)
+    expect(payload.viewport).toEqual(viewport)
+  })
+
+  it('drops devices whose rack is gone, and the cables that hung off them', () => {
+    const orphan: RackDevice = { ...device, id: 'dev2', rackId: 'gone' }
+    const cable: Cable = {
+      ...toCable(apiCable),
+      to: { deviceId: 'dev2', portId: 'p2' },
+    }
+    const payload = buildSavePayload('d1', [rack], [device, orphan], [cable], viewport)
+    expect(payload.devices.map((d) => d.id)).toEqual(['dev1'])
+    // The backend rejects dangling cables, so they must not reach it.
+    expect(payload.cables).toEqual([])
+  })
+})

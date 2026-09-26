@@ -42,7 +42,7 @@ Need the standalone (Docker / LXC / Web) version instead? See
 
 ## Features
 
-From a **network scanner**  and **Zigbee / Z-Wave / Proxmox** imports to **live status monitoring**, floor plans, multiple canvases and PNG/SVG export, Homelable maps and watches your whole homelab inside Home Assistant.
+From a **network scanner**  and **Zigbee / Z-Wave / Proxmox** imports to **live status monitoring**, floor plans, multiple canvases, a **rack canvas** for the physical side and PNG/SVG export, Homelable maps and watches your whole homelab inside Home Assistant.
 
 Every feature, with how to turn it on and use it, is described in **[FEATURES.md](./FEATURES.md)**.
 

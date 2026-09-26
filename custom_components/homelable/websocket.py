@@ -8,8 +8,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
-from . import proxmox, scanner
-from .const import DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
+from . import proxmox, racks, scanner
+from .const import DESIGN_TYPES, DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .media import delete_media
 from .zha import ZhaNotReadyError
 from .zigbee import ZigbeeMqttNotReadyError
@@ -53,6 +53,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_proxmox_test_connection)
     websocket_api.async_register_command(hass, ws_proxmox_import)
     websocket_api.async_register_command(hass, ws_proxmox_import_pending)
+    websocket_api.async_register_command(hass, ws_racks_get)
+    websocket_api.async_register_command(hass, ws_racks_save)
+    websocket_api.async_register_command(hass, ws_racks_inventory)
+    websocket_api.async_register_command(hass, ws_scan_add_pending)
 
 
 def _coordinator(hass: HomeAssistant):
@@ -135,7 +139,7 @@ async def ws_designs_list(
         vol.Required("type"): "homelable/designs/create",
         vol.Required("name"): str,
         vol.Optional("icon", default="dashboard"): str,
-        vol.Optional("design_type", default="network"): str,
+        vol.Optional("design_type", default="network"): vol.In(DESIGN_TYPES),
     }
 )
 @websocket_api.require_admin
@@ -338,6 +342,13 @@ async def ws_scan_approve(
     node = await coord.approve_pending(msg["device_id"], overrides)
     if node is None:
         connection.send_error(msg["id"], "not_found", "Device not found")
+        return
+    if node.get("rack_only"):
+        connection.send_error(
+            msg["id"],
+            "rack_device",
+            "Rack devices cannot be placed on a logical canvas",
+        )
         return
     # A same-design duplicate isn't placed automatically: return the conflict so
     # the panel can ask (go to existing / add duplicate anyway). WS send_error
@@ -913,3 +924,113 @@ async def ws_proxmox_import_pending(
         connection.send_error(msg["id"], "not_configured", str(exc))
         return
     connection.send_result(msg["id"], result)
+
+
+# ─── Rack canvases ───────────────────────────────────────────────────────────
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/racks/get",
+        vol.Required("design_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_racks_get(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Full rack state of a design: racks, mounted devices, cables, viewport."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    state = await coord.get_racks(msg["design_id"])
+    if state is None:
+        connection.send_error(msg["id"], "not_found", "Design not found")
+        return
+    connection.send_result(msg["id"], state)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/racks/save",
+        vol.Required("design_id"): str,
+        vol.Optional("racks", default=[]): [dict],
+        vol.Optional("devices", default=[]): [dict],
+        vol.Optional("cables", default=[]): [dict],
+        vol.Optional("viewport", default={}): dict,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_racks_save(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Persist the full rack state of one design: what is sent replaces the rest."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        saved = await coord.save_racks(msg["design_id"], msg)
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    if not saved:
+        connection.send_error(msg["id"], "not_found", "Design not found")
+        return
+    connection.send_result(msg["id"], {"saved": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/racks/inventory",
+        vol.Required("design_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_racks_inventory(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Rackable Device Inventory entries, flagged racked and resolved to a node."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    items = await coord.rack_inventory(msg["design_id"])
+    if items is None:
+        connection.send_error(msg["id"], "not_found", "Design not found")
+        return
+    connection.send_result(msg["id"], {"items": items})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/add_pending",
+        vol.Required("hostname"): vol.All(str, vol.Length(min=1)),
+        vol.Optional("ip"): vol.Any(str, None),
+        vol.Optional("mac"): vol.Any(str, None),
+        vol.Optional("suggested_type"): vol.Any(str, None),
+        vol.Optional("discovery_source", default="manual"): vol.In(
+            ("manual", racks.RACK_SOURCE)
+        ),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_add_pending(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Add a Device Inventory entry by hand, for hardware no scan can find."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    device = await coord.add_manual_pending(
+        hostname=msg["hostname"],
+        ip=msg.get("ip"),
+        mac=msg.get("mac"),
+        suggested_type=msg.get("suggested_type"),
+        discovery_source=msg["discovery_source"],
+    )
+    connection.send_result(msg["id"], device)

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2, Map } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2, Map, Rows3 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -8,6 +8,9 @@ import { designsApi, mediaApi } from '@/api/client'
 import { resolveDesignIcon, DEFAULT_DESIGN_ICON } from '@/utils/designIcons'
 import { DesignModal, type DesignFormData } from '@/components/modals/DesignModal'
 import type { Design } from '@/types'
+import { AccessoryTray } from '@/rack/components/AccessoryTray'
+import { useRackStore } from '@/rack/store'
+import { freeUnits } from '@/rack/layout'
 import { toast } from 'sonner'
 import { useLatestRelease } from '@/hooks/useLatestRelease'
 
@@ -60,8 +63,14 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   const collapsed = forceView ? false : _collapsed
   const activeView = forceView ?? _activeView
 
-  const { nodes, hasUnsavedChanges, hideIp, toggleHideIp, addNode, onConnect, snapshotHistory, markUnsaved, floorMap, setFloorMap } = useCanvasStore()
+  const { nodes, hasUnsavedChanges: canvasDirty, hideIp, toggleHideIp, addNode, onConnect, snapshotHistory, markUnsaved, floorMap, setFloorMap } = useCanvasStore()
   const floorMapEditNonce = useCanvasStore((s) => s.floorMapEditNonce)
+  // A rack design swaps the canvas actions for rack ones, and its own store
+  // owns the unsaved-changes badge.
+  const isRack = useDesignStore((s) => s.activeDesignType) === 'rack'
+  const rackDirty = useRackStore((s) => s.hasUnsavedChanges)
+  const openDeviceEditor = useRackStore((s) => s.openDeviceEditor)
+  const hasUnsavedChanges = isRack ? rackDirty : canvasDirty
 
   // Direct "Add to Canvas" for a Proxmox import: drop the selected hosts/guests
   // as typed nodes and wire host→guest 'virtual' + host↔host 'cluster' edges.
@@ -142,7 +151,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         // picked; otherwise start blank.
         const res = data.sourceId
           ? await designsApi.copy(data.sourceId, { name: data.name, icon: data.icon })
-          : await designsApi.create({ name: data.name, icon: data.icon })
+          : await designsApi.create({ name: data.name, icon: data.icon, design_type: data.designType ?? 'network' })
         addDesign(res.data)
       } else if (designModal.design) {
         const res = await designsApi.update(designModal.design.id, { name: data.name, icon: data.icon })
@@ -300,8 +309,8 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         {VIEWS.map(({ id, icon: Icon, label }) => (
           <SidebarItem
             key={id}
-            icon={Icon}
-            label={label}
+            icon={id === 'canvas' && isRack ? Rows3 : Icon}
+            label={id === 'canvas' && isRack ? 'Rack view' : label}
             collapsed={collapsed}
             active={activeView === id}
             onClick={() => {
@@ -326,11 +335,14 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         ))}
       </nav>
 
-      {/* Spacer — pending / hidden / history all open in modals */}
-      {!collapsed && <div className="flex-1" />}
+      {/* Spacer — pending / hidden / history all open in modals. On a rack
+          canvas the accessory tray takes the space: it scrolls, everything
+          else stays pinned. */}
+      {isRack && !collapsed ? <AccessoryTray /> : !collapsed && <div className="flex-1" />}
 
       {/* Stats footer */}
-      {!collapsed && (
+      {!collapsed && isRack && <RackStats />}
+      {!collapsed && !isRack && (
         <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
           <div className="flex justify-between">
             <span>Total</span>
@@ -349,24 +361,30 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
 
       {/* Actions */}
       <div className="flex flex-col gap-0.5 p-2 border-t border-border">
-        <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
-        <SidebarItem icon={Square} label="Add Zone" collapsed={collapsed} onClick={onAddGroupRect} />
-        <SidebarItem icon={Type} label="Add Text" collapsed={collapsed} onClick={onAddText} />
-        {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
-        <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
-        <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
-        {!STANDALONE && <SidebarItem icon={Server} label="Import Proxmox" collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
-        {!STANDALONE && <SidebarItem icon={Map} label="Add Floorplan" collapsed={collapsed} onClick={openFloorPlan} />}
-        <SidebarItem
-          icon={hideIp ? EyeOff : Eye}
-          label={hideIp ? 'Show IPs' : 'Hide IPs'}
-          collapsed={collapsed}
-          onClick={toggleHideIp}
-          active={hideIp}
-        />
+        {isRack ? (
+          <SidebarItem icon={Plus} label="Add Device" collapsed={collapsed} onClick={() => openDeviceEditor()} />
+        ) : (
+          <>
+            <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
+            <SidebarItem icon={Square} label="Add Zone" collapsed={collapsed} onClick={onAddGroupRect} />
+            <SidebarItem icon={Type} label="Add Text" collapsed={collapsed} onClick={onAddText} />
+            {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
+            <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
+            <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
+            {!STANDALONE && <SidebarItem icon={Server} label="Import Proxmox" collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
+            {!STANDALONE && <SidebarItem icon={Map} label="Add Floorplan" collapsed={collapsed} onClick={openFloorPlan} />}
+            <SidebarItem
+              icon={hideIp ? EyeOff : Eye}
+              label={hideIp ? 'Show IPs' : 'Hide IPs'}
+              collapsed={collapsed}
+              onClick={toggleHideIp}
+              active={hideIp}
+            />
+          </>
+        )}
         <SidebarItem
           icon={Save}
-          label="Save Canvas"
+          label={isRack ? 'Save Rack' : 'Save Canvas'}
           collapsed={collapsed}
           onClick={() => onSave()}
           badge={hasUnsavedChanges}
@@ -423,11 +441,43 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         title={designModal?.mode === 'edit' ? 'Edit Canvas' : 'New Canvas'}
         submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
         sourceDesigns={designModal?.mode === 'create' ? designs : []}
-        showFloorMap={!STANDALONE && isActiveEdit}
+        // A rack canvas has no floor plan to lay under it.
+        showFloorMap={!STANDALONE && isActiveEdit && !isRack}
         initialFloorMap={!STANDALONE && isActiveEdit ? floorMap : null}
         onUploadImage={handleUploadImage}
       />
     </aside>
+  )
+}
+
+/** Rack equivalent of the node stats footer: capacity rather than reachability. */
+function RackStats() {
+  const racks = useRackStore((s) => s.racks)
+  const devices = useRackStore((s) => s.devices)
+  const cables = useRackStore((s) => s.cables)
+
+  const free = racks.reduce((sum, rack) => sum + freeUnits(rack, devices), 0)
+  const total = racks.reduce((sum, rack) => sum + rack.uHeight, 0)
+
+  return (
+    <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
+      <div className="flex justify-between">
+        <span>Racks</span>
+        <span className="text-foreground font-mono">{racks.length}</span>
+      </div>
+      <div className="flex justify-between">
+        <span>Mounted</span>
+        <span className="text-foreground font-mono">{devices.length}</span>
+      </div>
+      <div className="flex justify-between">
+        <span>Cables</span>
+        <span className="text-foreground font-mono">{cables.length}</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-[#39d353]">Free</span>
+        <span className="font-mono text-[#39d353]">{free}U / {total}U</span>
+      </div>
+    </div>
   )
 }
 

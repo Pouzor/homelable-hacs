@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { Toolbar } from '../Toolbar'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
+import { useRackStore } from '@/rack/store'
 
 vi.mock('@/stores/canvasStore')
 
@@ -51,5 +53,29 @@ describe('Toolbar', () => {
     fireEvent.click(screen.getByText('Save'))
     expect(onSave).toHaveBeenCalledTimes(1)
     expect(onSave).toHaveBeenCalledWith()
+  })
+})
+
+describe('Toolbar — rack canvas', () => {
+  beforeEach(() => {
+    mockStore()
+    vi.clearAllMocks()
+    useRackStore.getState().reset()
+    useDesignStore.setState({ activeDesignType: 'rack' })
+  })
+
+  afterEach(() => {
+    useDesignStore.setState({ activeDesignType: null })
+  })
+
+  it('shows the rack actions instead of the logical canvas ones', () => {
+    render(<Toolbar {...defaultProps} />)
+    expect(screen.getByText('Rack')).toBeInTheDocument()
+    expect(screen.getByText('Import links')).toBeInTheDocument()
+    expect(screen.queryByText('Auto Layout')).not.toBeInTheDocument()
+    expect(screen.queryByText('MD')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Undo (Ctrl+Z)')).not.toBeInTheDocument()
+    // PNG capture is DOM-based, so it stays.
+    expect(screen.getByText('PNG')).toBeInTheDocument()
   })
 })

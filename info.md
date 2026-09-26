@@ -6,6 +6,7 @@ Visualize and monitor your homelab network as an interactive topology, inside Ho
 
 - Interactive network topology canvas as a Lovelace panel
 - Read-only canvas card for any dashboard (`custom:homelable-canvas-card`)
+- Rack canvas: racks, mounted gear and port-to-port patching
 - nmap-based local network scanning + service fingerprinting
 - Live status monitoring (ping/HTTP/SSH/TCP)
 - 11 node types covering routers, switches, servers, Proxmox + VM/LXC, NAS, IoT, APs
