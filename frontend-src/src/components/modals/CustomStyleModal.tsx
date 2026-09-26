@@ -2,7 +2,7 @@ import { Fragment, useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
   Globe, Router, Network, Server, Layers, Box, Container, HardDrive,
-  Cpu, Wifi, Camera, Printer, Monitor, Laptop, Smartphone, PlugZap, Anchor, Package, Circle, Flame,
+  Cpu, Wifi, Camera, Printer, Monitor, MonitorCog, Laptop, Smartphone, PlugZap, Anchor, Package, Circle, Flame,
   Radio, Zap, Lightbulb, RadioTower, Share2,
   type LucideIcon,
 } from 'lucide-react'
@@ -27,7 +27,7 @@ import { normalizeMarker } from '@/utils/edgeMarkers'
 // ── Node types exposed for custom style, grouped by category (skip groupRect/group) ──
 
 const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [
-  { label: 'Hardware',       types: ['isp', 'router', 'firewall', 'switch', 'server', 'nas', 'ap', 'printer'] },
+  { label: 'Hardware',       types: ['isp', 'router', 'firewall', 'switch', 'server', 'nas', 'kvm', 'ap', 'printer'] },
   { label: 'Virtualization', types: ['proxmox', 'vm', 'lxc', 'docker_host', 'docker_container'] },
   { label: 'IoT',            types: ['iot', 'camera', 'cpl'] },
   { label: 'Zigbee',         types: ['zigbee_coordinator', 'zigbee_router', 'zigbee_enddevice'] },
@@ -40,7 +40,7 @@ const EDITABLE_EDGE_TYPES: EdgeType[] = ['ethernet', 'wifi', 'iot', 'vlan', 'vir
 
 const NODE_ICONS: Record<string, LucideIcon> = {
   isp: Globe, router: Router, firewall: Flame, switch: Network, server: Server, proxmox: Layers,
-  vm: Box, lxc: Container, nas: HardDrive, iot: Cpu, ap: Wifi,
+  vm: Box, lxc: Container, nas: HardDrive, kvm: MonitorCog, iot: Cpu, ap: Wifi,
   camera: Camera, printer: Printer, computer: Monitor, laptop: Laptop, mobile: Smartphone, cpl: PlugZap,
   docker_host: Anchor, docker_container: Package,
   zigbee_coordinator: Radio, zigbee_router: Zap, zigbee_enddevice: Lightbulb,
