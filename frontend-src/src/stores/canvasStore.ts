@@ -137,10 +137,12 @@ interface CanvasState {
   setEditingGroupRectId: (id: string | null) => void
   editingTextId: string | null
   setEditingTextId: (id: string | null) => void
+  toggleNodeCollapsed: (id: string) => void
   createGroup: (nodeIds: string[], name: string) => void
   ungroup: (groupId: string) => void
   addToGroup: (groupId: string, childId: string) => void
   addToContainer: (containerId: string, childId: string) => void
+  addToZone: (zoneId: string, childId: string) => void
   removeFromGroup: (groupId: string, childId: string) => void
   /**
    * Record a successful save. Pass the exact nodes / edges that were sent: the
@@ -306,13 +308,16 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   addNode: (node) =>
     set((state) => {
       const parent = node.data.parent_id ? state.nodes.find((n) => n.id === node.data.parent_id) : null
-      // A visual group nests its children just like a container-mode host.
-      const shouldNestInParent = !!(parent?.data.container_mode) || parent?.data.type === 'group'
+      // A visual group — and a groupRect zone — nests its children just like a
+      // container-mode host.
+      const shouldNestInParent = !!(parent?.data.container_mode) || parent?.data.type === 'group' || parent?.data.type === 'groupRect'
+      // Zones keep their children free to be dragged back out (see addToZone).
+      const nestExtent = parent?.data.type === 'groupRect' ? undefined : ('parent' as const)
       const enriched = node.data.parent_id && shouldNestInParent
         ? {
             ...node,
             parentId: node.data.parent_id,
-            extent: 'parent' as const,
+            extent: nestExtent,
             position: {
               x: Math.max(10, node.position.x - parent.position.x),
               y: Math.max(10, node.position.y - parent.position.y),
@@ -361,10 +366,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
             updated.extent = undefined
           } else if (newParentId && newParentId !== n.parentId) {
             const parent = state.nodes.find((p) => p.id === newParentId)
-            if (parent?.data.container_mode || parent?.data.type === 'group') {
-              // Attaching to a container-mode host or a visual group: nest visually
+            if (parent?.data.container_mode || parent?.data.type === 'group' || parent?.data.type === 'groupRect') {
+              // Attaching to a container-mode host, a visual group or a zone.
               updated.parentId = newParentId
-              updated.extent = 'parent' as const
+              updated.extent = parent.data.type === 'groupRect' ? undefined : ('parent' as const)
               // Convert absolute position to parent-relative (keep node visible inside)
               updated.position = {
                 x: Math.max(10, n.position.x - parent.position.x),
@@ -409,13 +414,34 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   deleteNode: (id) =>
     set((state) => {
       const idsToRemove = new Set<string>()
+      // Deleting a zone deletes the zone, never what it happens to contain:
+      // its children are released back to the canvas in absolute coords.
+      const released: Node<NodeData>[] = []
       const collect = (nodeId: string) => {
         idsToRemove.add(nodeId)
-        state.nodes.filter((n) => n.parentId === nodeId).forEach((n) => collect(n.id))
+        const node = state.nodes.find((n) => n.id === nodeId)
+        const children = state.nodes.filter((n) => n.parentId === nodeId)
+        if (node?.data.type === 'groupRect') {
+          children.forEach((c) => released.push({
+            ...c,
+            parentId: undefined,
+            extent: undefined,
+            position: {
+              x: node.position.x + c.position.x,
+              y: node.position.y + c.position.y,
+            },
+            data: { ...c.data, parent_id: undefined },
+          }))
+          return
+        }
+        children.forEach((n) => collect(n.id))
       }
       collect(id)
+      const releasedById = new Map(released.map((n) => [n.id, n]))
       return {
-        nodes: state.nodes.filter((n) => !idsToRemove.has(n.id)),
+        nodes: state.nodes
+          .filter((n) => !idsToRemove.has(n.id))
+          .map((n) => releasedById.get(n.id) ?? n),
         edges: state.edges.filter((e) => !idsToRemove.has(e.source) && !idsToRemove.has(e.target)),
         selectedNodeId: idsToRemove.has(state.selectedNodeId ?? '') ? null : state.selectedNodeId,
         hasUnsavedChanges: true,
@@ -534,6 +560,16 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   setEditingGroupRectId: (id) => set({ editingGroupRectId: id }),
 
   setEditingTextId: (id) => set({ editingTextId: id }),
+
+  toggleNodeCollapsed: (id) =>
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id === id
+          ? { ...n, data: { ...n.data, collapsed: !n.data.collapsed } }
+          : n
+      ),
+      hasUnsavedChanges: true,
+    })),
 
   createGroup: (nodeIds, name) =>
     set((state) => {
@@ -717,6 +753,53 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         ...others.slice(0, containerIdx + 1),
         movedChild,
         ...others.slice(containerIdx + 1),
+      ]
+
+      return {
+        nodes,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
+  // Nest an existing top-level node inside a groupRect zone. Mirrors
+  // addToGroup, with one deliberate difference: NO `extent: 'parent'`. A zone
+  // is a loose visual area, so a child must stay draggable out of it — the
+  // canvas detaches it on drop (see CanvasContainer). Parenting is what makes
+  // moving the zone move its contents.
+  addToZone: (zoneId, childId) =>
+    set((state) => {
+      const zone = state.nodes.find((n) => n.id === zoneId)
+      const child = state.nodes.find((n) => n.id === childId)
+      if (!zone || !child || zone.data.type !== 'groupRect') return state
+      if (child.id === zoneId || child.parentId === zoneId) return state
+      // A zone cannot become a child of a node it already contains.
+      if (zone.parentId === childId) return state
+
+      const updatedNodes = state.nodes.map((n) => {
+        if (n.id !== childId) return n
+        return {
+          ...n,
+          parentId: zoneId,
+          // Absolute → zone-relative.
+          position: {
+            x: n.position.x - zone.position.x,
+            y: n.position.y - zone.position.y,
+          },
+          selected: false,
+          data: { ...n.data, parent_id: zoneId },
+        }
+      })
+
+      // React Flow requires the parent to precede its children in the array.
+      const others = updatedNodes.filter((n) => n.id !== childId)
+      const movedChild = updatedNodes.find((n) => n.id === childId)!
+      const zoneIdx = others.findIndex((n) => n.id === zoneId)
+      const nodes = [
+        ...others.slice(0, zoneIdx + 1),
+        movedChild,
+        ...others.slice(zoneIdx + 1),
       ]
 
       return {

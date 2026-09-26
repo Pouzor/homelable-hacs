@@ -221,6 +221,12 @@ export interface NodeData extends Record<string, unknown> {
     width?: number
     height?: number
   }
+  /**
+   * Collapse state. When true, the node hides its descendants on the canvas
+   * (a zone also hides the nodes sitting on it). Persisted inside
+   * `custom_colors.collapsed`, so the stored canvas needs no new field.
+   */
+  collapsed?: boolean
   custom_icon?: string
   /** Number of top connection points, 0..64. Default 1. */
   top_handles?: number

@@ -49,8 +49,10 @@ export function hydrateCanvasPayload(data: CanvasPayload): HydratedCanvas | null
       .filter((n) => n.type === 'group' || n.container_mode === true)
       .map((n) => [n.id, true])
   )
+  // Zones parent the nodes dropped inside them, without clamping them.
+  const zoneIds = new Set(apiNodes.filter((n) => n.type === 'groupRect').map((n) => n.id))
   const { nodes, edges } = migrateClusterHandles(
-    apiNodes.map((n) => deserializeApiNode(n, proxmoxContainerMap)),
+    apiNodes.map((n) => deserializeApiNode(n, proxmoxContainerMap, zoneIds)),
     ((data.edges ?? []) as ApiEdge[]).map(deserializeApiEdge)
   )
 
