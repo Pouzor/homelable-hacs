@@ -199,7 +199,7 @@ describe('exportCanvasToYaml', () => {
     expect(link.targetHandle).toBe('top-t')
   })
 
-  it('exports per-side handle counts only when above the side default', () => {
+  it('exports per-side handle counts only when they differ from the side default', () => {
     const nodes = [makeNode({ label: 'N', type: 'server', bottom_handles: 4, right_handles: 2, top_handles: 1, left_handles: 0 })]
     const entry = (yaml.load(exportCanvasToYaml(nodes, [])) as Record<string, unknown>[])[0]
     expect(entry.bottomHandles).toBe(4)
@@ -207,5 +207,12 @@ describe('exportCanvasToYaml', () => {
     // top default is 1, left default is 0 → omitted.
     expect(entry).not.toHaveProperty('topHandles')
     expect(entry).not.toHaveProperty('leftHandles')
+  })
+
+  it('exports a top/bottom count of 0 (below the side default)', () => {
+    const nodes = [makeNode({ label: 'N', type: 'server', top_handles: 0, bottom_handles: 0 })]
+    const entry = (yaml.load(exportCanvasToYaml(nodes, [])) as Record<string, unknown>[])[0]
+    expect(entry.topHandles).toBe(0)
+    expect(entry.bottomHandles).toBe(0)
   })
 })

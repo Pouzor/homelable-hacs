@@ -330,6 +330,18 @@ describe('parseYamlToCanvas', () => {
     expect(sw.data.bottom_handles).toBe(3)
   })
 
+  it('restores a top/bottom count of 0 instead of falling back to 1', () => {
+    const yaml = `
+- nodeType: server
+  label: "Headless"
+  topHandles: 0
+  bottomHandles: 0
+`
+    const { nodes } = parseYamlToCanvas(yaml, empty, emptyEdges)
+    expect(nodes[0].data.top_handles).toBe(0)
+    expect(nodes[0].data.bottom_handles).toBe(0)
+  })
+
   it('falls back to legacy handles when the YAML link omits them', () => {
     const yaml = `
 - nodeType: switch
