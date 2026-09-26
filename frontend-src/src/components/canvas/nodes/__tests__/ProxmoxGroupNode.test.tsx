@@ -87,6 +87,13 @@ describe('ProxmoxGroupNode', () => {
     expect(queryByText(/should-not-show/)).toBeNull()
   })
 
+  it('renders a value-less property as a bare label', () => {
+    const properties: NodeProperty[] = [{ key: 'Spare', value: '', icon: null, visible: true }]
+    const { getByText, queryByText } = renderNode({ properties })
+    expect(getByText('Spare')).toBeDefined()
+    expect(queryByText(/^·/)).toBeNull()
+  })
+
   it('renders status dot with title matching status', () => {
     const { container } = renderNode({ status: 'offline' })
     const dot = container.querySelector('[title="offline"]')
