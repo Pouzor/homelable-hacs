@@ -58,6 +58,45 @@ describe('canvasStore — device fact baseline', () => {
   })
 })
 
+describe('canvasStore — markSaved with an edit made during the save', () => {
+  beforeEach(resetStore)
+
+  it('keeps reporting a fact edited while the save was in flight', () => {
+    useCanvasStore.getState().loadCanvas([loadedNode()], [])
+    // The save serializes this snapshot, then awaits the round trip…
+    const { nodes, edges } = useCanvasStore.getState()
+    // …during which the user edits a device fact.
+    useCanvasStore.getState().updateNode('n1', { notes: 'moved to the loft' })
+    useCanvasStore.getState().markSaved({ nodes, edges })
+
+    const state = useCanvasStore.getState()
+    // Not in the payload, so the next save must still send it…
+    expect(changedFactFields(state.nodes[0].data, state.factsBaseline.n1)).toEqual(['notes'])
+    // …and the canvas still reads as unsaved.
+    expect(state.hasUnsavedChanges).toBe(true)
+  })
+
+  it('clears the unsaved flag when nothing moved during the save', () => {
+    useCanvasStore.getState().loadCanvas([loadedNode()], [])
+    useCanvasStore.getState().updateNode('n1', { notes: 'moved to the loft' })
+    const { nodes, edges } = useCanvasStore.getState()
+    useCanvasStore.getState().markSaved({ nodes, edges })
+
+    const state = useCanvasStore.getState()
+    expect(state.hasUnsavedChanges).toBe(false)
+    expect(changedFactFields(state.nodes[0].data, state.factsBaseline.n1)).toEqual([])
+  })
+
+  it('leaves a node added during the save without a baseline', () => {
+    useCanvasStore.getState().loadCanvas([loadedNode('n1')], [])
+    const { nodes, edges } = useCanvasStore.getState()
+    useCanvasStore.getState().addNode(loadedNode('n2', 'd-2'))
+    useCanvasStore.getState().markSaved({ nodes, edges })
+    // Never sent, so it still claims every fact on its first save.
+    expect(useCanvasStore.getState().factsBaseline.n2).toBeUndefined()
+  })
+})
+
 describe('canvasStore — applyDeviceFacts', () => {
   beforeEach(resetStore)
 

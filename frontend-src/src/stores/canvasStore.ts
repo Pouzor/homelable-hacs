@@ -142,7 +142,13 @@ interface CanvasState {
   addToGroup: (groupId: string, childId: string) => void
   addToContainer: (containerId: string, childId: string) => void
   removeFromGroup: (groupId: string, childId: string) => void
-  markSaved: () => void
+  /**
+   * Record a successful save. Pass the exact nodes / edges that were sent: the
+   * save is async, and whatever the user edits while it is in flight was not in
+   * the payload, so it must neither become the baseline nor lose its unsaved
+   * flag. Without an argument, the current state is taken as saved.
+   */
+  markSaved: (saved?: { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }) => void
   markUnsaved: () => void
   /**
    * The device facts as this canvas received them, per node id. A save diffs
@@ -751,7 +757,18 @@ export const useCanvasStore = create<CanvasState>((set) => ({
 
   // The save just became the integration's truth, so it is the new baseline:
   // the next save reports only what is edited from here on.
-  markSaved: () => set((state) => ({ hasUnsavedChanges: false, factsBaseline: factsBaselines(state.nodes) })),
+  markSaved: (saved) =>
+    set((state) => {
+      if (!saved) return { hasUnsavedChanges: false, factsBaseline: factsBaselines(state.nodes) }
+      // Rebase only on what was sent. A fact edited during the round trip keeps
+      // differing from its baseline, so the next save still reports it; a node
+      // added meanwhile keeps having none, so it still sends everything.
+      const factsBaseline = { ...state.factsBaseline, ...factsBaselines(saved.nodes) }
+      // Every canvas edit replaces the nodes / edges array, so the same arrays
+      // mean nothing moved during the save.
+      const untouched = state.nodes === saved.nodes && state.edges === saved.edges
+      return { factsBaseline, hasUnsavedChanges: untouched ? false : state.hasUnsavedChanges }
+    }),
 
   applyDeviceFacts: (deviceId, facts) =>
     set((state) => {

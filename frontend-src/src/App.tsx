@@ -120,7 +120,9 @@ export default function App() {
       const viewport: Record<string, unknown> = { theme_id: activeTheme }
       if (floorMap) viewport.floor_map = floorMap
       await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport, custom_style: customStyle, design_id: saveDesignId })
-      markSaved()
+      // What was sent, not what the store holds now: an edit made while the
+      // save was in flight is not in the payload and must stay pending.
+      markSaved({ nodes, edges })
       toast.success('Canvas saved')
       return true
     } catch {
