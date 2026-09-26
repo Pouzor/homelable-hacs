@@ -40,6 +40,16 @@ export function isValidParentNode(
   return getValidParentTypes(childType).includes(parent.type) || parent.container_mode === true
 }
 
+/** Does linking a child to `parent` need a virtual edge?
+ *
+ *  Only when the parent shows no containment itself: a container-mode host and
+ *  a visual group both draw the child inside them, so an edge would be a stray
+ *  duplicate — and the drag-into-a-group path never creates one.
+ */
+export function needsVirtualEdge(parent: { type: NodeType; container_mode?: boolean } | undefined): boolean {
+  return !parent?.container_mode && parent?.type !== 'group'
+}
+
 export function resolveVirtualEdgeParent(
   source: VirtualEdgeEndpoint,
   target: VirtualEdgeEndpoint,

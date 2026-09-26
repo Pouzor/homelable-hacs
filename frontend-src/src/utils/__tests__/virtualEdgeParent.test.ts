@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveVirtualEdgeParent, getValidParentTypes, isValidParentNode } from '../virtualEdgeParent'
+import { resolveVirtualEdgeParent, getValidParentTypes, isValidParentNode, needsVirtualEdge } from '../virtualEdgeParent'
 
 describe('getValidParentTypes', () => {
   it('returns container-mode types for lxc', () => {
@@ -45,6 +45,18 @@ describe('isValidParentNode', () => {
   it('rejects a non-container node that no type rule allows', () => {
     expect(isValidParentNode('server', { type: 'proxmox', container_mode: false })).toBe(false)
     expect(isValidParentNode('server', { type: 'groupRect' })).toBe(false)
+  })
+})
+
+describe('needsVirtualEdge', () => {
+  it('links a child to a plain parent with a virtual edge', () => {
+    expect(needsVirtualEdge({ type: 'proxmox' })).toBe(true)
+    expect(needsVirtualEdge({ type: 'proxmox', container_mode: false })).toBe(true)
+  })
+
+  it('skips the edge when the parent nests the child visually', () => {
+    expect(needsVirtualEdge({ type: 'proxmox', container_mode: true })).toBe(false)
+    expect(needsVirtualEdge({ type: 'group' })).toBe(false)
   })
 })
 

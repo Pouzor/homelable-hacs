@@ -10,7 +10,7 @@ import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { getCenteredPosition } from '@/utils/viewportCenter'
-import { resolveVirtualEdgeParent } from '@/utils/virtualEdgeParent'
+import { resolveVirtualEdgeParent, needsVirtualEdge } from '@/utils/virtualEdgeParent'
 import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
 import { ExportModal } from '@/components/modals/ExportModal'
@@ -471,11 +471,11 @@ export default function App() {
           )
           if (oldEdge) deleteEdge(oldEdge.id)
         }
-        // Create virtual edge only when parent is NOT in container mode
-        // (container mode shows containment visually — no edge needed)
+        // Create virtual edge only when the parent doesn't show containment
+        // itself (container mode and visual groups nest the child — no edge)
         if (newParentId) {
           const parentNode = nodes.find((n) => n.id === newParentId)
-          if (!parentNode?.data.container_mode) {
+          if (needsVirtualEdge(parentNode?.data)) {
             onConnect({ source: editNodeId, sourceHandle: 'top', target: newParentId, targetHandle: 'bottom', type: 'virtual' } as unknown as Connection)
           }
         }
