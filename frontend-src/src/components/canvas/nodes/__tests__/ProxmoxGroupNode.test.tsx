@@ -94,6 +94,18 @@ describe('ProxmoxGroupNode', () => {
     expect(queryByText(/^·/)).toBeNull()
   })
 
+  it('gives a value-less property label the full width, capped only beside a value', () => {
+    const properties: NodeProperty[] = [
+      { key: 'A very long property label', value: ' ', icon: null, visible: true },
+      { key: 'CPU', value: '16 cores', icon: null, visible: true },
+    ]
+    const { getByText } = renderNode({ properties })
+    const bare = getByText('A very long property label')
+    expect(bare.className).not.toContain('max-w-15')
+    expect(bare.className).toContain('min-w-0')
+    expect(getByText('CPU').className).toContain('max-w-15')
+  })
+
   it('renders status dot with title matching status', () => {
     const { container } = renderNode({ status: 'offline' })
     const dot = container.querySelector('[title="offline"]')
