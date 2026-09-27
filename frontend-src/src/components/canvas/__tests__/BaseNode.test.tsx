@@ -163,6 +163,33 @@ describe('BaseNode — properties rendering', () => {
     expect(screen.queryByText(/^·/)).toBeNull()
   })
 
+  // The label is capped so a long key cannot crowd out the value beside it.
+  // With no value there is nothing to protect: the label gets the full line.
+  it('drops the label width cap when the value is empty', () => {
+    renderBaseNode({
+      properties: [{ key: 'A very long property label', value: '', icon: null, visible: true }],
+    })
+    const label = screen.getByText('A very long property label')
+    expect(label.className).not.toContain('max-w-15')
+    expect(label.className).toContain('min-w-0')
+  })
+
+  it('treats a whitespace-only value as empty', () => {
+    renderBaseNode({
+      properties: [{ key: 'Label', value: '   ', icon: null, visible: true }],
+    })
+    expect(screen.getByText('Label').className).not.toContain('max-w-15')
+    expect(screen.queryByText(/^·/)).toBeNull()
+  })
+
+  it('keeps the label width cap when a value shares the line', () => {
+    renderBaseNode({
+      properties: [{ key: 'Label', value: '42', icon: null, visible: true }],
+    })
+    expect(screen.getByText('Label').className).toContain('max-w-15')
+    expect(screen.getByText('· 42')).toBeDefined()
+  })
+
   it('does not render properties with visible=false', () => {
     renderBaseNode({
       properties: [
