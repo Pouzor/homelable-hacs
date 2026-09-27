@@ -116,13 +116,19 @@ DEFAULT_SERVICE_CHECK_ENABLED = False
 DEFAULT_SERVICE_CHECK_INTERVAL = 300  # seconds (5 min)
 MIN_SERVICE_CHECK_INTERVAL = 30   # seconds
 
-# Zigbee networkmap timeouts (seconds). Large meshes (>50 devices) routinely
-# take 2-4 minutes; coordinator polls every router for routing tables.
-ZIGBEE_NETWORKMAP_TIMEOUT = 300.0
-
-# Z-Wave JS UI getNodes timeout (seconds). Large meshes are slow; the gateway
-# polls every node before answering.
-ZWAVE_NODES_TIMEOUT = 300.0
+# How long to wait (seconds) for a gateway to answer over MQTT — the Zigbee2MQTT
+# networkmap and the Z-Wave JS UI getNodes dump. Both poll every device before
+# answering, and a 200+ device mesh can take several minutes, so this is an
+# option rather than a constant. A non-positive stored value falls back to the
+# default instead of meaning "give up immediately".
+CONF_MQTT_RESPONSE_TIMEOUT = "mqtt_response_timeout"
+DEFAULT_MQTT_RESPONSE_TIMEOUT = 300  # seconds (5 min)
+MIN_MQTT_RESPONSE_TIMEOUT = 30  # seconds
+# Appended to a gateway timeout error so the user knows which knob to turn.
+MQTT_TIMEOUT_HINT = (
+    "raise the MQTT gateway response timeout in the Homelable integration "
+    "options if your mesh is large"
+)
 
 # Dispatcher signal for live scan events (device_discovered / device_enriched
 # / scan_phase / scan_finished / scan_cancelled). Subscribers receive a single

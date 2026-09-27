@@ -15,7 +15,7 @@ from typing import Any
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
 
-from .const import ZIGBEE_NETWORKMAP_TIMEOUT
+from .const import DEFAULT_MQTT_RESPONSE_TIMEOUT, MQTT_TIMEOUT_HINT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -208,7 +208,7 @@ def _mqtt_ready(hass: HomeAssistant) -> bool:
 async def fetch_networkmap(
     hass: HomeAssistant,
     base_topic: str,
-    timeout: float = ZIGBEE_NETWORKMAP_TIMEOUT,
+    timeout: float = DEFAULT_MQTT_RESPONSE_TIMEOUT,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Request the Z2M networkmap via HA MQTT and return (nodes, edges).
 
@@ -255,7 +255,8 @@ async def fetch_networkmap(
             response_payload = await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError as exc:
             raise TimeoutError(
-                "Timed out waiting for Zigbee2MQTT networkmap response"
+                "Timed out waiting for Zigbee2MQTT networkmap response after "
+                f"{timeout:g}s — {MQTT_TIMEOUT_HINT}"
             ) from exc
     finally:
         unsub()

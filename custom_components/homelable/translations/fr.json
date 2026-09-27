@@ -33,6 +33,7 @@
           "zigbee_base_topic": "Topic de base Zigbee2MQTT",
           "zwave_prefix": "Préfixe MQTT Z-Wave JS UI",
           "zwave_gateway": "Nom de la passerelle Z-Wave JS UI",
+          "mqtt_response_timeout": "Délai de réponse des passerelles MQTT (secondes)",
           "service_check_enabled": "Activer la vérification d'état par service",
           "service_check_interval": "Intervalle de vérification des services (secondes)",
           "proxmox_host": "Hôte ou IP Proxmox VE",

@@ -7,7 +7,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.homelable import zwave
-from custom_components.homelable.const import DOMAIN
+from custom_components.homelable.const import CONF_MQTT_RESPONSE_TIMEOUT, DOMAIN
 from custom_components.homelable.coordinator import HomelableCoordinator
 from custom_components.homelable.websocket import async_register_websocket_commands
 
@@ -146,6 +146,16 @@ async def test_fetch_zwave_network_raises_when_mqtt_missing(hass: HomeAssistant)
         await zwave.fetch_zwave_network(hass, "zwave", "zwavejs2mqtt", timeout=0.1)
 
 
+async def test_fetch_zwave_network_timeout_names_the_option(hass: HomeAssistant) -> None:
+    hass.config.components.add("mqtt")
+    with (
+        patch.object(zwave.mqtt, "async_subscribe", new=AsyncMock(return_value=MagicMock())),
+        patch.object(zwave.mqtt, "async_publish", new=AsyncMock()),
+        pytest.raises(TimeoutError, match=r"after 0\.05s .*MQTT gateway response timeout"),
+    ):
+        await zwave.fetch_zwave_network(hass, "zwave", "zwavejs2mqtt", timeout=0.05)
+
+
 # ─── Property builders ───────────────────────────────────────────────────────
 
 
@@ -190,6 +200,16 @@ def _mock_entry() -> MagicMock:
 @pytest.fixture
 async def coordinator(hass: HomeAssistant) -> HomelableCoordinator:
     return HomelableCoordinator(hass, _mock_entry())
+
+
+async def test_fetch_zwave_network_passes_configured_timeout(hass: HomeAssistant) -> None:
+    entry = _mock_entry()
+    entry.options = {CONF_MQTT_RESPONSE_TIMEOUT: 600}
+    coord = HomelableCoordinator(hass, entry)
+    fetch = AsyncMock(return_value=([], []))
+    with patch.object(zwave, "fetch_zwave_network", new=fetch):
+        await coord.fetch_zwave_network()
+    fetch.assert_awaited_once_with(hass, "zwave", "zwavejs2mqtt", timeout=600.0)
 
 
 def _dev(node_id: int = 1, ntype: str = "zwave_coordinator") -> dict:
