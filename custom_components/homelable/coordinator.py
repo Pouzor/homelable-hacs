@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import inventory_sync, proxmox, racks, scanner, status_checker, zha, zigbee, zwave
 from .const import (
+    CONF_MQTT_RESPONSE_TIMEOUT,
     CONF_PROXMOX_HOST,
     CONF_PROXMOX_PORT,
     CONF_PROXMOX_SYNC_ENABLED,
@@ -39,6 +40,7 @@ from .const import (
     DEFAULT_DESIGN_ICON,
     DEFAULT_DESIGN_NAME,
     DEFAULT_DESIGN_TYPE,
+    DEFAULT_MQTT_RESPONSE_TIMEOUT,
     DEFAULT_PROXMOX_PORT,
     DEFAULT_PROXMOX_SYNC_ENABLED,
     DEFAULT_PROXMOX_SYNC_INTERVAL,
@@ -2533,6 +2535,26 @@ class HomelableCoordinator(DataUpdateCoordinator):
             {"event": "scan_finished", "run_id": run_id, "devices_found": 0},
         )
 
+    # ─── MQTT gateways (Zigbee2MQTT / Z-Wave JS UI) ───────────────────────────
+
+    def get_mqtt_response_timeout(self) -> float:
+        """Seconds to wait for a gateway's MQTT answer (networkmap / getNodes).
+
+        A missing, unparsable or non-positive value falls back to the default
+        rather than timing out at once.
+        """
+        raw = self.entry.options.get(
+            CONF_MQTT_RESPONSE_TIMEOUT,
+            self.entry.data.get(
+                CONF_MQTT_RESPONSE_TIMEOUT, DEFAULT_MQTT_RESPONSE_TIMEOUT
+            ),
+        )
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return float(DEFAULT_MQTT_RESPONSE_TIMEOUT)
+        return value if value > 0 else float(DEFAULT_MQTT_RESPONSE_TIMEOUT)
+
     # ─── Zigbee (Zigbee2MQTT / ZHA) ──────────────────────────────────────────
 
     def get_zigbee_base_topic(self) -> str:
@@ -2602,7 +2624,11 @@ class HomelableCoordinator(DataUpdateCoordinator):
         """
         if self.resolve_zigbee_backend(backend) == "zha":
             return await zha.fetch_zha_network(self.hass)
-        return await zigbee.fetch_networkmap(self.hass, self.get_zigbee_base_topic())
+        return await zigbee.fetch_networkmap(
+            self.hass,
+            self.get_zigbee_base_topic(),
+            timeout=self.get_mqtt_response_timeout(),
+        )
 
     async def trigger_zigbee_import(
         self, backend: str | None = None
@@ -2825,7 +2851,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Trigger a Z-Wave getNodes request and return parsed (nodes, edges)."""
         prefix, gateway = self.get_zwave_config()
-        return await zwave.fetch_zwave_network(self.hass, prefix, gateway)
+        return await zwave.fetch_zwave_network(
+            self.hass, prefix, gateway, timeout=self.get_mqtt_response_timeout()
+        )
 
     async def trigger_zwave_import(self) -> dict[str, Any]:
         """Kick off a Z-Wave import in the background. Returns immediately.

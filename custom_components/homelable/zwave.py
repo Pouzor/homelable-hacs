@@ -20,7 +20,7 @@ from typing import Any
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
 
-from .const import ZWAVE_NODES_TIMEOUT
+from .const import DEFAULT_MQTT_RESPONSE_TIMEOUT, MQTT_TIMEOUT_HINT
 from .zigbee import _find_parent_router, _mqtt_ready, merge_zigbee_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -200,7 +200,7 @@ async def fetch_zwave_network(
     hass: HomeAssistant,
     prefix: str,
     gateway_name: str,
-    timeout: float = ZWAVE_NODES_TIMEOUT,
+    timeout: float = DEFAULT_MQTT_RESPONSE_TIMEOUT,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Request the Z-Wave node list via HA MQTT and return (nodes, edges).
 
@@ -243,7 +243,8 @@ async def fetch_zwave_network(
             response_payload = await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError as exc:
             raise TimeoutError(
-                "Timed out waiting for Z-Wave JS UI getNodes response"
+                "Timed out waiting for Z-Wave JS UI getNodes response after "
+                f"{timeout:g}s — {MQTT_TIMEOUT_HINT}"
             ) from exc
     finally:
         unsub()

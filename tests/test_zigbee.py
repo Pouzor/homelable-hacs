@@ -7,7 +7,11 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.homelable import zigbee
-from custom_components.homelable.const import DOMAIN
+from custom_components.homelable.const import (
+    CONF_MQTT_RESPONSE_TIMEOUT,
+    DEFAULT_MQTT_RESPONSE_TIMEOUT,
+    DOMAIN,
+)
 from custom_components.homelable.coordinator import HomelableCoordinator
 from custom_components.homelable.websocket import async_register_websocket_commands
 
@@ -129,6 +133,17 @@ async def test_fetch_networkmap_raises_when_mqtt_missing(hass: HomeAssistant) ->
         await zigbee.fetch_networkmap(hass, "zigbee2mqtt", timeout=0.1)
 
 
+async def test_fetch_networkmap_timeout_names_the_option(hass: HomeAssistant) -> None:
+    # A silent bridge must say how long it waited and which option to raise.
+    hass.config.components.add("mqtt")
+    with (
+        patch.object(zigbee.mqtt, "async_subscribe", new=AsyncMock(return_value=MagicMock())),
+        patch.object(zigbee.mqtt, "async_publish", new=AsyncMock()),
+        pytest.raises(TimeoutError, match=r"after 0\.05s .*MQTT gateway response timeout"),
+    ):
+        await zigbee.fetch_networkmap(hass, "zigbee2mqtt", timeout=0.05)
+
+
 # ─── Property builders ───────────────────────────────────────────────────────
 
 
@@ -192,6 +207,45 @@ def _mock_entry() -> MagicMock:
 @pytest.fixture
 async def coordinator(hass: HomeAssistant) -> HomelableCoordinator:
     return HomelableCoordinator(hass, _mock_entry())
+
+
+# ─── MQTT response timeout option ────────────────────────────────────────────
+
+
+def test_mqtt_response_timeout_defaults(coordinator: HomelableCoordinator) -> None:
+    assert coordinator.get_mqtt_response_timeout() == DEFAULT_MQTT_RESPONSE_TIMEOUT
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (900, 900.0),
+        (0, float(DEFAULT_MQTT_RESPONSE_TIMEOUT)),
+        (-5, float(DEFAULT_MQTT_RESPONSE_TIMEOUT)),
+        ("nope", float(DEFAULT_MQTT_RESPONSE_TIMEOUT)),
+        (None, float(DEFAULT_MQTT_RESPONSE_TIMEOUT)),
+    ],
+)
+async def test_mqtt_response_timeout_from_options(
+    hass: HomeAssistant, stored: object, expected: float
+) -> None:
+    # A non-positive or unparsable value falls back instead of giving up at once.
+    entry = _mock_entry()
+    entry.options = {CONF_MQTT_RESPONSE_TIMEOUT: stored}
+    coord = HomelableCoordinator(hass, entry)
+    assert coord.get_mqtt_response_timeout() == expected
+
+
+async def test_fetch_zigbee_networkmap_passes_configured_timeout(
+    hass: HomeAssistant,
+) -> None:
+    entry = _mock_entry()
+    entry.options = {CONF_MQTT_RESPONSE_TIMEOUT: 900}
+    coord = HomelableCoordinator(hass, entry)
+    fetch = AsyncMock(return_value=([], []))
+    with patch.object(zigbee, "fetch_networkmap", new=fetch):
+        await coord.fetch_zigbee_networkmap("z2m")
+    fetch.assert_awaited_once_with(hass, "zigbee2mqtt", timeout=900.0)
 
 
 async def test_import_zigbee_devices_adds_to_pending(coordinator: HomelableCoordinator) -> None:

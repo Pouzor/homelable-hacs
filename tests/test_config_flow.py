@@ -9,6 +9,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homelable.const import (
+    CONF_MQTT_RESPONSE_TIMEOUT,
     CONF_SCAN_AUTO_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
@@ -16,6 +17,7 @@ from custom_components.homelable.const import (
     CONF_SERVICE_CHECK_INTERVAL,
     CONF_STATUS_INTERVAL,
     CONF_ZIGBEE_SOURCE,
+    DEFAULT_MQTT_RESPONSE_TIMEOUT,
     DOMAIN,
 )
 
@@ -207,5 +209,54 @@ async def test_options_flow_rejects_unknown_zigbee_source(hass: HomeAssistant) -
                 CONF_SCAN_INTERVAL: 3600,
                 CONF_STATUS_INTERVAL: 60,
                 CONF_ZIGBEE_SOURCE: "carrier_pigeon",
+            },
+        )
+
+
+async def test_options_flow_saves_mqtt_response_timeout(hass: HomeAssistant) -> None:
+    """The gateway timeout defaults to 300 s and persists a raised value."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Homelable",
+        data={CONF_SCAN_RANGES: "192.168.1.0/24"},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    schema = result["data_schema"].schema
+    key = next(k for k in schema if k == CONF_MQTT_RESPONSE_TIMEOUT)
+    assert key.default() == DEFAULT_MQTT_RESPONSE_TIMEOUT
+
+    result2 = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_SCAN_RANGES: "192.168.1.0/24",
+            CONF_SCAN_INTERVAL: 3600,
+            CONF_STATUS_INTERVAL: 60,
+            CONF_MQTT_RESPONSE_TIMEOUT: 900,
+        },
+    )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert result2["data"][CONF_MQTT_RESPONSE_TIMEOUT] == 900
+
+
+async def test_options_flow_rejects_sub_minimum_mqtt_timeout(hass: HomeAssistant) -> None:
+    """A gateway timeout under the floor would fail every real mesh; reject it."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Homelable",
+        data={CONF_SCAN_RANGES: "192.168.1.0/24"},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_SCAN_RANGES: "192.168.1.0/24",
+                CONF_SCAN_INTERVAL: 3600,
+                CONF_STATUS_INTERVAL: 60,
+                CONF_MQTT_RESPONSE_TIMEOUT: 5,
             },
         )

@@ -13,6 +13,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_MQTT_RESPONSE_TIMEOUT,
     CONF_PROXMOX_HOST,
     CONF_PROXMOX_PORT,
     CONF_PROXMOX_SYNC_ENABLED,
@@ -30,6 +31,7 @@ from .const import (
     CONF_ZIGBEE_SOURCE,
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
+    DEFAULT_MQTT_RESPONSE_TIMEOUT,
     DEFAULT_PROXMOX_PORT,
     DEFAULT_PROXMOX_SYNC_ENABLED,
     DEFAULT_PROXMOX_SYNC_INTERVAL,
@@ -45,6 +47,7 @@ from .const import (
     DEFAULT_ZWAVE_GATEWAY,
     DEFAULT_ZWAVE_PREFIX,
     DOMAIN,
+    MIN_MQTT_RESPONSE_TIMEOUT,
     MIN_PROXMOX_SYNC_INTERVAL,
     MIN_SCAN_INTERVAL,
     MIN_SERVICE_CHECK_INTERVAL,
@@ -176,6 +179,15 @@ class HomelableOptionsFlow(OptionsFlow):
                     CONF_ZWAVE_GATEWAY,
                     default=data.get(CONF_ZWAVE_GATEWAY, DEFAULT_ZWAVE_GATEWAY),
                 ): str,
+                # Wait for the Zigbee2MQTT / Z-Wave JS UI answer. A 200+ device
+                # mesh can take minutes to build its map; raise this if imports
+                # time out.
+                vol.Required(
+                    CONF_MQTT_RESPONSE_TIMEOUT,
+                    default=data.get(
+                        CONF_MQTT_RESPONSE_TIMEOUT, DEFAULT_MQTT_RESPONSE_TIMEOUT
+                    ),
+                ): vol.All(int, vol.Range(min=MIN_MQTT_RESPONSE_TIMEOUT)),
                 vol.Required(
                     CONF_SERVICE_CHECK_ENABLED,
                     default=data.get(
