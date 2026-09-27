@@ -189,6 +189,53 @@ async def test_a_new_node_drawn_on_the_canvas_gets_a_row(coord) -> None:  # noqa
     assert inventory[0]["canvas_count"] == 1
 
 
+async def test_drawing_a_scanned_device_by_hand_keeps_its_lists(coord) -> None:  # noqa: ANN001
+    """A new node has no baseline, so the panel reports every fact as changed —
+    its empty lists are what it was drawn with, not a request to clear the row."""
+    await _add_rows(coord, {
+        "id": "pd-1", "ip": "10.0.0.5", "show_hardware": True,
+        "services": [{"port": 22, "protocol": "tcp", "service_name": "ssh"}],
+        "properties": [{"key": "Rack", "value": "A1", "icon": None, "visible": True}],
+    })
+    await coord.save_canvas({"nodes": [{
+        "id": "n1", "type": "server", "label": "Box", "ip": "10.0.0.5",
+        "services": [], "properties": [], "show_hardware": False,
+        "changed_facts": ["ip", "services", "properties", "show_hardware", "label"],
+    }], "edges": []})
+
+    row = (await coord._get_pending())["devices"][0]
+    assert len((await coord._get_pending())["devices"]) == 1
+    assert row["services"] == [{"port": 22, "protocol": "tcp", "service_name": "ssh"}]
+    assert [p["key"] for p in row["properties"]] == ["Rack"]
+    assert row["show_hardware"] is True
+    assert row["label"] == "Box"
+    assert (await coord.get_canvas())["nodes"][0]["services"] == row["services"]
+
+
+async def test_a_hand_drawn_nodes_own_lists_merge_into_the_row(coord) -> None:  # noqa: ANN001
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5",
+                            "properties": [{"key": "Rack", "value": "A1", "visible": True}]})
+    await coord.save_canvas({"nodes": [{
+        "id": "n1", "type": "server", "label": "Box", "ip": "10.0.0.5",
+        "properties": [{"key": "Owner", "value": "me", "visible": True}],
+        "changed_facts": ["ip", "properties", "label"],
+    }], "edges": []})
+    row = (await coord._get_pending())["devices"][0]
+    assert [p["key"] for p in row["properties"]] == ["Rack", "Owner"]
+
+
+async def test_a_linked_node_still_deletes_a_property(coord) -> None:  # noqa: ANN001
+    """Merging is for a node joining a row; once linked, a list save is an edit."""
+    await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5",
+                            "properties": [{"key": "Rack", "value": "A1", "visible": True}]})
+    await coord.approve_pending("pd-1")
+    canvas = await coord.get_canvas()
+    canvas["nodes"][0]["properties"] = []
+    canvas["nodes"][0]["changed_facts"] = ["properties"]
+    await coord.save_canvas(canvas)
+    assert (await coord._get_pending())["devices"][0]["properties"] == []
+
+
 # ─── Approve ─────────────────────────────────────────────────────────────────
 
 
@@ -558,10 +605,11 @@ async def test_removing_a_service_removes_it_from_the_device(coord) -> None:  # 
 
 
 async def test_a_new_node_shows_what_the_row_already_holds(coord) -> None:  # noqa: ANN001
-    """A node that says nothing about the lists gets its first view off the row."""
+    """An empty list on a first view means "nothing to say", not "hide it all"."""
     await _add_rows(coord, {"id": "pd-1", "ip": "10.0.0.5", "services": [SSH]})
     await coord.save_canvas({"nodes": [
-        {"id": "n1", "type": "server", "label": "Box", "ip": "10.0.0.5"},
+        {"id": "n1", "type": "server", "label": "Box", "ip": "10.0.0.5", "services": [],
+         "changed_facts": ["ip", "services", "label"]},
     ], "edges": []})
     assert (await coord.get_canvas())["nodes"][0]["services"] == [SSH]
 
