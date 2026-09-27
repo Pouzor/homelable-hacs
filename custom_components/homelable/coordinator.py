@@ -580,10 +580,40 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
         self._designs = designs
         self._canvases = canvases
+        if self._repair_self_parent_nodes():
+            dirty = True
         if dirty:
             await self._save_designs()
             await self._save_canvases()
         await self._link_nodes_to_inventory()
+
+    def _repair_self_parent_nodes(self) -> bool:
+        """Detach any node stored as its own parent; True when one was.
+
+        Port of homelable #390. A ``parent_id == id`` row is fatal on the
+        canvas: the panel's parent walks assume an acyclic tree, so dragging the
+        node overflowed the stack inside the change reducer and the move was
+        silently dropped — the node selected but would not move.
+
+        Clearing the key is the only safe repair: the real parent is not
+        recoverable from the row, and None returns the node to the top level
+        where the user can re-nest it. A longer cycle is left alone — there is
+        no single right link to cut, and the panel's cycle guards keep the
+        canvas usable either way. Idempotent — a second run matches nothing.
+        """
+        assert self._canvases is not None
+        repaired = 0
+        for canvas in self._canvases.values():
+            for node in canvas.get("nodes") or []:
+                if node.get("parent_id") is not None and node["parent_id"] == node.get("id"):
+                    node["parent_id"] = None
+                    repaired += 1
+                    _LOGGER.info(
+                        "Detached self-parented node %s (%s)", node.get("id"), node.get("label")
+                    )
+        if repaired:
+            _LOGGER.info("Repaired %d node(s) recorded as their own parent", repaired)
+        return bool(repaired)
 
     async def _link_nodes_to_inventory(self) -> None:
         """Move every node's device facts onto its Device Inventory row, once.
@@ -1166,6 +1196,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
         edited: set[str] = set()
         for node in canvas.get("nodes", []):
             changed = node.pop("changed_facts", None)
+            # A node can never be its own parent: the panel's parent walks
+            # assume an acyclic tree and the row freezes the node on the canvas.
+            # Dropped rather than rejected so a canvas already carrying the bad
+            # row can still save; the load repair clears what is persisted.
+            if node.get("parent_id") is not None and node["parent_id"] == node.get("id"):
+                node["parent_id"] = None
             if inventory_sync.is_furniture(inventory_sync.node_type(node)):
                 node.pop("device_id", None)
                 continue

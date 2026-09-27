@@ -1540,4 +1540,79 @@ describe('canvasStore — edge waypoints follow dragged nodes', () => {
     useCanvasStore.getState().onNodesChange([{ type: 'select', id: 'a', selected: true }])
     expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 100, y: 100 }])
   })
+
+  // A corrupt row pointing a node at itself made the child walk recurse
+  // forever. The overflow was thrown inside onNodesChange's reducer, so the
+  // whole state update was discarded: the node selected but never moved.
+  const withParent = (id: string, parentId: string): Node<NodeData> => {
+    const n = node(id)
+    return { ...n, data: { ...n.data, parent_id: parentId } }
+  }
+
+  it('moves a node that is recorded as its own parent', () => {
+    useCanvasStore.setState({ nodes: [withParent('a', 'a')], edges: [] })
+    useCanvasStore.getState().onNodesChange([posChange('a', 40, 40)])
+    expect(useCanvasStore.getState().nodes[0].position).toEqual({ x: 40, y: 40 })
+  })
+
+  it('translates waypoints once for a self-parented node instead of hanging', () => {
+    useCanvasStore.setState({
+      nodes: [withParent('a', 'a'), node('b')],
+      edges: [wpEdge('e1', 'a', 'b', [{ x: 100, y: 100 }])],
+    })
+    useCanvasStore.getState().onNodesChange([posChange('a', 10, 10)])
+    expect(useCanvasStore.getState().edges[0].data!.waypoints).toEqual([{ x: 110, y: 110 }])
+  })
+
+  it('survives a longer parent cycle (a -> b -> a)', () => {
+    useCanvasStore.setState({ nodes: [withParent('a', 'b'), withParent('b', 'a')], edges: [] })
+    useCanvasStore.getState().onNodesChange([posChange('a', 25, 25)])
+    expect(useCanvasStore.getState().nodes[0].position).toEqual({ x: 25, y: 25 })
+  })
+})
+
+// Nothing used to stop a node being written as its own parent, and the row is
+// fatal: it freezes the node on the canvas and survives a save.
+describe('canvasStore — self-parent guard', () => {
+  beforeEach(() => {
+    useCanvasStore.setState({ nodes: [], edges: [], hasUnsavedChanges: false })
+  })
+
+  it('updateNode ignores a parent_id pointing at the node itself', () => {
+    const n = { ...makeNode('n1', { container_mode: true }), position: { x: 50, y: 50 } }
+    useCanvasStore.setState({ nodes: [n] })
+
+    useCanvasStore.getState().updateNode('n1', { parent_id: 'n1', label: 'renamed' })
+
+    const after = useCanvasStore.getState().nodes[0]
+    expect(after.data.parent_id).toBeUndefined()
+    expect(after.parentId).toBeUndefined()
+    // The rest of the edit still lands — the key is dropped, not the update.
+    expect(after.data.label).toBe('renamed')
+    expect(after.position).toEqual({ x: 50, y: 50 })
+  })
+
+  it('updateNode self-parent does not detach a node from its real parent', () => {
+    const parent = { ...makeNode('p1', { container_mode: true }), position: { x: 100, y: 100 } }
+    useCanvasStore.setState({ nodes: [parent] })
+    useCanvasStore.getState().addNode({ ...makeNode('c1', { parent_id: 'p1' }), position: { x: 140, y: 160 } })
+
+    useCanvasStore.getState().updateNode('c1', { parent_id: 'c1' })
+
+    const child = useCanvasStore.getState().nodes.find((x) => x.id === 'c1')!
+    expect(child.parentId).toBe('p1')
+    expect(child.data.parent_id).toBe('p1')
+  })
+
+  it('addNode strips a parent_id pointing at the node itself', () => {
+    useCanvasStore.getState().addNode({
+      ...makeNode('n1', { parent_id: 'n1', container_mode: true }),
+      position: { x: 30, y: 30 },
+    })
+
+    const added = useCanvasStore.getState().nodes[0]
+    expect(added.data.parent_id).toBeUndefined()
+    expect(added.parentId).toBeUndefined()
+    expect(added.position).toEqual({ x: 30, y: 30 })
+  })
 })
