@@ -65,6 +65,18 @@ export interface ApiEdge {
 
 // ── Serialization (RF node → API save payload) ───────────────────────────────
 
+/** Drop the legacy geometry keys from a zone's style blob — its size lives in
+ *  the top-level `width`/`height` now, and a stale copy here would be the one
+ *  an older panel reads back. */
+function omitZoneSize(
+  colors: NodeData['custom_colors'],
+): Record<string, unknown> {
+  if (!colors) return {}
+  return Object.fromEntries(
+    Object.entries(colors).filter(([key]) => key !== 'width' && key !== 'height'),
+  )
+}
+
 export function serializeNode(
   n: Node<NodeData>,
   factsBaseline?: FactsBaseline,
@@ -90,10 +102,13 @@ export function serializeNode(
       custom_icon: null,
       pos_x: n.position.x,
       pos_y: n.position.y,
+      // A zone's size goes in the top-level fields, like every other node
+      // type. It used to live in the custom_colors blob; `width`/`height` are
+      // stripped from it below so the two cannot drift apart.
+      width: n.width ?? n.measured?.width ?? 360,
+      height: n.height ?? n.measured?.height ?? 240,
       custom_colors: {
-        ...n.data.custom_colors,
-        width: n.width ?? n.measured?.width ?? 360,
-        height: n.height ?? n.measured?.height ?? 240,
+        ...omitZoneSize(n.data.custom_colors),
         // Collapse state rides in custom_colors so the stored node needs no
         // new field. Hoisted back to `data.collapsed` on load.
         collapsed: n.data.collapsed ?? false,
@@ -201,8 +216,10 @@ export function deserializeApiNode(
       : rawNode
   const normalizedType = n.type === 'docker' ? 'docker_host' : n.type
   if (n.type === 'groupRect') {
-    const w = (n.custom_colors?.width as number | undefined) ?? 360
-    const h = (n.custom_colors?.height as number | undefined) ?? 240
+    // Prefer the top-level fields; fall back to the custom_colors stash for a
+    // canvas saved before the size moved out of it (or a YAML import).
+    const w = n.width ?? (n.custom_colors?.width as number | undefined) ?? 360
+    const h = n.height ?? (n.custom_colors?.height as number | undefined) ?? 240
     const z = (n.custom_colors?.z_order as number | undefined) ?? 1
     return {
       id: n.id,
