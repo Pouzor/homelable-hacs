@@ -123,6 +123,33 @@ def test_link_facts_mints_a_canvas_row_when_nothing_matches() -> None:
     assert row["ip"] == "10.0.0.9"
 
 
+def test_link_facts_approves_a_pending_row_a_node_draws() -> None:
+    """A row a node draws is past the pending queue (homelable #388)."""
+    devices = [_row(ip="10.0.0.5", status="pending")]
+    node = {"id": "n1", "type": "server"}
+    row, _ = sync.link_facts(devices, node, {"type": "server", "ip": "10.0.0.5"}, now=NOW)
+    assert row is devices[0]
+    assert row["status"] == "approved"
+
+
+def test_link_facts_leaves_a_hidden_row_hidden() -> None:
+    """The user hid it on purpose — drawing it does not undo that."""
+    devices = [_row(ip="10.0.0.5", status="hidden")]
+    node = {"id": "n1", "type": "server"}
+    row, _ = sync.link_facts(devices, node, {"type": "server", "ip": "10.0.0.5"}, now=NOW)
+    assert row is devices[0]
+    assert row["status"] == "hidden"
+
+
+def test_attach_device_ids_stamps_copies_of_matched_nodes() -> None:
+    devices = [_row(id="by-ieee", data_extras={"ieee_address": "pve-a-100"})]
+    nodes = [{"ieee_address": "pve-a-100"}, {"ieee_address": "pve-a-999"}]
+    out = sync.attach_device_ids(devices, nodes)
+    assert out[0]["device_id"] == "by-ieee"
+    assert "device_id" not in out[1]
+    assert "device_id" not in nodes[0]  # the caller's payload is left untouched
+
+
 def test_link_facts_leaves_furniture_unlinked() -> None:
     devices: list[dict] = []
     node = {"id": "g", "type": "groupRect", "device_id": "stale"}

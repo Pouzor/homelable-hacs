@@ -1159,6 +1159,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
             if n.get("id") and inventory_sync.VIEW_KEY in n
         }
         devices = (await self._get_pending())["devices"]
+        # link_facts approves a pending row a node now draws; that is lifecycle,
+        # not an edit, so it is watched for separately to still reach the Store.
+        was_pending = {d.get("id") for d in devices if d.get("status") == "pending"}
         now = _utc_now_iso()
         edited: set[str] = set()
         for node in canvas.get("nodes", []):
@@ -1204,7 +1207,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._reconcile_node_timestamps(canvas, prior, edited)
         self._canvases[did] = canvas
         await self._save_canvases()
-        if edited:
+        approved = any(
+            d.get("id") in was_pending and d.get("status") == "approved" for d in devices
+        )
+        if edited or approved:
             await self._save_pending()
 
     @staticmethod
@@ -3150,6 +3156,24 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if dirty_designs:
             await self._save_canvases()
         return {"created": created, "updated": updated, "device_count": len(nodes)}
+
+    async def import_proxmox_canvas(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
+        cluster_pairs: list[tuple[str, str]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Land a canvas-direct Proxmox import in the inventory, then link it.
+
+        A canvas import is an import: the guests land in the Device Inventory
+        exactly as the pending path does, and each returned node carries the id
+        of the row it draws. The panel puts that ``device_id`` on the node it
+        places, so the canvas save links to the row instead of minting a
+        second, ieee-less one — which the next import would duplicate again.
+        """
+        await self.import_proxmox_pending(nodes, edges, cluster_pairs)
+        devices = (await self._get_pending())["devices"]
+        return inventory_sync.attach_device_ids(devices, nodes)
 
     @staticmethod
     def _new_proxmox_pending(

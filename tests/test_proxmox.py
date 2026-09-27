@@ -336,6 +336,57 @@ async def test_import_merges_host_onto_scanned_row_by_ip(coord) -> None:  # noqa
     assert row["mac"] == "aa:bb:cc:dd:ee:ff"  # scanned MAC kept
 
 
+async def test_canvas_import_reuses_the_scanned_row(coord) -> None:  # noqa: ANN001
+    """A guest merged into a row an IP scan found draws that row (homelable #388)."""
+    store = await coord._get_pending()
+    store["devices"].append(
+        {
+            "id": "pd-scan",
+            "ip": "10.0.0.100",
+            "mac": "bc:24:11:00:00:01",
+            "services": [],
+            "status": "pending",
+            "discovery_source": "arp",
+            "discovery_sources": ["arp"],
+        }
+    )
+    guest = _guest("a", 100, ip=None, mac="bc:24:11:00:00:01")
+    nodes = await coord.import_proxmox_canvas([guest], [], [])
+    assert nodes[0]["device_id"] == "pd-scan"
+    assert len(await coord.list_pending()) == 1
+
+
+async def test_canvas_import_then_save_keeps_one_row(coord) -> None:  # noqa: ANN001
+    """A stopped guest (no IP) placed on the canvas and saved links to the row the
+    import landed, instead of minting an ieee-less ``canvas`` row that the next
+    import would duplicate again."""
+    guest = _guest("a", 100, ip=None, mac=None)
+    [placed] = await coord.import_proxmox_canvas([guest], [], [])
+    device_id = placed["device_id"]
+    assert device_id
+
+    # What the panel sends back on save: a node with the stamped device_id.
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {
+                    "id": "pve-a-100",
+                    "type": "vm",
+                    "label": "vm-100",
+                    "position": {"x": 0, "y": 0},
+                    "device_id": device_id,
+                }
+            ],
+            "edges": [],
+        }
+    )
+    await coord.import_proxmox_pending([guest], [], [])
+
+    rows = (await coord._get_pending())["devices"]
+    assert [r["id"] for r in rows] == [device_id]
+    assert rows[0]["status"] == "approved"  # drawn → out of the pending queue
+
+
 async def test_approve_proxmox_guest_creates_virtual_edge(coord) -> None:  # noqa: ANN001
     nodes = [_host("a"), _guest("a", 100, ip="10.0.0.100", mac="bc:24:11:00:00:01")]
     edges = [{"source": "pve-node-a", "target": "pve-a-100"}]
@@ -526,3 +577,7 @@ async def test_ws_import_returns_inventory(hass, hass_ws_client, setup_ws) -> No
     assert msg["success"] is True
     assert msg["result"]["device_count"] == 2
     assert len(msg["result"]["nodes"]) == 2
+    # A canvas import lands in the Device Inventory too, and each node carries
+    # the row it draws (homelable #388).
+    rows = {r["data_extras"]["ieee_address"]: r["id"] for r in (await setup_ws._get_pending())["devices"]}
+    assert {n["ieee_address"]: n["device_id"] for n in msg["result"]["nodes"]} == rows

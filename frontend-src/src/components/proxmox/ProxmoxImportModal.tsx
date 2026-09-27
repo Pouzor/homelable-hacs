@@ -180,7 +180,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
-      <DialogContent className="bg-[#161b22] border-border max-w-xl max-h-[85vh] flex flex-col">
+      <DialogContent className="bg-[#161b22] border-border max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <Server size={16} style={{ color: ACCENT }} />
@@ -259,30 +259,32 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
               </div>
             )}
 
-            <div className="flex items-center gap-3 text-xs">
-              <span className="text-muted-foreground">Send devices to:</span>
-              <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
-                <input
-                  type="radio"
-                  name="proxmox-import-mode"
-                  checked={importMode === 'pending'}
-                  onChange={() => setImportMode('pending')}
-                  className="cursor-pointer"
-                  style={{ accentColor: ACCENT }}
-                />
-                Pending section
-              </label>
-              <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
-                <input
-                  type="radio"
-                  name="proxmox-import-mode"
-                  checked={importMode === 'canvas'}
-                  onChange={() => setImportMode('canvas')}
-                  className="cursor-pointer"
-                  style={{ accentColor: ACCENT }}
-                />
-                Canvas directly
-              </label>
+            <div className="space-y-2 rounded-md border border-border bg-[#0d1117]/60 px-3 py-2.5">
+              <span className="block text-xs text-muted-foreground">Send devices to</span>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+                <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
+                  <input
+                    type="radio"
+                    name="proxmox-import-mode"
+                    checked={importMode === 'pending'}
+                    onChange={() => setImportMode('pending')}
+                    className="cursor-pointer"
+                    style={{ accentColor: ACCENT }}
+                  />
+                  Device inventory only
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
+                  <input
+                    type="radio"
+                    name="proxmox-import-mode"
+                    checked={importMode === 'canvas'}
+                    onChange={() => setImportMode('canvas')}
+                    className="cursor-pointer"
+                    style={{ accentColor: ACCENT }}
+                  />
+                  Inventory + canvas
+                </label>
+              </div>
             </div>
             <div className="flex gap-2">
               <Button
@@ -305,7 +307,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 disabled={loading || connectionStatus === 'testing'}
               >
                 {loading ? <Loader2 size={13} className="animate-spin" /> : <Server size={13} />}
-                {importMode === 'pending' ? 'Import to Pending' : 'Fetch Inventory'}
+                {importMode === 'pending' ? 'Import to Inventory' : 'Fetch Guests'}
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground italic">
