@@ -507,6 +507,52 @@ describe('DetailPanel', () => {
       expect(() => render(<DetailPanel onEdit={vi.fn()} />)).not.toThrow()
     })
 
+    it('hides a service on this node without touching the service itself', () => {
+      // Visibility is the node's answer, not the device's: the rest of the
+      // service record goes back unchanged so other canvases keep drawing it.
+      const updateNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({ services: [{ port: 3001, protocol: 'tcp', service_name: 'Uptime Kuma' }] })],
+        selectedNodeId: 'n1',
+        selectedNodeIds: [],
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode,
+        snapshotHistory: vi.fn(),
+        createGroup: vi.fn(),
+        ungroup: vi.fn(),
+        setNodeSize: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+
+      fireEvent.click(screen.getByTitle('Hide on node'))
+      expect(updateNode.mock.calls[0][1].services).toEqual([
+        { port: 3001, protocol: 'tcp', service_name: 'Uptime Kuma', visible: false },
+      ])
+    })
+
+    it('shows a hidden service again', () => {
+      const updateNode = vi.fn()
+      vi.mocked(canvasStore.useCanvasStore).mockReturnValue({
+        nodes: [makeNode({
+          services: [{ port: 3001, protocol: 'tcp', service_name: 'Uptime Kuma', visible: false }],
+        })],
+        selectedNodeId: 'n1',
+        selectedNodeIds: [],
+        setSelectedNode: vi.fn(),
+        deleteNode: vi.fn(),
+        updateNode,
+        snapshotHistory: vi.fn(),
+        createGroup: vi.fn(),
+        ungroup: vi.fn(),
+        setNodeSize: vi.fn(),
+      } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
+      render(<DetailPanel onEdit={vi.fn()} />)
+
+      fireEvent.click(screen.getByTitle('Show on node'))
+      expect(updateNode.mock.calls[0][1].services[0].visible).toBe(true)
+    })
+
     it('reorders services on drag and drop', () => {
       const updateNode = vi.fn()
       vi.mocked(canvasStore.useCanvasStore).mockReturnValue({

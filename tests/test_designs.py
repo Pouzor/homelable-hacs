@@ -59,7 +59,11 @@ async def test_legacy_single_canvas_migrated_into_default_design(coord) -> None:
     assert canvas["nodes"][0]["ip"] == "192.168.1.5"
     # Its facts moved onto a Device Inventory row; the stored node only links it.
     stored = coord._canvases[designs[0]["id"]]["nodes"][0]
-    assert stored == {"id": "old-node", "device_id": stored["device_id"]}
+    assert stored == {
+        "id": "old-node",
+        "device_id": stored["device_id"],
+        "display_view": {"services": [], "properties": []},
+    }
 
 
 async def test_create_design_starts_with_empty_canvas(coord) -> None:  # noqa: ANN001

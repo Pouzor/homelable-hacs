@@ -243,6 +243,31 @@ describe('BaseNode — services visibility toggle', () => {
     expect(screen.getByText('ssh')).toBeDefined()
   })
 
+  it('leaves out a service this node hid, keeping the rest', () => {
+    // Hiding is per node: the same device on another canvas answers for itself.
+    renderBaseNode({
+      custom_colors: { show_services: true },
+      services: [
+        { service_name: 'ssh', port: 22, protocol: 'tcp' },
+        { service_name: 'Uptime Kuma', port: 3001, protocol: 'tcp', visible: false },
+      ],
+    })
+    expect(screen.getByText('ssh')).toBeDefined()
+    expect(screen.queryByText('Uptime Kuma')).toBeNull()
+  })
+
+  it('draws services in the order the node carries', () => {
+    const { container } = renderBaseNode({
+      custom_colors: { show_services: true },
+      services: [
+        { service_name: 'Uptime Kuma', port: 3001, protocol: 'tcp' },
+        { service_name: 'ssh', port: 22, protocol: 'tcp' },
+      ],
+    })
+    const text = container.textContent ?? ''
+    expect(text.indexOf('Uptime Kuma')).toBeLessThan(text.indexOf('ssh'))
+  })
+
   it('renders clickable service links for web services', () => {
     renderBaseNode({
       ip: '192.168.1.10',
