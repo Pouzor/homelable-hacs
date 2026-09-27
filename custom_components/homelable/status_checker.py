@@ -278,13 +278,20 @@ async def _http_get(url: str, verify: bool = False) -> bool:
     # and a redirect to an internal endpoint would defeat the host filter
     # we just applied. When verifying, pass a pre-built SSL context so httpx
     # doesn't load the CA bundle (blocking I/O) on the event loop.
+    #
+    # Only the status line matters here. A plain .get() buffers the whole body
+    # first, and some endpoints stream without end (bandwidth-test endpoints,
+    # MJPEG cameras, log tails) — enough to exhaust Home Assistant's memory.
+    # timeout=5 does not save us: httpx applies it per network operation, not
+    # to the total time spent draining a socket that keeps delivering data.
+    # stream() closes the connection on exit without draining it.
     verify_arg: bool | ssl.SSLContext = verify
     if verify:
         verify_arg = await _verifying_ssl_context()
-    async with httpx.AsyncClient(
-        verify=verify_arg, timeout=5, follow_redirects=False
-    ) as client:
-        resp = await client.get(url)
+    async with (
+        httpx.AsyncClient(verify=verify_arg, timeout=5, follow_redirects=False) as client,
+        client.stream("GET", url) as resp,
+    ):
         # Treat 2xx/3xx/4xx as "the host is up"; 5xx as offline.
         return resp.status_code < 500
 
