@@ -475,7 +475,7 @@ describe('DetailPanel', () => {
         ungroup: vi.fn(),
       } as unknown as ReturnType<typeof canvasStore.useCanvasStore>)
       render(<DetailPanel onEdit={vi.fn()} />)
-      expect(screen.getByRole('link', { name: 'blog' }).getAttribute('href')).toBe('https://blog.example.com:443')
+      expect(screen.getByRole('link', { name: 'blog' }).getAttribute('href')).toBe('https://blog.example.com')
     })
 
     it('calls updateNode without the removed service when X is clicked', () => {
