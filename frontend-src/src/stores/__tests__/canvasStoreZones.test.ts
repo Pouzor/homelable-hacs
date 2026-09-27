@@ -331,3 +331,256 @@ describe('canvasStore — importZoneSubnet', () => {
     expect(nodes.find((n) => n.id === 'n2')!.parentId).toBeUndefined()
   })
 })
+
+const resetStore = () => {
+  useCanvasStore.setState({
+    nodes: [],
+    edges: [],
+    hasUnsavedChanges: false,
+    selectedNodeId: null,
+    selectedNodeIds: [],
+    past: [],
+    future: [],
+  })
+}
+
+describe('canvasStore — batch parenting', () => {
+  beforeEach(resetStore)
+
+  it('addNodesToZone moves the whole selection, not just the first node', () => {
+    useCanvasStore.setState({
+      nodes: [
+        zone('z1'),
+        { ...makeNode('n1'), position: { x: 160, y: 220 } },
+        { ...makeNode('n2'), position: { x: 200, y: 260 } },
+        { ...makeNode('n3'), position: { x: 240, y: 300 } },
+      ],
+    })
+    useCanvasStore.getState().addNodesToZone('z1', ['n1', 'n2', 'n3'])
+
+    const nodes = useCanvasStore.getState().nodes
+    for (const id of ['n1', 'n2', 'n3']) {
+      const child = nodes.find((n) => n.id === id)!
+      expect(child.parentId).toBe('z1')
+      expect(child.data.parent_id).toBe('z1')
+      expect(child.extent).toBeUndefined()
+    }
+    expect(nodes.find((n) => n.id === 'n1')!.position).toEqual({ x: 60, y: 120 })
+    expect(nodes.find((n) => n.id === 'n3')!.position).toEqual({ x: 140, y: 200 })
+  })
+
+  it('undoes a batch add in a single step', () => {
+    useCanvasStore.setState({
+      nodes: [zone('z1'), makeNode('n1'), makeNode('n2')],
+    })
+    useCanvasStore.getState().addNodesToZone('z1', ['n1', 'n2'])
+    useCanvasStore.getState().undo()
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBeUndefined()
+    expect(nodes.find((n) => n.id === 'n2')!.parentId).toBeUndefined()
+  })
+
+  it('skips a child whose own parent is in the same batch', () => {
+    useCanvasStore.setState({
+      nodes: [
+        zone('z1'),
+        { ...makeNode('host'), position: { x: 500, y: 500 } },
+        {
+          ...makeNode('vm'),
+          position: { x: 20, y: 20 },
+          parentId: 'host',
+          data: { ...makeNode('vm').data, parent_id: 'host' },
+        },
+      ],
+    })
+    useCanvasStore.getState().addNodesToZone('z1', ['host', 'vm'])
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'host')!.parentId).toBe('z1')
+    // The VM rides along with its host; re-parenting it would tear it out.
+    expect(nodes.find((n) => n.id === 'vm')!.parentId).toBe('host')
+    expect(nodes.find((n) => n.id === 'vm')!.position).toEqual({ x: 20, y: 20 })
+  })
+
+  it('refuses a node the zone itself descends from', () => {
+    useCanvasStore.setState({
+      nodes: [
+        makeNode('outer'),
+        {
+          ...zone('z1'),
+          parentId: 'outer',
+          data: { ...zone('z1').data, parent_id: 'outer' },
+        },
+        makeNode('n1'),
+      ],
+    })
+    useCanvasStore.getState().addNodesToZone('z1', ['outer', 'n1'])
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'outer')!.parentId).toBeUndefined()
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBe('z1')
+  })
+
+  it('is a no-op when nothing in the batch is eligible', () => {
+    useCanvasStore.setState({ nodes: [zone('z1'), makeNode('n1')] })
+    useCanvasStore.getState().addToZone('z1', 'n1')
+    const before = useCanvasStore.getState().nodes
+    useCanvasStore.getState().addNodesToZone('z1', ['n1', 'z1'])
+    expect(useCanvasStore.getState().nodes).toBe(before)
+  })
+
+  it('addNodesToGroup clamps every child inside the group', () => {
+    useCanvasStore.setState({
+      nodes: [
+        { ...makeNode('g1', { type: 'group' }), type: 'group', position: { x: 100, y: 100 } },
+        { ...makeNode('n1'), position: { x: 160, y: 220 } },
+        { ...makeNode('n2'), position: { x: 100, y: 100 } },
+      ],
+    })
+    useCanvasStore.getState().addNodesToGroup('g1', ['n1', 'n2'])
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.extent).toBe('parent')
+    expect(nodes.find((n) => n.id === 'n1')!.position).toEqual({ x: 60, y: 120 })
+    // Dropped on the group's own corner: clamped to the 8px inset.
+    expect(nodes.find((n) => n.id === 'n2')!.position).toEqual({ x: 8, y: 8 })
+  })
+
+  it('removeNodesFromGroup detaches the whole selection in one undo step', () => {
+    useCanvasStore.setState({
+      nodes: [
+        zone('z1'),
+        { ...makeNode('n1'), parentId: 'z1', position: { x: 20, y: 20 }, data: { ...makeNode('n1').data, parent_id: 'z1' } },
+        { ...makeNode('n2'), parentId: 'z1', position: { x: 40, y: 40 }, data: { ...makeNode('n2').data, parent_id: 'z1' } },
+      ],
+    })
+    useCanvasStore.getState().removeNodesFromGroup('z1', ['n1', 'n2'])
+
+    let nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBeUndefined()
+    expect(nodes.find((n) => n.id === 'n1')!.position).toEqual({ x: 120, y: 120 })
+    expect(nodes.find((n) => n.id === 'n2')!.position).toEqual({ x: 140, y: 140 })
+
+    useCanvasStore.getState().undo()
+    nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBe('z1')
+    expect(nodes.find((n) => n.id === 'n2')!.parentId).toBe('z1')
+  })
+
+  it('removeNodesFromGroup ignores nodes that are not in that group', () => {
+    useCanvasStore.setState({
+      nodes: [
+        zone('z1'),
+        { ...makeNode('n1'), parentId: 'z1', position: { x: 20, y: 20 }, data: { ...makeNode('n1').data, parent_id: 'z1' } },
+        makeNode('free'),
+      ],
+    })
+    useCanvasStore.getState().removeNodesFromGroup('z1', ['n1', 'free', 'ghost'])
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBeUndefined()
+    expect(nodes.find((n) => n.id === 'free')!.position).toEqual(makeNode('free').position)
+  })
+
+  it('removeNodesFromGroup is a no-op when nothing in the batch is attached', () => {
+    useCanvasStore.setState({ nodes: [zone('z1'), makeNode('n1')] })
+    const before = useCanvasStore.getState().nodes
+    useCanvasStore.getState().removeNodesFromGroup('z1', ['n1'])
+    expect(useCanvasStore.getState().nodes).toBe(before)
+  })
+
+  it('addNodesToContainer parents every child of a container-mode node', () => {
+    useCanvasStore.setState({
+      nodes: [
+        {
+          ...makeNode('px1', { type: 'proxmox', container_mode: true }),
+          position: { x: 100, y: 100 },
+        },
+        { ...makeNode('n1'), position: { x: 160, y: 220 } },
+        { ...makeNode('n2'), position: { x: 180, y: 240 } },
+      ],
+    })
+    useCanvasStore.getState().addNodesToContainer('px1', ['n1', 'n2'])
+
+    const nodes = useCanvasStore.getState().nodes
+    expect(nodes.find((n) => n.id === 'n1')!.parentId).toBe('px1')
+    expect(nodes.find((n) => n.id === 'n2')!.parentId).toBe('px1')
+    expect(nodes.find((n) => n.id === 'n2')!.extent).toBe('parent')
+  })
+})
+
+describe('canvasStore — nesting order with a container inside a zone', () => {
+  beforeEach(resetStore)
+
+  // A zone can hold a container, so the tree is two levels deep. React Flow
+  // needs every parent to precede its children in the array; when it doesn't,
+  // it drops the child's parent binding — the child loses its extent clamp and
+  // drags anywhere on the canvas.
+  const container = (id: string, parentId?: string): Node<NodeData> => ({
+    ...makeNode(id, { type: 'proxmox', container_mode: true, ...(parentId ? { parent_id: parentId } : {}) }),
+    position: { x: 50, y: 50 },
+    width: 300,
+    height: 200,
+    ...(parentId ? { parentId } : {}),
+  })
+  const nested = (id: string, parentId: string): Node<NodeData> => ({
+    ...makeNode(id, { type: 'vm', parent_id: parentId }),
+    position: { x: 20, y: 30 },
+    parentId,
+    extent: 'parent' as const,
+  })
+  const order = () => useCanvasStore.getState().nodes.map((n) => n.id)
+
+  it('addNodesToZone keeps the container ahead of its own children', () => {
+    useCanvasStore.setState({ nodes: [zone('z1'), container('px'), nested('vm1', 'px')] })
+    useCanvasStore.getState().addNodesToZone('z1', ['px'])
+
+    const ids = order()
+    expect(ids.indexOf('z1')).toBeLessThan(ids.indexOf('px'))
+    expect(ids.indexOf('px')).toBeLessThan(ids.indexOf('vm1'))
+    // The nested child rides along untouched: still clamped inside its container.
+    const vm = useCanvasStore.getState().nodes.find((n) => n.id === 'vm1')!
+    expect(vm.parentId).toBe('px')
+    expect(vm.extent).toBe('parent')
+  })
+
+  it('loadCanvas reorders a container ahead of its child, not just the parentless nodes', () => {
+    // Stored order: the nested child was created before the container it now
+    // sits in, so both land in the "has a parent" bucket child-first.
+    useCanvasStore.getState().loadCanvas([nested('vm1', 'px'), container('px', 'z1'), zone('z1')], [])
+
+    const ids = order()
+    expect(ids.indexOf('z1')).toBeLessThan(ids.indexOf('px'))
+    expect(ids.indexOf('px')).toBeLessThan(ids.indexOf('vm1'))
+  })
+
+  it('updateNode re-parenting keeps a nested container ahead of its child', () => {
+    useCanvasStore.setState({ nodes: [nested('vm1', 'px'), container('px'), zone('z1')] })
+    useCanvasStore.getState().updateNode('px', { parent_id: 'z1' })
+
+    const ids = order()
+    expect(ids.indexOf('z1')).toBeLessThan(ids.indexOf('px'))
+    expect(ids.indexOf('px')).toBeLessThan(ids.indexOf('vm1'))
+    const vm = useCanvasStore.getState().nodes.find((n) => n.id === 'vm1')!
+    expect(vm.extent).toBe('parent')
+  })
+
+  it('setProxmoxContainerMode keeps a zoned host ahead of the children it adopts', () => {
+    // The VM predates its host in the array and is not nested yet; enabling
+    // container mode nests it, while the host itself already sits in a zone.
+    useCanvasStore.setState({
+      nodes: [
+        { ...makeNode('vm1', { type: 'vm', parent_id: 'px' }), position: { x: 200, y: 200 } },
+        { ...container('px', 'z1'), data: { ...container('px', 'z1').data, container_mode: false } },
+        zone('z1'),
+      ],
+    })
+    useCanvasStore.getState().setProxmoxContainerMode('px', true)
+
+    const ids = order()
+    expect(ids.indexOf('z1')).toBeLessThan(ids.indexOf('px'))
+    expect(ids.indexOf('px')).toBeLessThan(ids.indexOf('vm1'))
+    expect(useCanvasStore.getState().nodes.find((n) => n.id === 'vm1')!.parentId).toBe('px')
+  })
+})
