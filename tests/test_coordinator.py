@@ -1,4 +1,5 @@
 """Tests for the HomelableCoordinator."""
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from custom_components.homelable.const import (
     LAST_SEEN_SAVE_DELAY,
     MIN_SCAN_INTERVAL,
     STATUS_CHECK_CONCURRENCY,
+    STORAGE_KEY_RUNS,
 )
 from custom_components.homelable.coordinator import (
     HomelableCoordinator,
@@ -1587,3 +1589,84 @@ async def test_last_seen_keeps_advancing_across_intervals(coord) -> None:  # noq
     writes, moved_again = await _poll_at(base + timedelta(seconds=800))
     assert writes == 1
     assert moved_again > moved
+
+
+# ─── Orphan scan runs (port of homelable #377) ───────────────────────────────
+
+
+def _seed_runs(hass_storage, runs: list[dict]) -> None:  # noqa: ANN001
+    hass_storage[STORAGE_KEY_RUNS] = {"version": 1, "key": STORAGE_KEY_RUNS, "data": runs}
+
+
+def _run(run_id: str, status: str, **extra) -> dict:  # noqa: ANN003
+    return {
+        "id": run_id,
+        "status": status,
+        "ranges": ["192.168.1.0/24"],
+        "devices_found": 0,
+        "started_at": "2026-09-01T10:00:00+00:00",
+        "finished_at": None,
+        "error": None,
+        **extra,
+    }
+
+
+@pytest.mark.asyncio
+async def test_orphan_running_run_is_marked_error_on_load(coord, hass_storage) -> None:  # noqa: ANN001
+    """A run a previous HA left `running` is closed out the first time we read."""
+    _seed_runs(hass_storage, [_run("r1", "running", devices_found=7)])
+
+    runs = await coord.list_runs()
+
+    assert len(runs) == 1
+    assert runs[0]["status"] == "error"
+    assert runs[0]["finished_at"] is not None
+    assert "restarted" in runs[0]["error"]
+    # Everything else about the run survives.
+    assert runs[0]["devices_found"] == 7
+    assert runs[0]["started_at"] == "2026-09-01T10:00:00+00:00"
+    # And the fix is persisted, not just patched in memory.
+    await coord.hass.async_block_till_done()
+    assert hass_storage[STORAGE_KEY_RUNS]["data"][0]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_orphan_reconcile_leaves_finished_runs_alone(coord, hass_storage) -> None:  # noqa: ANN001
+    done = _run("d", "done", finished_at="2026-09-01T10:05:00+00:00")
+    cancelled = _run("c", "cancelled", finished_at="2026-09-01T10:06:00+00:00")
+    errored = _run("e", "error", finished_at="2026-09-01T10:07:00+00:00", error="boom")
+    _seed_runs(hass_storage, [done, cancelled, errored, _run("r", "running")])
+
+    runs = {r["id"]: r for r in await coord.list_runs()}
+
+    assert runs["d"] == done
+    assert runs["c"] == cancelled
+    assert runs["e"] == errored  # its own error message is kept
+    assert runs["r"]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_orphan_reconcile_counts_and_handles_empty_store(coord, hass_storage) -> None:  # noqa: ANN001
+    assert await coord._reconcile_orphan_runs([]) == 0
+
+    runs = [_run("a", "running"), _run("b", "done"), _run("c", "running")]
+    assert await coord._reconcile_orphan_runs(runs) == 2
+    assert [r["status"] for r in runs] == ["error", "done", "error"]
+
+
+@pytest.mark.asyncio
+async def test_orphan_reconcile_does_not_touch_a_run_started_in_this_process(
+    coord, hass_storage  # noqa: ANN001
+) -> None:
+    """The new run is recorded after the one-time reconcile, so it stays live."""
+    _seed_runs(hass_storage, [_run("old", "running")])
+
+    async def _never_finishes(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        await asyncio.sleep(3600)
+
+    with patch.object(coord, "_run_scan_task", _never_finishes):
+        started = await coord.trigger_scan()
+        runs = {r["id"]: r for r in await coord.list_runs()}
+
+    assert runs["old"]["status"] == "error"
+    assert runs[started["run_id"]]["status"] == "running"

@@ -1932,7 +1932,40 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if self._runs is None:
             stored = await self.runs_store.async_load()
             self._runs = list(stored) if isinstance(stored, list) else []
+            await self._reconcile_orphan_runs(self._runs)
         return self._runs
+
+    async def _reconcile_orphan_runs(self, runs: list[dict[str, Any]]) -> int:
+        """Mark every run the Store still flags ``running`` as errored.
+
+        Runs are background tasks of this process, and the Store is read once
+        per process before any run of ours is recorded — so nothing can
+        legitimately be ``running`` yet. Such a row belongs to a previous
+        Home Assistant that stopped mid-scan: the task was cancelled before it
+        could write its final status. Left alone it stays ``running`` for good,
+        and Scan History keeps polling and ticking its clock for it.
+
+        Returns the number of runs reconciled.
+        """
+        now = _utc_now_iso()
+        orphans = 0
+        for i, run in enumerate(runs):
+            if not isinstance(run, dict) or run.get("status") != "running":
+                continue
+            runs[i] = {
+                **run,
+                "status": "error",
+                "finished_at": now,
+                "error": "Interrupted: Home Assistant restarted while this scan was running",
+            }
+            orphans += 1
+        if orphans:
+            await self.runs_store.async_save(runs)
+            _LOGGER.warning(
+                "Reconciled %d scan run(s) left running by a previous Home Assistant",
+                orphans,
+            )
+        return orphans
 
     async def list_runs(self) -> list[dict[str, Any]]:
         # Newest-first for the UI.
