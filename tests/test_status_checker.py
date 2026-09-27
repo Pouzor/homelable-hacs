@@ -1,6 +1,7 @@
 """Tests for the status_checker module."""
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from custom_components.homelable import status_checker
@@ -342,6 +343,19 @@ async def test_verifying_ssl_context_built_in_thread_and_cached() -> None:
     to_thread.assert_awaited_once()  # only the first call builds it
 
 
+class _FakeStream:
+    """Async context manager standing in for httpx.AsyncClient.stream()."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
 @pytest.mark.asyncio
 async def test_http_get_verify_passes_ssl_context_not_true() -> None:
     """_http_get(verify=True) must hand httpx a pre-built SSLContext, so httpx
@@ -360,8 +374,8 @@ async def test_http_get_verify_passes_ssl_context_not_true() -> None:
         async def __aexit__(self, *exc):
             return False
 
-        async def get(self, url):
-            return type("R", (), {"status_code": 200})()
+        def stream(self, method, url):
+            return _FakeStream(200)
 
     with patch.object(status_checker.httpx, "AsyncClient", _FakeClient):
         assert await status_checker._http_get("https://example.com", verify=True)
@@ -385,13 +399,58 @@ async def test_http_get_no_verify_stays_false() -> None:
         async def __aexit__(self, *exc):
             return False
 
-        async def get(self, url):
-            return type("R", (), {"status_code": 204})()
+        def stream(self, method, url):
+            return _FakeStream(204)
 
     with patch.object(status_checker.httpx, "AsyncClient", _FakeClient):
         assert await status_checker._http_get("http://example.com", verify=False)
 
     assert captured["verify"] is False
+
+
+# --- Regression: an endless response body must not be buffered (standalone #375) ---
+
+_CHUNK = b"\0" * 65536
+
+
+def _endless_body(counter: dict):
+    """
+    A body that never ends and declares no Content-Length (a Freebox
+    bandwidth-test port, an MJPEG camera). Bounded at 512 chunks (32 MiB) so a
+    regression fails the test instead of hanging the suite forever.
+    """
+
+    async def gen():
+        for _ in range(512):
+            counter["chunks"] += 1
+            yield _CHUNK
+
+    return gen()
+
+
+@pytest.mark.asyncio
+async def test_http_get_does_not_read_the_body() -> None:
+    # _http_get only needs the status line. Buffering the body of an endless
+    # stream grows memory without bound, so assert not one chunk is pulled.
+    counter = {"chunks": 0}
+    real_client = httpx.AsyncClient
+
+    def factory(**kwargs):
+        kwargs.pop("verify", None)
+        return real_client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    headers={"Content-Type": "application/octet-stream"},
+                    content=_endless_body(counter),
+                )
+            ),
+            **kwargs,
+        )
+
+    with patch.object(status_checker.httpx, "AsyncClient", factory):
+        assert await status_checker._http_get("http://192.168.1.254:8095/") is True
+    assert counter["chunks"] == 0
 
 
 @pytest.mark.asyncio
