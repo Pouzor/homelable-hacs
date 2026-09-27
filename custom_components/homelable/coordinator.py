@@ -2450,7 +2450,13 @@ class HomelableCoordinator(DataUpdateCoordinator):
         row = next((d for d in pending["devices"] if d.get("id") == device_id), None)
         found = result["device"]
         if row is not None and not result["cancelled"]:
-            known = {p.get("port"): p for p in row.get("open_ports") or []}
+            # An entry without a port number can't be ordered or deduped; skip
+            # it rather than let sorted() crash the task and strand the run.
+            known = {
+                p["port"]: p
+                for p in row.get("open_ports") or []
+                if isinstance(p, dict) and isinstance(p.get("port"), int)
+            }
             known.update({p["port"]: p for p in found["open_ports"]})
             row["open_ports"] = [known[p] for p in sorted(known)]
             # A rescan unions services: it adds what it found and refreshes the

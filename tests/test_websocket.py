@@ -479,6 +479,22 @@ async def test_rescan_deep_scans_one_device_and_unions_its_services(
     assert run["error"] is None
 
 
+async def test_rescan_skips_a_stored_open_port_without_a_number(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    """A malformed stored entry must not crash the merge and strand the run."""
+    row = await _seed_device(setup_ws, open_ports=[{"protocol": "tcp"}, {"port": 443, "protocol": "tcp"}])
+    fake = AsyncMock(return_value=_device_scan_result([22]))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+        run_id = (await client.receive_json())["result"]["run_id"]
+        await hass.async_block_till_done()
+
+    assert [p["port"] for p in row["open_ports"]] == [22, 443]
+    assert (await setup_ws.get_run(run_id))["status"] == "done"
+
+
 async def test_rescan_passes_the_requested_port_range(
     hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
 ) -> None:
