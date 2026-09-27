@@ -928,8 +928,9 @@ async def ws_proxmox_test_connection(
 async def ws_proxmox_import(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Fetch the inventory and return nodes + edges + cluster pairs for a direct
-    canvas drop (the panel injects them client-side)."""
+    """Fetch the inventory, land it in the Device Inventory, and return nodes +
+    edges + cluster pairs for a direct canvas drop (the panel injects them
+    client-side). Each node carries the ``device_id`` of the row it draws."""
     coord = _coordinator(hass)
     if coord is None:
         _send_not_setup(connection, msg["id"])
@@ -955,6 +956,7 @@ async def ws_proxmox_import(
         connection.send_error(msg["id"], "bad_response", str(exc))
         return
     cluster_pairs = proxmox.build_proxmox_cluster_links(nodes)
+    nodes = await coord.import_proxmox_canvas(nodes, edges, cluster_pairs)
     connection.send_result(
         msg["id"],
         {

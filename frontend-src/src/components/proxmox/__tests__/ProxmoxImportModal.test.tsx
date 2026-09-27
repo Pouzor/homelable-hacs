@@ -92,7 +92,7 @@ describe('ProxmoxImportModal', () => {
     } as never)
     render(<ProxmoxImportModal {...defaultProps} />)
     fireEvent.change(screen.getByPlaceholderText('192.168.1.x or pve.local'), { target: { value: 'pve' } })
-    fireEvent.click(screen.getByRole('button', { name: /import to pending/i }))
+    fireEvent.click(screen.getByRole('button', { name: /import to inventory/i }))
     await waitFor(() => expect(proxmoxApi.importToPending).toHaveBeenCalled())
     expect(defaultProps.onPendingImported).toHaveBeenCalled()
     expect(proxmoxApi.importNetwork).not.toHaveBeenCalled()
@@ -109,14 +109,30 @@ describe('ProxmoxImportModal', () => {
       },
     } as never)
     render(<ProxmoxImportModal {...defaultProps} />)
-    fireEvent.click(screen.getByRole('radio', { name: /canvas directly/i }))
+    fireEvent.click(screen.getByRole('radio', { name: /inventory \+ canvas/i }))
     fireEvent.change(screen.getByPlaceholderText('192.168.1.x or pve.local'), { target: { value: 'pve' } })
-    fireEvent.click(screen.getByRole('button', { name: /fetch inventory/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fetch guests/i }))
     await waitFor(() => {
       expect(screen.getByText('pve1')).toBeDefined()
       expect(screen.getByText('web')).toBeDefined()
     })
     expect(toast.success).toHaveBeenCalledWith('Found 2 devices')
+  })
+
+  it('forwards the inventory row each node draws to onAddToCanvas', async () => {
+    // The canvas import already landed the guests in the Device Inventory; the
+    // node must carry that row's id so the save links to it (homelable #388).
+    const stamped = sampleNodes.map((n, i) => ({ ...n, device_id: `dev-${i}` }))
+    vi.mocked(proxmoxApi.importNetwork).mockResolvedValue({
+      data: { nodes: stamped, edges: [], cluster_pairs: [], device_count: 2, advisory: null },
+    } as never)
+    render(<ProxmoxImportModal {...defaultProps} />)
+    fireEvent.click(screen.getByRole('radio', { name: /inventory \+ canvas/i }))
+    fireEvent.change(screen.getByPlaceholderText('192.168.1.x or pve.local'), { target: { value: 'pve' } })
+    fireEvent.click(screen.getByRole('button', { name: /fetch guests/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /add 2 to canvas/i }))
+    const [nodes] = defaultProps.onAddToCanvas.mock.calls[0]
+    expect(nodes.map((n: { device_id?: string | null }) => n.device_id)).toEqual(['dev-0', 'dev-1'])
   })
 
   it('warns when the import returns a non-fatal advisory', async () => {
@@ -130,9 +146,9 @@ describe('ProxmoxImportModal', () => {
       },
     } as never)
     render(<ProxmoxImportModal {...defaultProps} />)
-    fireEvent.click(screen.getByRole('radio', { name: /canvas directly/i }))
+    fireEvent.click(screen.getByRole('radio', { name: /inventory \+ canvas/i }))
     fireEvent.change(screen.getByPlaceholderText('192.168.1.x or pve.local'), { target: { value: 'pve' } })
-    fireEvent.click(screen.getByRole('button', { name: /fetch inventory/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fetch guests/i }))
     await waitFor(() =>
       expect(toast.warning).toHaveBeenCalledWith(
         expect.stringContaining('no VMs or LXC were visible'),
@@ -145,10 +161,10 @@ describe('ProxmoxImportModal', () => {
       data: { nodes: [], edges: [], cluster_pairs: [], device_count: 0, advisory: null },
     } as never)
     render(<ProxmoxImportModal {...defaultProps} />)
-    fireEvent.click(screen.getByRole('radio', { name: /canvas directly/i }))
+    fireEvent.click(screen.getByRole('radio', { name: /inventory \+ canvas/i }))
     fireEvent.change(screen.getByPlaceholderText('192.168.1.x or pve.local'), { target: { value: 'pve' } })
     fireEvent.change(screen.getByPlaceholderText('user@pam!tokenname'), { target: { value: 'root@pam!hl' } })
-    fireEvent.click(screen.getByRole('button', { name: /fetch inventory/i }))
+    fireEvent.click(screen.getByRole('button', { name: /fetch guests/i }))
     await waitFor(() => expect(proxmoxApi.importNetwork).toHaveBeenCalled())
     const payload = vi.mocked(proxmoxApi.importNetwork).mock.calls[0][0]
     expect(payload.token_id).toBe('root@pam!hl')

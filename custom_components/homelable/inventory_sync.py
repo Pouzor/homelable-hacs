@@ -732,11 +732,41 @@ def link_facts(
     # it must not make a save that only moved a node read as a device edit.
     changed = device != before
     device["discovery_sources"] = _add_source(device.get("discovery_sources"), CANVAS_SOURCE)
+    # A row a node draws is past the pending queue — the mirror of the
+    # "approved but no longer drawn -> pending" revival the imports do. A hidden
+    # row stays hidden: the user hid it on purpose. Lifecycle, not a fact, so it
+    # is not counted in ``changed``.
+    if device.get("status") == "pending":
+        device["status"] = "approved"
     node["device_id"] = device["id"]
     _record_view(node, facts, device, strict=strict_view)
     if changed:
         device["updated_at"] = now
     return device, changed
+
+
+def attach_device_ids(
+    devices: list[dict[str, Any]], nodes: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Stamp each imported node with the inventory row that already owns it.
+
+    A canvas-direct import upserts the inventory first, so the node dropped on
+    the canvas can point straight at that row instead of minting a second one
+    on the next save. Matching goes through :func:`find_device_for`, so a
+    Proxmox guest merged into a scanned row by ip/mac resolves too.
+
+    Returns new dicts — the caller's nodes are left untouched.
+    """
+    stamped: list[dict[str, Any]] = []
+    for node in nodes:
+        device = find_device_for(
+            devices,
+            ip=node.get("ip"),
+            mac=node.get("mac"),
+            ieee=node.get("ieee_address"),
+        )
+        stamped.append({**node, "device_id": device["id"]} if device else dict(node))
+    return stamped
 
 
 def _record_view(

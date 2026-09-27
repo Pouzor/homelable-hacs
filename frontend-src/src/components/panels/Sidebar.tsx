@@ -101,6 +101,9 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
           type: pn.type as NodeData['type'],
           status: (pn.status === 'online' ? 'online' : 'unknown') as NodeData['status'],
           services: [],
+          // The import already upserted the Device Inventory row; carry its id so
+          // the canvas save links to that row instead of minting a second one.
+          ...(pn.device_id ? { device_id: pn.device_id } : {}),
           ...(pn.ip ? { ip: pn.ip } : {}),
           ...(pn.hostname ? { hostname: pn.hostname } : {}),
           ...(isClusterHost ? { left_handles: 1, right_handles: 1 } : {}),
