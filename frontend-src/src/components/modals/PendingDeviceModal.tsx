@@ -14,7 +14,7 @@
  * badges, then three columns — identity / operations / curation — so a device
  * reads in one screen instead of a scrolling column of key-value pairs.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Check,
   Copy,
@@ -23,9 +23,11 @@ import {
   HeartPulse,
   History,
   Layers,
+  Loader2,
   Network,
   Pencil,
   Plus,
+  Radar,
   StickyNote,
   Tags,
   X,
@@ -40,6 +42,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PropertyList } from '@/components/common/PropertyList'
 import { ServiceModal } from './ServiceModal'
+import { DeepScanModal } from './DeepScanModal'
 import { scanApi } from '@/api/ha'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -49,6 +52,7 @@ import { NODE_TYPE_DEFAULT_ICONS } from '@/utils/nodeIcons'
 import { isRackDevice, orderedSources, sourceBuckets, SOURCE_META } from '@/utils/pendingSources'
 import { DEVICE_TYPE_GROUPS } from '@/utils/nodeTypeGroups'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
+import { countPorts } from '@/utils/portSpec'
 import { serviceToForm, type ServiceFormData, type ServiceSubmitData } from '@/utils/serviceForm'
 import { NODE_TYPE_LABELS, type CheckMethod, type PendingDevice, type NodeProperty, type NodeType, type ServiceInfo } from '@/types'
 import modalStyles from './modal-interactive.module.css'
@@ -267,7 +271,67 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
   const [services, setServices] = useState<ServiceInfo[]>(device?.services ?? [])
   const [svcModal, setSvcModal] = useState<{ index: number | null; form?: ServiceFormData } | null>(null)
   const [saving, setSaving] = useState(false)
+  // The id of the deep scan this modal started, while it is still running.
+  const [rescanRunId, setRescanRunId] = useState<string | null>(null)
+  const [rescanStarting, setRescanStarting] = useState(false)
+  // The port-range dialog, opened by the Deep scan link.
+  const [deepScanOpen, setDeepScanOpen] = useState(false)
   const activeTheme = useThemeStore((s) => s.activeTheme)
+  // Kept in refs so the poll effect below doesn't restart — and lose its
+  // timer — every time the parent re-renders with a new callback identity.
+  const onSavedRef = useRef(onSaved)
+  const editingRef = useRef(editing)
+  useEffect(() => {
+    onSavedRef.current = onSaved
+    editingRef.current = editing
+  })
+  const deviceId = device?.id ?? null
+
+  // Wait on a running deep scan. A full 65535-port sweep takes minutes, so the
+  // run is polled rather than awaited — the user can close the modal, and the
+  // scan keeps going and still shows under Scan History.
+  useEffect(() => {
+    if (!rescanRunId || !deviceId) return
+    let stopped = false
+    const timer = window.setInterval(async () => {
+      try {
+        const { data: run } = await scanApi.run(rescanRunId)
+        if (stopped || run.status === 'running') return
+        setRescanRunId(null)
+        if (run.status === 'error') {
+          toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
+          return
+        }
+        if (run.status === 'cancelled') {
+          toast.info('Scan stopped')
+          return
+        }
+        const { data: rows } = await scanApi.pending()
+        const fresh = (rows as PendingDevice[]).find((d) => d.id === deviceId)
+        if (!fresh || stopped) return
+        // Never clobber an edit in progress — the user's unsaved services win.
+        if (!editingRef.current) setServices(fresh.services ?? [])
+        useCanvasStore.getState().applyDeviceFacts(fresh.id, deviceFactsToNodeData(fresh))
+        useCanvasStore.getState().notifyScanDeviceFound()
+        onSavedRef.current?.(fresh)
+        const n = fresh.services?.length ?? 0
+        const summary = `${n} service${n !== 1 ? 's' : ''}`
+        // A done run can still carry an advisory: the sweep ran out of budget
+        // before every port range. Saying "done" flat would read as complete.
+        if (run.error) {
+          toast.warning(`Scan partial — ${summary}. ${run.error}`)
+        } else {
+          toast.success(`Scan done — ${summary}`)
+        }
+      } catch {
+        // Transient failure: keep polling, the run is still on the server.
+      }
+    }, 3000)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [rescanRunId, deviceId])
 
   if (!device) return null
 
@@ -294,6 +358,33 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
     setForm(toForm(device))
     setProperties(device.properties ?? [])
     setServices(device.services ?? [])
+  }
+
+  const handleRescan = async (ports: string) => {
+    if (!device.ip || rescanRunId || rescanStarting) return
+    setRescanStarting(true)
+    try {
+      const res = await scanApi.rescanDevice(device.id, { ports })
+      if (res.data.status === 'already_running') {
+        toast.error('A scan is already running — wait for it or stop it first')
+        return
+      }
+      setRescanRunId(res.data.run_id)
+      toast.info(`Deep scan started — ${countPorts(ports).toLocaleString('en-US')} ports, this takes a few minutes`)
+    } catch (err) {
+      toast.error((err as { message?: string } | null)?.message ?? 'Could not start the scan')
+    } finally {
+      setRescanStarting(false)
+    }
+  }
+
+  const handleStopRescan = async () => {
+    if (!rescanRunId) return
+    try {
+      await scanApi.stop()
+    } catch {
+      toast.error('Could not stop the scan')
+    }
   }
 
   const handleSubmitService = (data: ServiceSubmitData) => {
@@ -600,7 +691,36 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 </Section>
 
                 {!isMesh && (
-                  <Section title={`Services found (${device.services.length})`} icon={Network}>
+                  <Section
+                    title={`Services found (${device.services.length})`}
+                    icon={Network}
+                    action={
+                      // Deep scan: the fix for a device added before the
+                      // scanner knew its services, or one listening on a port
+                      // no curated list covers (homelable #350). Needs an IP.
+                      device.ip ? (
+                        rescanRunId ? (
+                          <button
+                            onClick={handleStopRescan}
+                            data-testid="device-rescan-stop"
+                            className="flex items-center gap-1 text-[10px] text-[#f85149] hover:text-[#f85149]/80 transition-colors cursor-pointer"
+                          >
+                            <Loader2 size={10} className="animate-spin" /> Scanning — stop
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setDeepScanOpen(true)}
+                            disabled={rescanStarting}
+                            data-testid="device-rescan"
+                            title="Pick a port range and refresh the services"
+                            className="flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Radar size={10} /> Deep scan
+                          </button>
+                        )
+                      ) : undefined
+                    }
+                  >
                     {device.services.length === 0 ? (
                       <Empty>No services detected</Empty>
                     ) : (
@@ -749,6 +869,15 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
             </div>
           )}
         </div>
+
+        {deepScanOpen && (
+          <DeepScanModal
+            open
+            target={device.ip}
+            onClose={() => setDeepScanOpen(false)}
+            onStart={handleRescan}
+          />
+        )}
 
         {svcModal && (
           <ServiceModal

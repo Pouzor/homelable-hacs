@@ -72,6 +72,23 @@ def test_discovered_services_refresh_a_renamed_entry_instead_of_duplicating() ->
     ]
 
 
+def test_a_blank_icon_on_a_user_edit_does_not_clear_an_established_one() -> None:
+    """homelable #363: an absent field is silence, not a reset."""
+    base = [{"port": 80, "protocol": "tcp", "service_name": "web", "icon": "nginx", "category": "web"}]
+    edit = [{"port": 80, "protocol": "tcp", "service_name": "web", "icon": None, "path": "/admin"}]
+    out = sync.merge_services(base, edit)
+    assert out == [
+        {"port": 80, "protocol": "tcp", "service_name": "web", "icon": "nginx",
+         "category": "web", "path": "/admin"},
+    ]
+
+
+def test_a_user_edit_still_changes_the_icon() -> None:
+    base = [{"port": 80, "protocol": "tcp", "service_name": "web", "icon": "nginx"}]
+    out = sync.merge_services(base, [{"port": 80, "protocol": "tcp", "service_name": "web", "icon": "caddy"}])
+    assert out[0]["icon"] == "caddy"
+
+
 def test_changed_facts_ignores_blanks_and_equal_values() -> None:
     row = _row(ip="10.0.0.5", hostname="nas", services=[{"port": 22}])
     facts = {"ip": "10.0.0.5", "hostname": "", "os": "DSM", "services": [{"port": 22}]}

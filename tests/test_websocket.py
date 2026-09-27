@@ -386,6 +386,7 @@ async def test_get_canvas_not_setup_returns_error(
         {"type": "homelable/scan/approve", "device_id": "x"},
         {"type": "homelable/scan/hide", "device_id": "x"},
         {"type": "homelable/scan/clear"},
+        {"type": "homelable/scan/rescan", "device_id": "x"},
     ],
 )
 async def test_mutating_commands_reject_non_admin(
@@ -397,3 +398,188 @@ async def test_mutating_commands_reject_non_admin(
     msg = await client.receive_json()
     assert msg["success"] is False
     assert msg["error"]["code"] == "unauthorized"
+
+
+# ─── Per-device deep scan (homelable #363) ───────────────────────────────────
+
+
+def _device_scan_result(ports: list[int], *, scanned: int = 8, cancelled: bool = False) -> dict:
+    open_ports = [{"port": p, "protocol": "tcp", "banner": ""} for p in ports]
+    return {
+        "device": {
+            "ip": "10.0.0.5",
+            "mac": None,
+            "hostname": None,
+            "os": None,
+            "open_ports": open_ports,
+            "services": [
+                {"port": p, "protocol": "tcp", "service_name": f"svc-{p}", "icon": "guess", "category": None}
+                for p in ports
+            ],
+            "suggested_type": "server",
+            "discovery_source": "tcp",
+        },
+        "scanned": scanned,
+        "total": 8,
+        "cancelled": cancelled,
+    }
+
+
+async def _seed_device(coord, **fields) -> dict:  # noqa: ANN001
+    pending = await coord._get_pending()
+    row = {"id": "pd-1", "ip": "10.0.0.5", "status": "approved", "services": [], **fields}
+    pending["devices"].append(row)
+    return row
+
+
+async def test_rescan_deep_scans_one_device_and_unions_its_services(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    row = await _seed_device(
+        setup_ws,
+        discovery_source="proxmox",
+        open_ports=[{"port": 8006, "protocol": "tcp"}],
+        services=[
+            {"port": 22, "protocol": "tcp", "service_name": "SSH", "icon": "terminal"},
+            {"port": 8006, "protocol": "tcp", "service_name": "Proxmox", "icon": "proxmox"},
+        ],
+    )
+    fake = AsyncMock(return_value=_device_scan_result([22, 9000]))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+        msg = await client.receive_json()
+        await hass.async_block_till_done()
+
+    assert msg["success"] is True
+    assert msg["result"]["status"] == "running"
+    run_id = msg["result"]["run_id"]
+
+    args, kwargs = fake.call_args
+    assert args == ("10.0.0.5",)
+    assert kwargs["ports"] == "1-65535"
+    assert kwargs["discovery_source"] == "proxmox"
+
+    # A hand-picked icon survives, a hand-added service stays, a new one lands.
+    by_port = {s["port"]: s for s in row["services"]}
+    assert by_port[22]["icon"] == "terminal"
+    assert by_port[22]["service_name"] == "SSH"
+    assert by_port[8006]["service_name"] == "Proxmox"
+    assert by_port[9000]["service_name"] == "svc-9000"
+    assert [p["port"] for p in row["open_ports"]] == [22, 8006, 9000]
+    assert row["discovery_source"] == "proxmox"
+    assert row["last_scan"]
+    assert setup_ws._scan_run_id is None
+
+    await client.send_json({"id": 2, "type": "homelable/scan/run", "run_id": run_id})
+    run = (await client.receive_json())["result"]["run"]
+    assert run["kind"] == "device"
+    assert run["ranges"] == ["10.0.0.5/32"]
+    assert run["status"] == "done"
+    assert run["error"] is None
+
+
+async def test_rescan_passes_the_requested_port_range(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    await _seed_device(setup_ws, ip="fe80::1, 10.0.0.5")
+    fake = AsyncMock(return_value=_device_scan_result([]))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json(
+            {"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1", "ports": " 80,443 "}
+        )
+        assert (await client.receive_json())["success"] is True
+        await hass.async_block_till_done()
+
+    assert fake.call_args.kwargs["ports"] == "80,443"
+    assert fake.call_args.args == ("fe80::1",)
+
+
+async def test_rescan_reports_a_partial_sweep(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    await _seed_device(setup_ws)
+    fake = AsyncMock(return_value=_device_scan_result([22], scanned=3))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+        run_id = (await client.receive_json())["result"]["run_id"]
+        await hass.async_block_till_done()
+
+    run = await setup_ws.get_run(run_id)
+    assert run["status"] == "done"
+    assert run["error"].startswith("Scanned 3/8 port ranges (1 open)")
+
+
+async def test_rescan_cancelled_leaves_the_row_alone(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    row = await _seed_device(setup_ws)
+    fake = AsyncMock(return_value=_device_scan_result([22], scanned=1, cancelled=True))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+        run_id = (await client.receive_json())["result"]["run_id"]
+        await hass.async_block_till_done()
+
+    assert row["services"] == []
+    run = await setup_ws.get_run(run_id)
+    assert (run["status"], run["error"]) == ("cancelled", None)
+
+
+async def test_rescan_records_a_failure_as_error(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    await _seed_device(setup_ws)
+    fake = AsyncMock(side_effect=OSError("boom"))
+    client = await hass_ws_client(hass)
+    with patch("custom_components.homelable.scanner.run_device_scan", fake):
+        await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+        run_id = (await client.receive_json())["result"]["run_id"]
+        await hass.async_block_till_done()
+
+    run = await setup_ws.get_run(run_id)
+    assert (run["status"], run["error"]) == ("error", "boom")
+    assert setup_ws._scan_run_id is None
+
+
+async def test_rescan_shares_the_scan_slot(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    await _seed_device(setup_ws)
+    setup_ws._scan_run_id = "network-run"
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/scan/rescan", "device_id": "pd-1"})
+    msg = await client.receive_json()
+    assert msg["result"] == {"run_id": "network-run", "status": "already_running"}
+
+
+@pytest.mark.parametrize(
+    ("fields", "payload", "code"),
+    [
+        ({}, {"device_id": "nope"}, "not_found"),
+        ({"ip": None}, {"device_id": "pd-1"}, "no_ip"),
+        ({"status": "hidden"}, {"device_id": "pd-1"}, "hidden"),
+        ({}, {"device_id": "pd-1", "ports": "1-99999"}, "invalid_port_range"),
+    ],
+)
+async def test_rescan_refuses_what_it_cannot_scan(
+    hass: HomeAssistant, hass_ws_client, setup_ws, fields, payload, code  # noqa: ANN001
+) -> None:
+    await _seed_device(setup_ws, **fields)
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/scan/rescan", **payload})
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == code
+    assert await setup_ws.list_runs() == []
+
+
+async def test_scan_run_unknown_id_is_not_found(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/scan/run", "run_id": "nope"})
+    msg = await client.receive_json()
+    assert msg["error"]["code"] == "not_found"

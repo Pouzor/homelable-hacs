@@ -581,3 +581,108 @@ async def test_shutdown_executor_is_idempotent_and_the_pool_comes_back() -> None
     await scanner._run_offloop(lambda: None)
     assert scanner._executor is not None
     assert scanner._executor is not first
+
+
+# ─── Per-device deep scan (homelable #363) ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("80", [(80, 80)]),
+        ("1-1024", [(1, 1024)]),
+        ("443, 80,8000-9000", [(80, 80), (443, 443), (8000, 9000)]),
+        ("1-100,50-200,201", [(1, 201)]),
+        ("", []),
+        ("80,", []),
+        ("0-10", []),
+        ("1-70000", []),
+        ("500-100", []),
+        ("http", []),
+    ],
+)
+def test_parse_port_spec(spec: str, expected: list[tuple[int, int]]) -> None:
+    assert scanner.parse_port_spec(spec) == expected
+
+
+def test_port_chunks_cover_the_full_range_exactly_once() -> None:
+    chunks = scanner._port_chunks(scanner.FULL_PORTS)
+    assert len(chunks) == 8
+    flat = [p for c in chunks for p in c]
+    assert flat == list(range(1, 65536))
+
+
+def test_port_chunks_pack_small_ranges_into_one_slice() -> None:
+    assert scanner._port_chunks("443,80") == [(80, 443)]
+
+
+def _fake_tcp_by_chunk(open_by_port: set[int], seen: list[tuple[int, ...]]):
+    async def _fake(host: dict, ports: tuple[int, ...], **_kw) -> dict:
+        seen.append(ports)
+        host["open_ports"] = [
+            {"port": p, "protocol": "tcp", "banner": ""} for p in ports if p in open_by_port
+        ]
+        return host
+
+    return _fake
+
+
+async def test_run_device_scan_unions_ports_across_slices() -> None:
+    seen: list[tuple[int, ...]] = []
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp_by_chunk({22, 9000, 40000}, seen)):
+        result = await scanner.run_device_scan(
+            "10.0.0.5", budget=3600, discovery_source="proxmox"
+        )
+
+    assert len(seen) == 8
+    assert (result["scanned"], result["total"], result["cancelled"]) == (8, 8, False)
+    device = result["device"]
+    assert [p["port"] for p in device["open_ports"]] == [22, 9000, 40000]
+    assert any(s["port"] == 22 for s in device["services"])
+    # A rescan re-observes the device through the source it already has.
+    assert device["discovery_source"] == "proxmox"
+
+
+async def test_run_device_scan_honours_the_requested_ports() -> None:
+    seen: list[tuple[int, ...]] = []
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp_by_chunk({443}, seen)):
+        result = await scanner.run_device_scan(
+            "10.0.0.5", ports="80,443", budget=3600, discovery_source="tcp"
+        )
+
+    assert seen == [(80, 443)]
+    assert [p["port"] for p in result["device"]["open_ports"]] == [443]
+
+
+async def test_run_device_scan_keeps_what_it_found_when_the_budget_is_spent() -> None:
+    """The first slice always runs; the rest is skipped and reported, not lost."""
+    seen: list[tuple[int, ...]] = []
+    with patch.object(scanner, "tcp_connect_scan", _fake_tcp_by_chunk({22, 40000}, seen)):
+        result = await scanner.run_device_scan("10.0.0.5", budget=-1, discovery_source="tcp")
+
+    assert len(seen) == 1
+    assert (result["scanned"], result["total"]) == (1, 8)
+    assert [p["port"] for p in result["device"]["open_ports"]] == [22]
+
+
+async def test_run_device_scan_stops_between_slices_when_cancelled() -> None:
+    seen: list[tuple[int, ...]] = []
+    inner = _fake_tcp_by_chunk({22}, seen)
+
+    async def _cancel_after_first(host: dict, ports: tuple[int, ...], **kw) -> dict:
+        scanner.request_cancel("dev-run")
+        return await inner(host, ports, **kw)
+
+    with patch.object(scanner, "tcp_connect_scan", _cancel_after_first):
+        result = await scanner.run_device_scan(
+            "10.0.0.5", run_id="dev-run", budget=3600, discovery_source="tcp"
+        )
+
+    assert len(seen) == 1
+    assert result["cancelled"] is True
+    assert not scanner._is_cancelled("dev-run")  # the token is released
+
+
+async def test_run_device_scan_rejects_a_bad_port_spec() -> None:
+    with pytest.raises(ValueError, match="Invalid port range"):
+        await scanner.run_device_scan("10.0.0.5", ports="1-99999", budget=10, discovery_source="tcp")
