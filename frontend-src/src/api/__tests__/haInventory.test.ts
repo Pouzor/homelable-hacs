@@ -44,3 +44,19 @@ describe('scanApi — inventory edits', () => {
     })
   })
 })
+
+describe('scanApi — per-device deep scan', () => {
+  it('rescanDevice sends the device and the port range', async () => {
+    wsCall.mockResolvedValue({ run_id: 'run-1', status: 'running' })
+    const res = await scanApi.rescanDevice('pd-1', { ports: '80,443' })
+    expect(wsCall).toHaveBeenCalledWith('homelable/scan/rescan', { device_id: 'pd-1', ports: '80,443' })
+    expect(res.data).toEqual({ run_id: 'run-1', status: 'running' })
+  })
+
+  it('run unwraps the one run it asked for', async () => {
+    wsCall.mockResolvedValue({ run: { id: 'run-1', status: 'done' } })
+    const res = await scanApi.run('run-1')
+    expect(wsCall).toHaveBeenCalledWith('homelable/scan/run', { run_id: 'run-1' })
+    expect(res.data).toEqual({ id: 'run-1', status: 'done' })
+  })
+})

@@ -450,10 +450,12 @@ def merge_services(
         used.add(pos)
         if isinstance(svc, dict) and isinstance(out[pos], dict):
             merged = {**out[pos], **svc}
-            if discovered:
-                for field in _CURATED_SERVICE_FIELDS:
-                    if out[pos].get(field):
-                        merged[field] = out[pos][field]
+            # A blank incoming value never clears an established one, on either
+            # path — an absent field is silence, not a reset.
+            for field in _CURATED_SERVICE_FIELDS:
+                established = out[pos].get(field)
+                if established and (discovered or not svc.get(field)):
+                    merged[field] = established
             out[pos] = merged
         else:
             out[pos] = svc

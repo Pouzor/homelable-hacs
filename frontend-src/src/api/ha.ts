@@ -142,6 +142,18 @@ export interface DeepScanConfig {
   verify_tls: boolean
 }
 
+/** A row of `homelable_scan_runs` — what `scan/runs` and `scan/run` return. */
+export interface ScanRunSummary {
+  id: string
+  status: 'running' | 'done' | 'cancelled' | 'error'
+  kind?: string
+  ranges: string[]
+  devices_found: number
+  started_at: string
+  finished_at: string | null
+  error: string | null
+}
+
 // A device bulk-approve refused to place because an equivalent node already
 // exists on the target design (same ip/mac/ieee). `existing_node_id` points at
 // the node already there so the UI can link to it.
@@ -329,6 +341,26 @@ export const scanApi = {
   runs: async () => {
     const result = await wsCall<{ runs: object[] }>('homelable/scan/runs')
     return toAxiosLike(result.runs)
+  },
+  /** One run — polled by the caller waiting on a device scan it started. */
+  run: async (runId: string) => {
+    const result = await wsCall<{ run: ScanRunSummary }>('homelable/scan/run', {
+      run_id: runId,
+    })
+    return toAxiosLike(result.run)
+  },
+  /**
+   * Deep-scan one inventory device over `ports` (every TCP port by default),
+   * then re-fingerprint it. Answers "this device predates the scanner knowing
+   * that service" (homelable #350). Shares the scan slot: `already_running`
+   * while any scan is. Stop it with `stop()`, poll it with `run()`.
+   */
+  rescanDevice: async (id: string, opts: { ports?: string } = {}) => {
+    const result = await wsCall<{ run_id: string; status: 'running' | 'already_running' }>(
+      'homelable/scan/rescan',
+      { device_id: id, ...opts }
+    )
+    return toAxiosLike(result)
   },
   clearPending: async () => {
     const result = await wsCall<{ removed: number }>('homelable/scan/clear')

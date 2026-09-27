@@ -18,6 +18,7 @@ import re
 import socket
 import subprocess
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -190,6 +191,59 @@ def _expand_port_ranges(http_ranges: list[str] | None) -> tuple[int, ...]:
 def _build_port_list(http_ranges: list[str] | None) -> tuple[int, ...]:
     """Combine the default port list with validated user ranges for the TCP scan."""
     return _PORT_LIST + _expand_port_ranges(http_ranges)
+
+
+# Every TCP port. The per-device deep scan's default: a device added before the
+# scanner knew a service, or listening on a port no curated list covers.
+FULL_PORTS = "1-65535"
+
+# The deep scan sweeps its range in slices, unioning what they find. A slice is
+# where a stop request lands and where the time budget is checked, so a spent
+# budget keeps the ports already found instead of abandoning them.
+_DEEP_CHUNK_SIZE = 8192
+
+
+def parse_port_spec(spec: str) -> list[tuple[int, int]]:
+    """Parse a port spec into sorted, merged ``(start, end)`` ranges.
+
+    Accepts what the user can type in the deep-scan dialog: ``80``,
+    ``8000-9000``, or a comma list of both. Returns ``[]`` for anything invalid,
+    an empty spec included — a scan of nothing is never what was meant.
+    """
+    ranges: list[tuple[int, int]] = []
+    for token in (t.strip() for t in spec.split(",")):
+        if not token or not _valid_port_range(token):
+            return []
+        parts = [int(p) for p in token.split("-")]
+        ranges.append((parts[0], parts[-1]))
+    ranges.sort()
+    merged = [ranges[0]]
+    for start, end in ranges[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end + 1:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _port_chunks(spec: str, size: int = _DEEP_CHUNK_SIZE) -> list[tuple[int, ...]]:
+    """Slice a port spec into port tuples of at most ``size`` ports each.
+
+    Ranges are packed, not scanned one slice per range: ``80,443`` is one
+    slice, while ``1-65535`` becomes eight.
+    """
+    chunks: list[tuple[int, ...]] = []
+    current: list[int] = []
+    for start, end in parse_port_spec(spec):
+        for port in range(start, end + 1):
+            current.append(port)
+            if len(current) == size:
+                chunks.append(tuple(current))
+                current = []
+    if current:
+        chunks.append(tuple(current))
+    return chunks
 
 _MDNS_SERVICE_TYPES = [
     "_http._tcp.local.",
@@ -779,3 +833,79 @@ async def run_scan(
                 _cancelled_runs.discard(run_id)
         if mdns_task is not None and not mdns_task.done():
             mdns_task.cancel()
+
+
+async def run_device_scan(
+    ip: str,
+    *,
+    run_id: str | None = None,
+    ports: str = FULL_PORTS,
+    budget: float,
+    discovery_source: str,
+    mac: str | None = None,
+    hostname: str | None = None,
+    deep_scan: DeepScanOptions | None = None,
+) -> dict[str, Any]:
+    """Deep-scan one known device over ``ports`` and fingerprint what answers.
+
+    No ping sweep and no mDNS: the device is already known, so its IP goes
+    straight to the TCP connect pass, one slice of ports at a time. ``budget``
+    is a total in seconds, checked between slices — the first slice always
+    runs, and a spent budget keeps what was found rather than discarding it.
+
+    Returns ``{device, scanned, total, cancelled}``: the enriched host (same
+    shape as a ``run_scan`` entry), and how many of the ``total`` slices ran.
+    ``discovery_source`` is the row's own: a rescan re-observes a device, it is
+    not a network discovery, so a Proxmox guest stays a Proxmox guest.
+
+    Raises:
+        ValueError: if ``ports`` is not a usable port spec.
+    """
+    chunks = _port_chunks(ports)
+    if not chunks:
+        raise ValueError(f"Invalid port range: {ports!r}")
+    deep_scan = deep_scan or DeepScanOptions()
+    await _run_offloop(preload_fingerprints)
+
+    deadline = time.monotonic() + budget
+    found: dict[int, dict[str, Any]] = {}
+    scanned = 0
+    for i, chunk in enumerate(chunks):
+        if _is_cancelled(run_id):
+            break
+        if i and time.monotonic() > deadline:
+            _LOGGER.warning(
+                "[Deep scan] %s — budget of %ds spent, %d/%d port range(s) scanned",
+                ip, budget, scanned, len(chunks),
+            )
+            break
+        result = await tcp_connect_scan(
+            {"ip": ip, "open_ports": []}, chunk, port_concurrency=_SOCKET_CONCURRENCY
+        )
+        for port in result["open_ports"]:
+            found.setdefault(port["port"], port)
+        scanned += 1
+
+    cancelled = _is_cancelled(run_id)
+    if run_id is not None:
+        with _cancelled_lock:
+            _cancelled_runs.discard(run_id)
+
+    open_ports = [found[p] for p in sorted(found)]
+    if deep_scan.http_probe_enabled and open_ports:
+        open_ports = await probe_open_ports(
+            ip, open_ports, verify_tls=deep_scan.verify_tls
+        )
+    host = {
+        "ip": ip,
+        "mac": mac,
+        "hostname": hostname,
+        "os": None,
+        "open_ports": open_ports,
+    }
+    return {
+        "device": await _enrich(host, discovery_source=discovery_source),
+        "scanned": scanned,
+        "total": len(chunks),
+        "cancelled": cancelled,
+    }

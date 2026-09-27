@@ -77,6 +77,10 @@ DEFAULT_SCAN_AUTO_ENABLED = False
 DEFAULT_SCAN_INTERVAL = 3600  # seconds (1h)
 MIN_SCAN_INTERVAL = 300  # seconds (5 min)
 DEFAULT_STATUS_INTERVAL = 60   # seconds
+# Per-device deep scan: total time budget, checked between port slices. All
+# 65535 ports against a host that drops packets run ~16 min at the scanner's
+# socket cap; a partial sweep is reported as such, never passed off as whole.
+DEEP_SCAN_BUDGET = 2700  # seconds (45 min)
 
 # Node status checks fan out one subprocess per node (ping). Unbounded, a large
 # canvas forks dozens of processes at once every poll, which starves low-memory

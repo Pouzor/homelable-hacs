@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import proxmox, racks, scanner
 from .const import DESIGN_TYPES, DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
+from .coordinator import DeviceScanError
 from .media import delete_media
 from .zha import ZhaNotReadyError
 from .zigbee import ZigbeeMqttNotReadyError
@@ -33,6 +34,8 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_approve)
     websocket_api.async_register_command(hass, ws_scan_hide)
     websocket_api.async_register_command(hass, ws_scan_runs)
+    websocket_api.async_register_command(hass, ws_scan_run)
+    websocket_api.async_register_command(hass, ws_scan_rescan)
     websocket_api.async_register_command(hass, ws_scan_get_config)
     websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
@@ -432,6 +435,58 @@ async def ws_scan_runs(
         return
     runs = await coord.list_runs()
     connection.send_result(msg["id"], {"runs": runs})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "homelable/scan/run", vol.Required("run_id"): str}
+)
+@websocket_api.async_response
+async def ws_scan_run(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """One run, for a caller polling the scan it started (the device scan)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    run = await coord.get_run(msg["run_id"])
+    if run is None:
+        connection.send_error(msg["id"], "not_found", "Scan run not found")
+        return
+    connection.send_result(msg["id"], {"run": run})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/scan/rescan",
+        vol.Required("device_id"): str,
+        # Port spec (`80`, `1-1024`, `80,443,8000-9000`); every TCP port if omitted.
+        vol.Optional("ports"): str,
+        vol.Optional("http_probe_enabled", default=False): bool,
+        vol.Optional("verify_tls", default=False): bool,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_scan_rescan(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Deep-scan one inventory device to refresh its services (homelable #350)."""
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    try:
+        result = await coord.trigger_device_scan(
+            msg["device_id"],
+            ports=(msg.get("ports") or "").strip() or scanner.FULL_PORTS,
+            http_probe_enabled=msg["http_probe_enabled"],
+            verify_tls=msg["verify_tls"],
+        )
+    except DeviceScanError as exc:
+        connection.send_error(msg["id"], exc.code, str(exc))
+        return
+    connection.send_result(msg["id"], result)
 
 
 # ─── Status ──────────────────────────────────────────────────────────────────

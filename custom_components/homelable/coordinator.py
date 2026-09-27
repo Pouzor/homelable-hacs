@@ -35,6 +35,7 @@ from .const import (
     CONF_ZIGBEE_SOURCE,
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
+    DEEP_SCAN_BUDGET,
     DEFAULT_DESIGN_ICON,
     DEFAULT_DESIGN_NAME,
     DEFAULT_DESIGN_TYPE,
@@ -227,6 +228,14 @@ def _is_stale(stamp: Any, now: datetime, max_age: int) -> bool:
     # A stamp in the future (clock skew, restored backup) is treated as stale so
     # the next online check corrects it.
     return abs((now - previous).total_seconds()) >= max_age
+
+
+class DeviceScanError(Exception):
+    """A per-device deep scan that cannot start; ``code`` is the WS error code."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class HomelableCoordinator(DataUpdateCoordinator):
@@ -2337,6 +2346,159 @@ class HomelableCoordinator(DataUpdateCoordinator):
             return False
         scanner.request_cancel(self._scan_run_id)
         return True
+
+    async def get_run(self, run_id: str) -> dict[str, Any] | None:
+        """One run, for a caller waiting on a scan it started (the device scan)."""
+        return next((r for r in await self._load_runs() if r["id"] == run_id), None)
+
+    async def trigger_device_scan(
+        self,
+        device_id: str,
+        *,
+        ports: str = scanner.FULL_PORTS,
+        http_probe_enabled: bool = False,
+        verify_tls: bool = False,
+    ) -> dict[str, Any]:
+        """Deep-scan one inventory row in the background (homelable #350).
+
+        Recorded as a ``kind="device"`` run over ``<ip>/32``, so stop, progress
+        and Scan History work unchanged. It takes the same slot as a network
+        scan — one sweep at a time, whichever kind — so a second request, or
+        one during a network scan, gets ``already_running`` like ``trigger_scan``.
+
+        Raises:
+            DeviceScanError: unknown device, no IP, hidden, or a bad port spec.
+        """
+        if not scanner.parse_port_spec(ports):
+            raise DeviceScanError("invalid_port_range", f"Invalid port range: {ports!r}")
+        await self._ensure_loaded()
+        pending = await self._get_pending()
+        row = next((d for d in pending["devices"] if d.get("id") == device_id), None)
+        if row is None:
+            raise DeviceScanError("not_found", "Device not found")
+        ips = _ip_tokens(row.get("ip"))
+        if not ips:
+            raise DeviceScanError("no_ip", "Device has no IP address to scan")
+        if row.get("status") == "hidden":
+            raise DeviceScanError("hidden", "Device is hidden")
+        if self._scan_run_id is not None:
+            return {"run_id": self._scan_run_id, "status": "already_running"}
+
+        run_id = uuid.uuid4().hex
+        self._scan_run_id = run_id
+        run = {
+            "id": run_id,
+            "status": "running",
+            "kind": "device",
+            "ranges": [f"{ips[0]}/32"],
+            "devices_found": 0,
+            "started_at": _utc_now_iso(),
+            "finished_at": None,
+            "error": None,
+        }
+        await self._record_run(run)
+        deep_scan = scanner.DeepScanOptions(
+            http_probe_enabled=http_probe_enabled, verify_tls=verify_tls
+        )
+        # Background, like trigger_scan: a full sweep runs for minutes and must
+        # not hold up HA shutdown (issue #73).
+        self.hass.async_create_background_task(
+            self._run_device_scan_task(run, device_id, ips[0], ports, deep_scan),
+            f"{DOMAIN}_device_scan_{run_id}",
+        )
+        return {"run_id": run_id, "status": "running"}
+
+    async def _run_device_scan_task(
+        self,
+        run: dict[str, Any],
+        device_id: str,
+        ip: str,
+        ports: str,
+        deep_scan: scanner.DeepScanOptions,
+    ) -> None:
+        """Background body of a device scan: sweep, then fold into the row."""
+        run_id = run["id"]
+        pending = await self._get_pending()
+        row = next((d for d in pending["devices"] if d.get("id") == device_id), None)
+        try:
+            result = await scanner.run_device_scan(
+                ip,
+                run_id=run_id,
+                ports=ports,
+                budget=DEEP_SCAN_BUDGET,
+                discovery_source=(row or {}).get("discovery_source") or "tcp",
+                mac=(row or {}).get("mac"),
+                hostname=(row or {}).get("hostname"),
+                deep_scan=deep_scan,
+            )
+        except Exception as exc:  # noqa: BLE001 — record any failure, then exit
+            _LOGGER.exception("Device scan %s failed", run_id)
+            async_dispatcher_send(
+                self.hass,
+                SCAN_SIGNAL,
+                {"event": "scan_error", "run_id": run_id, "error": str(exc)},
+            )
+            await self._record_run(
+                {**run, "status": "error", "finished_at": _utc_now_iso(), "error": str(exc)}
+            )
+            return
+        finally:
+            self._scan_run_id = None
+
+        # Re-read: the row may have been edited or deleted during the sweep.
+        pending = await self._get_pending()
+        row = next((d for d in pending["devices"] if d.get("id") == device_id), None)
+        found = result["device"]
+        if row is not None and not result["cancelled"]:
+            # An entry without a port number can't be ordered or deduped; skip
+            # it rather than let sorted() crash the task and strand the run.
+            known = {
+                p["port"]: p
+                for p in row.get("open_ports") or []
+                if isinstance(p, dict) and isinstance(p.get("port"), int)
+            }
+            known.update({p["port"]: p for p in found["open_ports"]})
+            row["open_ports"] = [known[p] for p in sorted(known)]
+            # A rescan unions services: it adds what it found and refreshes the
+            # facts it knows, never drops or re-icons what the user curated.
+            row["services"] = inventory_sync.merge_services(
+                row.get("services"), found["services"], discovered=True
+            )
+            row["hostname"] = row.get("hostname") or found.get("hostname")
+            row["last_scan"] = _utc_now_iso()
+            await self._save_pending()
+            async_dispatcher_send(
+                self.hass,
+                SCAN_SIGNAL,
+                {
+                    "event": "device_enriched",
+                    "run_id": run_id,
+                    "device": {**found, "id": device_id},
+                },
+            )
+
+        # A partial sweep is a done run carrying an advisory, the way a Proxmox
+        # import reports what it could not see — never passed off as complete.
+        partial = result["scanned"] < result["total"]
+        await self._record_run(
+            {
+                **run,
+                "status": "cancelled" if result["cancelled"] else "done",
+                "devices_found": 1 if row is not None and not result["cancelled"] else 0,
+                "finished_at": _utc_now_iso(),
+                "error": (
+                    f"Scanned {result['scanned']}/{result['total']} port ranges "
+                    f"({len(found['open_ports'])} open) — the rest was not reached"
+                )
+                if partial and not result["cancelled"]
+                else None,
+            }
+        )
+        async_dispatcher_send(
+            self.hass,
+            SCAN_SIGNAL,
+            {"event": "scan_finished", "run_id": run_id, "devices_found": 0},
+        )
 
     # ─── Zigbee (Zigbee2MQTT / ZHA) ──────────────────────────────────────────
 
