@@ -173,7 +173,7 @@ describe('CanvasContainer', () => {
     rf.intersecting = [zoneNode('z1')]
     render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
-    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeId: 'n1', zoneId: 'z1' })
+    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeIds: ['n1'], zoneId: 'z1' })
   })
 
   it('prefers a group and a container over a zone when they overlap', () => {
@@ -183,7 +183,7 @@ describe('CanvasContainer', () => {
     rf.intersecting = [zoneNode('z1'), containerNode('px1')]
     render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} onRequestAddToContainer={onRequestAddToContainer} />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
-    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeId: 'n1', containerId: 'px1' })
+    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeIds: ['n1'], containerId: 'px1' })
     expect(onRequestAddToZone).not.toHaveBeenCalled()
   })
 
@@ -216,6 +216,64 @@ describe('CanvasContainer', () => {
     render(<CanvasContainer />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, child, [child])
     expect(useCanvasStore.getState().nodes.find((n) => n.id === 'n1')?.parentId).toBe('z1')
+  })
+
+  // ── Multi-selection drops ─────────────────────────────────────────────────
+
+  it('fires onRequestAddToZone with every dragged node, not just the one under the cursor', () => {
+    const onRequestAddToZone = vi.fn()
+    const dragged = [makeNode('n1'), makeNode('n2'), makeNode('n3')]
+    rf.intersecting = [zoneNode('z1')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, dragged[0], dragged)
+    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeIds: ['n1', 'n2', 'n3'], zoneId: 'z1' })
+  })
+
+  it('leaves zones and groups out of a dragged selection', () => {
+    const onRequestAddToZone = vi.fn()
+    const dragged = [makeNode('n1'), zoneNode('z1'), groupNode('g1')]
+    rf.intersecting = [zoneNode('z2')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, dragged[0], dragged)
+    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeIds: ['n1'], zoneId: 'z2' })
+  })
+
+  it('never asks to add the destination container to itself', () => {
+    const onRequestAddToContainer = vi.fn()
+    const target = containerNode('px1')
+    const dragged = [makeNode('n1'), target]
+    rf.intersecting = [target]
+    render(<CanvasContainer onRequestAddToContainer={onRequestAddToContainer} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, dragged[0], dragged)
+    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeIds: ['n1'], containerId: 'px1' })
+  })
+
+  it('keeps an already-parented node in the selection with its own parent', () => {
+    const onRequestAddToZone = vi.fn()
+    const dragged = [makeNode('n1'), { ...makeNode('n2'), parentId: 'pxOther' }]
+    rf.intersecting = [zoneNode('z1')]
+    render(<CanvasContainer onRequestAddToZone={onRequestAddToZone} />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, dragged[0], dragged)
+    expect(onRequestAddToZone).toHaveBeenCalledWith({ nodeIds: ['n1'], zoneId: 'z1' })
+  })
+
+  it('detaches every dragged child when a selection leaves its zone', () => {
+    const zone = { ...zoneNode('z1'), position: { x: 100, y: 100 } }
+    const c1 = { ...makeNode('n1'), parentId: 'z1', position: { x: 20, y: 20 } }
+    const c2 = { ...makeNode('n2'), parentId: 'z1', position: { x: 40, y: 40 } }
+    useCanvasStore.setState({ nodes: [zone, c1, c2] })
+    rf.intersecting = []
+    render(<CanvasContainer />)
+    ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, c1, [c1, c2])
+    const after = useCanvasStore.getState().nodes
+    expect(after.find((n) => n.id === 'n1')!.parentId).toBeUndefined()
+    expect(after.find((n) => n.id === 'n2')!.parentId).toBeUndefined()
+    expect(after.find((n) => n.id === 'n2')!.position).toEqual({ x: 140, y: 140 })
+    // One history entry for the whole selection: a single undo puts both back.
+    useCanvasStore.getState().undo()
+    const restored = useCanvasStore.getState().nodes
+    expect(restored.find((n) => n.id === 'n1')!.parentId).toBe('z1')
+    expect(restored.find((n) => n.id === 'n2')!.parentId).toBe('z1')
   })
 
   // ── Collapse ──────────────────────────────────────────────────────────────
@@ -332,7 +390,7 @@ describe('CanvasContainer', () => {
     rf.intersecting = [groupNode('g1')]
     render(<CanvasContainer onRequestAddToGroup={onRequestAddToGroup} />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
-    expect(onRequestAddToGroup).toHaveBeenCalledWith({ nodeId: 'n1', groupId: 'g1' })
+    expect(onRequestAddToGroup).toHaveBeenCalledWith({ nodeIds: ['n1'], groupId: 'g1' })
   })
 
   it('does not fire onRequestAddToGroup when no group is under the node', () => {
@@ -370,7 +428,7 @@ describe('CanvasContainer', () => {
     rf.intersecting = [containerNode('px1')]
     render(<CanvasContainer onRequestAddToContainer={onRequestAddToContainer} />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
-    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeId: 'n1', containerId: 'px1' })
+    expect(onRequestAddToContainer).toHaveBeenCalledWith({ nodeIds: ['n1'], containerId: 'px1' })
   })
 
   it('prefers a group over a container when both intersect', () => {
@@ -380,7 +438,7 @@ describe('CanvasContainer', () => {
     rf.intersecting = [containerNode('px1'), groupNode('g1')]
     render(<CanvasContainer onRequestAddToGroup={onRequestAddToGroup} onRequestAddToContainer={onRequestAddToContainer} />)
     ;(rfProps.onNodeDragStop as (...args: unknown[]) => unknown)({} as MouseEvent, node, [node])
-    expect(onRequestAddToGroup).toHaveBeenCalledWith({ nodeId: 'n1', groupId: 'g1' })
+    expect(onRequestAddToGroup).toHaveBeenCalledWith({ nodeIds: ['n1'], groupId: 'g1' })
     expect(onRequestAddToContainer).not.toHaveBeenCalled()
   })
 
