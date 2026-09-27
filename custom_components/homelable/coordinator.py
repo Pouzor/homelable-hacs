@@ -1170,13 +1170,20 @@ class HomelableCoordinator(DataUpdateCoordinator):
             # stale (or injected) copy in the payload is not written back.
             for observed in ("last_seen", "last_scan", "response_time_ms"):
                 facts.pop(observed, None)
+            # A node not yet linked to a row is joining one, if it matches a
+            # device the scanner or an import already knows. Its lists are
+            # whatever it was drawn with — empty, for a node drawn by hand — not
+            # a curated answer, so they merge into the row instead of replacing
+            # it; otherwise drawing a scanned device erases its services and
+            # properties. Once linked, a list save is an edit and replaces.
+            joining = node.get("device_id") not in {d.get("id") for d in devices}
             _, row_changed = inventory_sync.link_facts(
                 devices,
                 node,
                 facts,
                 now=now,
                 overwrite_scalars=True,
-                replace_lists=True,
+                replace_lists=not joining,
                 only_changed=True,
                 changed_fields=changed if isinstance(changed, list) else None,
             )
