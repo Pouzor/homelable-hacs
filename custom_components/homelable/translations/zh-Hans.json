@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Homelable",
+        "description": "配置局域网设备发现与监控。",
+        "data": {
+          "scan_ranges": "网段范围（CIDR，逗号分隔）",
+          "scan_auto_enabled": "按计划自动扫描",
+          "scan_interval": "扫描间隔（秒，最小 300）",
+          "status_interval": "状态检测间隔（秒）",
+          "zigbee_source": "Zigbee 网关",
+          "zigbee_base_topic": "Zigbee2MQTT 主题前缀",
+          "zwave_prefix": "Z-Wave JS UI MQTT 前缀",
+          "zwave_gateway": "Z-Wave JS UI 网关名称"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "只能配置一个 Homelable 实例。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Homelable 选项",
+        "data": {
+          "scan_ranges": "网段范围（CIDR，逗号分隔）",
+          "scan_auto_enabled": "按计划自动扫描",
+          "scan_interval": "扫描间隔（秒，最小 300）",
+          "status_interval": "状态检测间隔（秒）",
+          "zigbee_source": "Zigbee 网关",
+          "zigbee_base_topic": "Zigbee2MQTT 主题前缀",
+          "zwave_prefix": "Z-Wave JS UI MQTT 前缀",
+          "zwave_gateway": "Z-Wave JS UI 网关名称",
+          "mqtt_response_timeout": "MQTT 网关响应超时（秒）",
+          "service_check_enabled": "启用按服务的状态检测",
+          "service_check_interval": "服务检测间隔（秒）",
+          "proxmox_host": "Proxmox VE 主机名或 IP",
+          "proxmox_port": "Proxmox API 端口",
+          "proxmox_token_id": "Proxmox API 令牌 ID（user@realm!name）",
+          "proxmox_token_secret": "Proxmox API 令牌密钥（留空表示保持不变）",
+          "proxmox_verify_tls": "校验 Proxmox TLS 证书",
+          "proxmox_sync_enabled": "启用 Proxmox 自动同步",
+          "proxmox_sync_interval": "Proxmox 自动同步间隔（秒）"
+        }
+      }
+    }
+  },
+  "selector": {
+    "zigbee_source": {
+      "options": {
+        "auto": "自动检测（装了 ZHA 就用 ZHA，否则用 Zigbee2MQTT）",
+        "zha": "ZHA",
+        "z2m": "Zigbee2MQTT"
+      }
+    }
+  }
+}
