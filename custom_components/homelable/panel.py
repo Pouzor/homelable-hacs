@@ -46,8 +46,13 @@ async def _async_register_static_path(hass: HomeAssistant) -> None:
     hass.data[FRONTEND_STATIC_KEY] = True
 
 
-async def async_register_panel(hass: HomeAssistant) -> None:
-    """Serve the frontend bundle and register the Lovelace panel."""
+async def async_register_panel(
+    hass: HomeAssistant, *, admin_only: bool = False
+) -> None:
+    """Serve the frontend bundle and register the Lovelace panel.
+
+    `admin_only` keeps the panel out of non-admin users' sidebar.
+    """
     if DOMAIN in hass.data.get("frontend_panels", {}):
         return
 
@@ -74,7 +79,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
                 "module_url": f"{PANEL_URL}/{bundle_path.name}",
             }
         },
-        require_admin=False,
+        require_admin=admin_only,
     )
 
 

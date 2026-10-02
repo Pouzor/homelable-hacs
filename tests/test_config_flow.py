@@ -10,6 +10,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.homelable.const import (
     CONF_MQTT_RESPONSE_TIMEOUT,
+    CONF_PANEL_ADMIN_ONLY,
     CONF_SCAN_AUTO_ENABLED,
     CONF_SCAN_INTERVAL,
     CONF_SCAN_RANGES,
@@ -88,6 +89,31 @@ async def test_options_flow_saves_service_check_settings(hass: HomeAssistant) ->
     assert result2["type"] == FlowResultType.CREATE_ENTRY
     assert result2["data"][CONF_SERVICE_CHECK_ENABLED] is True
     assert result2["data"][CONF_SERVICE_CHECK_INTERVAL] == 120
+
+
+async def test_options_flow_panel_admin_only_defaults_off_and_saves(
+    hass: HomeAssistant,
+) -> None:
+    """The panel stays visible to everyone unless the admin opts out (issue #118)."""
+    entry = MockConfigEntry(domain=DOMAIN, title="Homelable", data={})
+    entry.add_to_hass(hass)
+    base = {
+        CONF_SCAN_RANGES: "192.168.1.0/24",
+        CONF_SCAN_INTERVAL: 3600,
+        CONF_STATUS_INTERVAL: 60,
+    }
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    untouched = await hass.config_entries.options.async_configure(
+        result["flow_id"], dict(base)
+    )
+    assert untouched["data"][CONF_PANEL_ADMIN_ONLY] is False
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    opted_out = await hass.config_entries.options.async_configure(
+        result["flow_id"], {**base, CONF_PANEL_ADMIN_ONLY: True}
+    )
+    assert opted_out["data"][CONF_PANEL_ADMIN_ONLY] is True
 
 
 async def test_options_flow_rejects_sub_minimum_interval(hass: HomeAssistant) -> None:

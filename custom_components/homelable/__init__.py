@@ -7,7 +7,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, PLATFORMS
+from .const import (
+    CONF_PANEL_ADMIN_ONLY,
+    DEFAULT_PANEL_ADMIN_ONLY,
+    DOMAIN,
+    PLATFORMS,
+)
 from .coordinator import HomelableCoordinator
 from .media import async_register_media
 from .panel import (
@@ -38,7 +43,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     async_register_websocket_commands(hass)
-    await async_register_panel(hass)
+    # Reload on options change unregisters the panel first, so a toggled
+    # admin-only setting is applied on the way back up.
+    await async_register_panel(
+        hass,
+        admin_only=entry.options.get(
+            CONF_PANEL_ADMIN_ONLY, DEFAULT_PANEL_ADMIN_ONLY
+        ),
+    )
     await async_register_card(hass)
     await async_register_media(hass)
 

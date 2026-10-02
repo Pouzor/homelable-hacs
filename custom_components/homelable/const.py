@@ -116,6 +116,12 @@ DEFAULT_SERVICE_CHECK_ENABLED = False
 DEFAULT_SERVICE_CHECK_INTERVAL = 300  # seconds (5 min)
 MIN_SERVICE_CHECK_INTERVAL = 30   # seconds
 
+# Hide the sidebar panel from non-admin users (issue #118). Off by default: a
+# non-admin gets a read-only canvas. This is visibility only — the read WS
+# commands stay open to every user because the Lovelace card relies on them.
+CONF_PANEL_ADMIN_ONLY = "panel_admin_only"
+DEFAULT_PANEL_ADMIN_ONLY = False
+
 # How long to wait (seconds) for a gateway to answer over MQTT — the Zigbee2MQTT
 # networkmap and the Z-Wave JS UI getNodes dump. Both poll every device before
 # answering, and a 200+ device mesh can take several minutes, so this is an
