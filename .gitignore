@@ -16,6 +16,9 @@ build/
 node_modules/
 *.log
 npm-debug.log*
+# `eslint src -f json > eslint-*.json` is a scratch report, not a source file.
+# It is a few hundred KB and would otherwise be swept up by `git add -A`.
+eslint-*.json
 
 # Frontend build output (regenerated each release)
 custom_components/homelable/frontend/homelable-panel-*
