@@ -24,6 +24,13 @@ export interface DynamicTable {
   block?: string
   fields?: string[]
   pattern?: string
+  /**
+   * Values of this table that must stay in English in every locale — protocol
+   * names and acronyms, where a translation would name something that does not
+   * exist. Listed per value rather than per table, because a table-level
+   * exemption would silently cover every future entry added to it.
+   */
+  verbatim?: readonly string[]
 }
 
 export const DYNAMIC_TABLES: DynamicTable[] = [
@@ -71,62 +78,107 @@ export const DYNAMIC_TABLES: DynamicTable[] = [
     pattern: "label:\\s*'((?:[^'\\\\]|\\\\.)*)'",
   },
   {
-    // The card editor's <ha-form> field captions, read by computeLabel() as
-    // t(LABELS[schema.name]). Panel-only — the main app has no card editor.
+    what: 'edge line style names (EDGE_LINE_STYLE_LABELS)',
+    file: 'utils/edgeLineStyle.ts',
+    block: 'EDGE_LINE_STYLE_LABELS',
+  },
+  {
+    what: 'faceplate width captions (WIDTH_LABEL)',
+    file: 'rack/components/FaceplatePicker.tsx',
+    block: 'WIDTH_LABEL',
+  },
+  {
+    what: 'sidebar view captions (ALL_VIEWS)',
+    file: 'components/panels/Sidebar.tsx',
+    block: 'ALL_VIEWS',
+    fields: ['label'],
+  },
+  {
+    what: 'node type group names (NODE_TYPE_GROUPS)',
+    file: 'utils/nodeTypeGroups.ts',
+    block: 'NODE_TYPE_GROUPS',
+    fields: ['label'],
+  },
+  {
+    // The faceplate catalogue's group headings, read by
+    // faceplateGroupLabel() — the `label` field above is the plate's own name.
+    what: 'faceplate group headings',
+    file: 'rack/faceplates.ts',
+    pattern: "group:\\s*'((?:[^'\\\\]|\\\\.)*)'",
+  },
+  {
+    what: 'check-method captions (CHECK_METHOD_LABELS)',
+    file: 'types/index.ts',
+    block: 'CHECK_METHOD_LABELS',
+    // Rendered through t() by both CHECK_METHODS pickers (NodeModal and
+    // PendingDeviceModal), which is why there is one table and not two.
+    verbatim: ['HTTP', 'HTTPS', 'TCP', 'SSH', 'Prometheus'],
+  },
+  {
     what: 'card editor field labels (computeLabel())',
     file: 'lib/cardEditorForm.ts',
     block: 'LABELS',
   },
 ]
 
-/** Read the display fields inside `export const <name> = { … }` or `[ … ]`. */
-export function valuesInBlock(source: string, name: string, fields?: string[]): string[] {
-  const start = source.indexOf(name)
-  if (start === -1) return []
-  // The table may be an object or an array of objects. Find the first opener
-  // that actually contains something: a type annotation can carry an empty `[]`
-  // just before the real literal.
-  let open = -1
-  for (let i = start; i < source.length; i++) {
-    const c = source[i]
-    if (c !== '{' && c !== '[') continue
-    if (source[i + 1] === (c === '{' ? '}' : ']')) { i += 1; continue }
-    open = i
-    break
-  }
-  if (open === -1) return []
+/** Index of the `}`/`]` that closes the block opened at `open`, or -1. */
+function balancedEnd(source: string, open: number): number {
   const closer = source[open] === '{' ? '}' : ']'
   const opener = source[open]
-
   let depth = 0
   for (let i = open; i < source.length; i++) {
     if (source[i] === opener) depth++
     else if (source[i] === closer) {
       depth--
-      if (depth === 0) {
-        const body = source.slice(open, i)
-        const quoted = (s: string) => s.replace(/\\'/g, "'").replace(/\\"/g, '"')
-        const found: string[] = []
-        if (!fields) {
-          for (const m of body.matchAll(/:\s*'((?:[^'\\]|\\')*)'/g)) found.push(m[1])
-          for (const m of body.matchAll(/\[([^\]]*)\]/g)) {
-            for (const n of m[1].matchAll(/'((?:[^'\\]|\\')*)'/g)) found.push(n[1])
-          }
-        } else {
-          for (const field of fields) {
-            const scalar = new RegExp(`\\b${field}:\\s*'((?:[^'\\\\]|\\\\.)*)'`, 'g')
-            for (const m of body.matchAll(scalar)) found.push(m[1])
-            const arr = new RegExp(`\\b${field}:\\s*\\[([^\\]]*)\\]`, 'g')
-            for (const m of body.matchAll(arr)) {
-              for (const n of m[1].matchAll(/'((?:[^'\\]|\\')*)'/g)) found.push(n[1])
-            }
-          }
-        }
-        return [...new Set(found.map(quoted))]
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+/** Read the display fields inside `export const <name> = { … }` or `[ … ]`. */
+export function valuesInBlock(source: string, name: string, fields?: string[]): string[] {
+  const start = source.indexOf(name)
+  if (start === -1) return []
+  // The table may be an object, an array of objects, or preceded by a type
+  // annotation. `const NODE_TYPE_GROUPS: { label: string; types: NodeType[] }[] = [`
+  // opens a brace before the literal even begins, and taking that one yielded
+  // zero values — the check then failed with "0 values, selector is stale" on
+  // a table that was in fact fully translated. So an opener has to be
+  // *validated*, not merely located: a type annotation holds no string
+  // literal, a real table does.
+  let open = -1
+  for (let i = start; i < source.length; i++) {
+    if (source[i] !== '{' && source[i] !== '[') continue
+    if (source[i + 1] === (source[i] === '{' ? '}' : ']')) { i += 1; continue }
+    const end = balancedEnd(source, i)
+    if (end === -1) break
+    if (!/['"]/.test(source.slice(i, end))) { i = end; continue }
+    open = i
+    break
+  }
+  if (open === -1) return []
+  const closeAt = balancedEnd(source, open)
+  if (closeAt === -1) return []
+  const body = source.slice(open, closeAt)
+  const quoted = (s: string) => s.replace(/\\'/g, "'").replace(/\\"/g, '"')
+  const found: string[] = []
+  if (!fields) {
+    for (const m of body.matchAll(/:\s*'((?:[^'\\]|\\')*)'/g)) found.push(m[1])
+    for (const m of body.matchAll(/\[([^\]]*)\]/g)) {
+      for (const n of m[1].matchAll(/'((?:[^'\\]|\\')*)'/g)) found.push(n[1])
+    }
+  } else {
+    for (const field of fields) {
+      const scalar = new RegExp(`\\b${field}:\\s*'((?:[^'\\\\]|\\\\.)*)'`, 'g')
+      for (const m of body.matchAll(scalar)) found.push(m[1])
+      const arr = new RegExp(`\\b${field}:\\s*\\[([^\\]]*)\\]`, 'g')
+      for (const m of body.matchAll(arr)) {
+        for (const n of m[1].matchAll(/'((?:[^'\\]|\\')*)'/g)) found.push(n[1])
       }
     }
   }
-  return []
+  return [...new Set(found.map(quoted))]
 }
 
 /**
@@ -190,6 +242,8 @@ export const PROP_DEFAULTS = [
   'Label (e.g. CPU Model)',
   'Value — optional (e.g. i7-12700K)',
   'No properties — click Add to define one.',
+  // DesignModal's own default, rendered by its submit button as {t(submitLabel)}.
+  'Create',
 ] as const
 
 /**

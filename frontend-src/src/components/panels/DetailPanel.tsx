@@ -390,7 +390,14 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
   const selectedNodes = nodeIds.map((id) => nodes.find((n) => n.id === id)).filter(Boolean) as Node<NodeData>[]
 
   const handleCreate = () => {
-    const name = groupName.trim() || 'Group'
+    // The fallback becomes the group's real, persisted name — but unlike an
+    // imported label it is a *default the user is choosing right now*, shown in
+    // the sidebar a second later and renameable there. Leaving it as a plain
+    // 'Group' put the one English word in a freshly-Chinese sidebar. The
+    // upstream comment argued for keeping it a bare string; the persisted name
+    // argument still holds, so this is the deliberate trade: a Chinese default
+    // beats a stable one, and the group can always be renamed back.
+    const name = groupName.trim() || t('Group')
     onCreateGroup(name)
   }
 

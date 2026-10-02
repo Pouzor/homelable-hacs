@@ -115,6 +115,26 @@ const part: Record<string, string> = {
   '{n}mo ago': '{n} 个月前',
   '{n}y ago': '{n} 年前',
 
+  // --- export dialog -------------------------------------------------------
+  'Export Canvas': '导出画布',
+  'vector — scalable, small file': '矢量 —— 可缩放，文件小',
+  'Exporting…': '导出中…',
+  'Download': '下载',
+
+  // --- check methods (the table is read at the render site) ----------------
+  'None': '无',
+  'Ping': 'Ping',
+  'SSH': 'SSH',
+  'TCP': 'TCP',
+
+  // --- groups --------------------------------------------------------------
+  // The default name a group is created with when the user leaves the name
+  // field empty. It is persisted as the group's real name, so this is a
+  // deliberate trade rather than an oversight — see the comment in
+  // DetailPanel's handleCreate. HTTP/HTTPS/TCP/SSH/Prometheus stay verbatim
+  // and so have no entry; they are listed in DYNAMIC_TABLES[].verbatim.
+  'Group': '组',
+
   // --- status ids ----------------------------------------------------------
   // A node's status is rendered straight from its stored id, so the ids are
   // keys in their own right. The capitalised spellings are the filter

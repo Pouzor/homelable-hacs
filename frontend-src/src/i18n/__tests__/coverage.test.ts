@@ -44,7 +44,10 @@ describe('tables whose values reach t() at runtime', () => {
       const all = valuesOf(src, table)
       // Guard against a stale selector making this pass vacuously.
       expect(all.length, `no values found in ${table.file} — the selector is stale`).toBeGreaterThan(0)
-      const missing = all.filter((v) => !dict.has(v))
+      // Protocol names are exempt by *value*, not by table: a table-level
+      // exemption would cover every string later added to the same table.
+      const verbatim = new Set<string>(table.verbatim ?? [])
+      const missing = all.filter((v) => !verbatim.has(v) && !dict.has(v))
       expect(
         missing,
         `These ${table.what} fall back to English (from ${table.file}):\n` + missing.join('\n'),
@@ -75,6 +78,11 @@ describe('no English string literal reaches a render site untranslated', () => {
   // deliberately blunt: it flags anything prose-shaped that is not inside t().
   // A hit means "look at it by hand"; a hit that is deliberate belongs in
   // ALLOWED with the reason stated.
+  const STR_LITERAL = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g
+
+  // shadcn primitives: class tables and structural markup only, no copy.
+  const SKIP_DIRS = new Set(['node_modules', 'i18n', 'test', '__tests__', 'ui'])
+
   const ALLOWED = new Map<string, string>([
     // Sample input, not copy. These have no dictionary entry on purpose.
     ['My Server', 'sample input'],
@@ -124,6 +132,46 @@ describe('no English string literal reaches a render site untranslated', () => {
     ['CPU Model', 'property key minted by the importers, becomes data'],
     ['CPU Cores', 'property key minted by the importers, becomes data'],
     ['Z-Wave ID', 'property key minted by the Z-Wave importer, becomes data'],
+    ['Vendor', 'property key minted by the importers, becomes data'],
+    ['Model', 'property key minted by the importers, becomes data'],
+    ['MemoryStick', 'sample device_type in importYaml fixtures, becomes data'],
+    ['HardDrive', 'sample device_type in importYaml fixtures, becomes data'],
+    // Key chords. ShortcutsModal holds them verbatim on purpose: "Ctrl" is the
+    // key the user presses, and translating it would make the help wrong.
+    ['Ctrl', 'a key binding, shown as the key the user presses'],
+    ['Scroll', 'a key binding, shown as the gesture the user performs'],
+    ['Drag', 'a key binding, shown as the gesture the user performs'],
+    // Developer-facing errors: thrown for a maintainer reading the console,
+    // never rendered in the panel's UI.
+    ['authApi.login (HA handles auth)', 'developer note, not user-facing copy'],
+    ['useHass must be used inside <HassProvider>', 'developer error text, thrown rather than rendered'],
+    ['configuration must be a mapping', 'developer error text, thrown rather than rendered'],
+    ['`height` must be a positive number of pixels', 'developer error text, thrown rather than rendered'],
+    ['upload failed', 'developer error text, rethrown after a translated toast'],
+    // Property-name suggestions offered in the rack editor. Accepting one
+    // creates a property *by that name*, so it is data the user will read back
+    // on the canvas, not chrome.
+    ['Length', 'a property-name suggestion; picking it creates a property with this name'],
+    ['Speed', 'a property-name suggestion; picking it creates a property with this name'],
+    ['Category', 'a property-name suggestion; picking it creates a property with this name'],
+  ])
+
+  /**
+   * Exemptions that only hold in one file.
+   *
+   * ALLOWED above is keyed by the string alone, so excusing `Status` for the
+   * Markdown exporter would also excuse an untranslated `<span>Status</span>`
+   * written in any other component later — a hole opened in the whole sweep to
+   * close one line. These words are common enough that the blast radius is
+   * real, so the exemption is pinned to the file that earned it.
+   *
+   * The markdown table is left English on purpose, together with its body: the
+   * body is raw data (`server`, `online`), so Chinese headings over English
+   * values would be a half-translated artifact, and the table is copied out as
+   * a data contract. See the comment in exportMarkdown.ts.
+   */
+  const ALLOWED_BY_FILE = new Map<string, Set<string>>([
+    ['utils/exportMarkdown.ts', new Set(['Label', 'Type', 'IP', 'Hostname', 'Status', 'Services'])],
   ])
   // The modal title defaults, each of which the modal renders as {t(title)}.
   for (const title of DIALOG_TITLES) {
@@ -157,41 +205,177 @@ describe('no English string literal reaches a render site untranslated', () => {
     /^\s*import\b/,
     /^\s*export\s+.*from/,
     /^\s*$/,
-    /className=/,
     /\bfrom ['"]/,
-    /data-[a-z-]+=/,
     /console\.(log|warn|error|info)/,
     /@ts-ignore/,
     /@ts-expect-error/,
     /eslint/,
   ]
 
+  /**
+   * Blank out the parts of a line that are structurally not copy, instead of
+   * skipping whole lines.
+   *
+   * Skipping the line was wrong twice over: `<DialogTitle className="…">Export
+   * Canvas</DialogTitle>` carries its title on a line that also has a
+   * className, so the whole line — title included — was skipped and
+   * ExportModal shipped in English. The same happened with a t() call sharing
+   * a line with a data-attribute. Masking the className value keeps the copy.
+   */
+  function maskNonCopy(line: string): string {
+    return line
+      .replace(/\bclassName\s*=\s*"[^"]*"/g, 'className=""')
+      .replace(/\bclassName\s*=\s*\{[^{}]*\}/g, 'className={}')
+      .replace(/\bdata-[\w-]+\s*=\s*"[^"]*"/g, 'data-x=""')
+      .replace(/\bstyle\s*=\s*\{\{[^}]*\}\}/g, 'style={{}}')
+  }
+
+  // Proper nouns and protocol names. Kept verbatim in every locale, so a
+  // scanner that cannot recognise them produces noise nobody acts on.
+  const PROPER_NOUNS = new Set([
+    'Proxmox', 'Zigbee', 'Z-Wave', 'Zigbee2MQTT', 'Prometheus', 'Ping', 'Health',
+    'Serial', 'UDP', 'TCP', 'SSH', 'HTTP', 'HTTPS', 'MQTT', 'Mattermost', 'Ntfy',
+    'OpnSense', 'Portainer', 'MemoryStick', 'HardDrive', 'Disk', 'Unraid', 'Synology',
+    'Home Assistant', 'InfluxDB', 'Grafana', 'WireGuard', 'OpenVPN', 'Netdata',
+    'Homelable', 'PVEAuditor', 'Serif', 'Sans', 'Mono', 'Inter', 'Georgia',
+  ])
+
+  // Not copy, and in bulk: CSS values, path data, key names. This list is the
+  // difference between a check that reports six real misses and one that
+  // reports three hundred Tailwind class strings, which is a check nobody reads.
+  const NOT_COPY = [
+    // An interpolated value, not a fixed phrase: a CSS length, a coordinate, an id.
+    /\$\{/,
+    // SVG path data, including the multi-command form.
+    /^[MmLlHhVvCcSsQqTtAaZz][\d\s.,MLHVCSQTAZmlhvcsqtaz-]*$/,
+    // A fragment of a template literal or a TS type, not a phrase.
+    /^\s*[:}]/,
+    /\bas\s+[A-Z][\w<>[\]]*$/,
+    /=>|\)\s*\.|\bas\s+Node\b/,
+    /^\(?[\w.]*\)?\s*[=!]==?|\)\)$/,
+    /\b(event|props|state)\s*:\s*[A-Z]\w*Props/,
+    /^\(?\w+\)?:\s*!/,
+    // A TypeScript type or expression caught by the JSX-text pass, which cannot
+    // tell `Promise<() => void>` from a sentence because both contain `>`.
+    /\b(Promise|Record|Partial|Map|Set|Omit|Pick|Node|Edge|ReactNode|KeyboardEvent)\b/,
+    /[[\]<>]|\b(edges|types|id)\s*:/,
+    /^\s*[=(,]|[,:=]\s*$/,
+    // An inline style declaration on a custom element.
+    /(^|[\s{])(width|height|display|margin|padding|border|background|color|font|position|top|left|right|bottom)\s*:\s*[\w#(]/,
+    /\b\d+px\b.*\b\d+px\b|\d+%/,
+    // A font stack — ends in a generic family.
+    /,\s*(monospace|serif|sans-serif|cursive|fantasy|system-ui|ui-sans-serif|ui-monospace|ui-serif)$/,
+    /^(var|calc|rgba?|hsla?|linear-gradient|radial-gradient|repeating-linear-gradient)\b/,
+    /^\d+(\.\d+)?(px|rem|em|%|vh|vw|ms|s|fr|deg|ch|ex|pt)$/,
+    /^\d/,                                        // a bare number or "12px 16px"
+    /#[0-9a-f]{3,8}\b/i,                           // a colour
+    /\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b/,
+    /^(translate|scale|rotate|transform|opacity|filter|drop-shadow|all|transition|animation|animate-in|fade-in|zoom-in)\b/,
+    /cubic-bezier|steps\(|ease-in|ease-out|infinite|forwards/,
+    // Tailwind arbitrary values and state prefixes; no sentence has these.
+    /^\[?[a-z-]*:[\w-]+[/:\]]/,                     // hover:, dark:, [a]:
+    /\[[&>:~*]|\[[a-z]/,                            // [&_svg], [&>svg], [data-…
+    /\b(focus-visible|hover|active|disabled|group-hover|peer-checked|data-\[)/,
+    /(w-|h-|px-|py-|mt-|mb-|ml-|mr-|pt-|pb-|gap-|flex|grid|rounded|items-|justify-|shrink|overflow|truncate|inline-)/,
+    /(text-(xs|sm|base|lg|xl|foreground|muted|destructive|primary|secondary|white))/, 
+    /^(bg-|border-|from-|to-|via-|ring-|shadow-|fill-|stroke-|divide-|outline-)/,
+    // HTML attribute keywords and framework directives.
+    /^noopener\b/,
+    /^noreferrer\b/,
+    /^use client$/,
+    /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s/,
+    // KeyboardEvent.key values: compared against, never displayed.
+    /^(Enter|Escape|Delete|Backspace|Space|Shift|Control|ControlLeft|ControlRight|Meta|Alt|ShiftLeft|ShiftRight|Tab|Arrow\w+|Home|End|PageUp|PageDown)$/,
+  ]
+
   const isProse = (s: string) => {
-    if (!/^[A-Z]/.test(s) || !/\s/.test(s) || s.length < 6) return false
+    if (s.length < 4) return false
+    if (!/[A-Za-z]/.test(s)) return false
+    if (PROPER_NOUNS.has(s)) return false
+    // Two or more letters, and either a space or a starting capital. Requiring
+    // both used to mean a single-word button label — "Cancel", "Download",
+    // "Exporting…" — was treated as data, and ExportModal shipped with all
+    // three in English plus a title and two option captions.
+    const hasUpper = /^[A-Z]/.test(s)
+    if (!hasUpper && !/\s/.test(s)) return false
+    if ((s.match(/[A-Za-z]/g) ?? []).length < 2) return false
     if (/^[A-Z0-9_./:-]+$/.test(s)) return false
-    // SVG path data. Interpolated coordinates are stripped first: their variable
-    // names would never match a path-command character class.
-    const bare = s.replace(/\$\{[^}]*\}/g, '')
-    if (/^[MmLlHhVvCcSsQqTtAaZz][\d\s.,MHmLlHhVvCcSsQqTtAaZz-]*$/.test(bare)) return false
-    if (/,\s*(monospace|serif|sans-serif|cursive|fantasy)$/.test(s)) return false
-    if (/^(Bearer|Basic)\s/.test(s)) return false
-    // An HTTP verb used as a terse note, e.g. "GET /nodes".
-    if (/^(GET|POST|PUT|PATCH|DELETE|HEAD)\s+\//.test(s)) return false
-    // Composite keys built by joining fields with a pipe — de-duplication keys,
-    // cache keys, the like. Never shown to anyone.
-    if (s.includes('|')) return false
+    if (NOT_COPY.some((re) => re.test(s))) return false
     return true
   }
 
+  /**
+   * Literals handed to `t()` on this line.
+   *
+   * A plain /\bt\('…'\)/ misses `t(cond ? 'A' : 'B')`, which is how the card
+   * editor and the scan-status filter both pass their two branches. Reading
+   * only the ternary's left side would report a translated string as a miss.
+   */
+  function literalsPassedToT(line: string): string[] {
+    const out: string[] = []
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] !== 't' || line[i + 1] !== '(') continue
+      if (i > 0 && /[A-Za-z0-9_$.]/.test(line[i - 1])) continue
+      // Balance within the line, or to its end when the call continues below —
+      // `toast.success(t('Found {count} devices', {` is the common shape, and
+      // stopping at the first line would miss the key that matters most.
+      let depth = 0
+      let end = line.length
+      for (let j = i + 1; j < line.length; j++) {
+        if (line[j] === '(') depth++
+        else if (line[j] === ')') {
+          depth--
+          if (depth === 0) {
+            end = j
+            break
+          }
+        }
+      }
+      for (const m of line.slice(i + 2, end).matchAll(STR_LITERAL)) {
+        // Trimmed to match what `report()` compares. Without this, every
+        // fragment key that deliberately keeps its English join space —
+        // 'Ranges are managed in ', 'Gateway: ' — is reported as a miss
+        // even though the t() call is right there on the line.
+        out.push(
+          m[2]
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .trim(),
+        )
+      }
+    }
+    return out
+  }
+
+  /** Net paren depth of a line, ignoring anything inside quotes. */
+  function parenDelta(line: string): number {
+    let depth = 0
+    let quote: string | null = null
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i]
+      if (quote) {
+        if (c === '\\') i++
+        else if (c === quote) quote = null
+        continue
+      }
+      if (c === "'" || c === '"' || c === '`') quote = c
+      else if (c === '(') depth++
+      else if (c === ')') depth--
+    }
+    return depth
+  }
+
   it('finds nothing outside the allowlist', () => {
-    // A string that has a dictionary entry is, by definition, translated — so it
-    // is skipped here even when the `t()` is applied somewhere other than this
-    // line. That covers the three shapes an earlier version of this sweep
-    // false-positived on: values in a data table (`t(source.description)`),
-    // component defaults (`title = 'Add Node'`, rendered as `{t(title)}`), and a
-    // default sliced before lookup. A genuine miss has no entry, and that is
-    // exactly what this test is here to catch.
-    const dict = dictionaryKeys()
+    // Having a dictionary entry is deliberately NOT enough to excuse a literal.
+    // An earlier version of this sweep skipped anything `dict.has(v)`, on the
+    // reasoning that an entry proves the string is translated. It does not —
+    // it proves someone *wrote* a translation, not that any call site reads
+    // it. ExportModal carried 'Standard'/'High'/'Ultra' in the dictionary the
+    // whole time and rendered all three in English, because it printed
+    // `opt.label` rather than `t(opt.label)`. See the note on `report` below.
+    //
+    // What *is* skipped is a value that provably reaches `t()` some other way:
+    // a DYNAMIC_TABLES entry read at a render site, or a declared exemption.
     const tableValues = new Set<string>()
     for (const table of DYNAMIC_TABLES) {
       for (const v of valuesOf(fs.readFileSync(path.join(SRC, table.file), 'utf8'), table)) {
@@ -204,10 +388,7 @@ describe('no English string literal reaches a render site untranslated', () => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
         const full = path.join(d, e.name)
         if (e.isDirectory()) {
-          if (e.name === 'node_modules' || e.name === 'i18n') continue
-          // Fixtures, not app copy — a test's expected string is not something
-          // a user ever sees rendered.
-          if (e.name === 'test' || e.name === '__tests__') continue
+          if (SKIP_DIRS.has(e.name)) continue
           walk(full)
         } else if (/\.(ts|tsx)$/.test(e.name) && !/\.(test|spec)\.(ts|tsx)$/.test(e.name)) {
           files.push(full)
@@ -218,31 +399,130 @@ describe('no English string literal reaches a render site untranslated', () => {
     expect(files.length).toBeGreaterThan(50)
 
     const hits: string[] = []
+    // A t() call may open on one line and close several lines later, as in
+    // `t('{nodes} nodes · …', { nodes: d.node_count ?? 0, })`. Scanning line by
+    // line then misses the key, and the body — object keys, expressions — gets
+    // read as copy. So once a line opens an unclosed `t(`, the lines up to its
+    // close are skipped. The trigger is specifically `t(`: tracking *every*
+    // unbalanced paren would swallow ordinary multi-line JSX instead.
+    let inTCall = false
+    let tDepth = 0
     for (const f of files) {
+      const rel = path.relative(SRC, f).split(path.sep).join('/')
+      // Only the file that earned the exemption gets it — see ALLOWED_BY_FILE.
+      const exemptHere = ALLOWED_BY_FILE.get(rel)
       let inBlock = false
       for (const [i, raw] of fs.readFileSync(f, 'utf8').split(/\r?\n/).entries()) {
-        const { code: line, inBlock: stillInBlock } = stripComments(raw, inBlock)
+        const { code: masked, inBlock: stillInBlock } = stripComments(raw, inBlock)
         inBlock = stillInBlock
+        const line = maskNonCopy(masked)
         if (SKIP_LINE.some((re) => re.test(line))) continue
-        const translated = new Set(
-          [...line.matchAll(/\bt\((['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map((m) => m[2]),
-        )
-        for (const m of line.matchAll(/(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)) {
-          const v = m[2]
+        if (inTCall) {
+          tDepth += parenDelta(line)
+          if (tDepth <= 0) inTCall = false
+          continue
+        }
+        const translated = new Set(literalsPassedToT(line))
+        if (/(?:^|[^A-Za-z0-9_$.])t\(/.test(line)) {
+          const d = parenDelta(line)
+          if (d > 0) {
+            inTCall = true
+            tDepth = d
+          }
+        }
+        const seen = new Set<string>()
+
+        // `dict.has(v)` is deliberately NOT a reason to skip. A dictionary
+        // entry only proves a translation was *written*; nothing proves a call
+        // site reads it. ExportModal had 'Standard'/'High'/'Ultra' in the
+        // dictionary and still rendered English, because it printed
+        // `opt.label` instead of `t(opt.label)` — a dead entry, invisible to
+        // every check that asked "is this key translated?" rather than
+        // "is this literal routed through t()?". Membership is not wiring.
+        const report = (raw: string) => {
+          const v = raw.trim()
+          if (!v || seen.has(v)) return
+          seen.add(v)
           // A lookup fallback that is data rather than copy — see
-          // NON_KEY_LITERALS. Prose-shaped rules would not catch these anyway,
-          // but naming them here keeps one list as the single source of truth.
-          if ((NON_KEY_LITERALS as readonly string[]).includes(v)) continue
-          if (!isProse(v) || translated.has(v) || dict.has(v) || tableValues.has(v) || ALLOWED.has(v)) continue
-          if (/^https?:|^\/|^\.|^#/.test(v)) continue
+          // NON_KEY_LITERALS. Naming them here keeps one list authoritative.
+          if ((NON_KEY_LITERALS as readonly string[]).includes(v)) return
+          if (!isProse(v) || translated.has(v) || tableValues.has(v)) return
+          if (exemptHere?.has(v) || ALLOWED.has(v)) return
+          if (/^https?:|^\/|^\.|^#/.test(v)) return
           hits.push(`${path.relative(SRC, f)}:${i + 1}  ${JSON.stringify(v)}`)
         }
+
+        for (const m of line.matchAll(STR_LITERAL)) report(m[2])
+
+        // JSX text. Not a string literal — `<DialogTitle>Export Canvas</…>`
+        // has no quotes anywhere, so a sweep that only reads quoted strings
+        // never sees it. That is how ExportModal shipped a title, a Cancel
+        // button, a Download button and an "Exporting…" spinner in English
+        // while every quoted string around them was translated.
+        for (const m of line.matchAll(/>\s*([^<>{}]*[A-Za-z][^<>{}]*?)\s*</g)) report(m[1])
       }
     }
     expect(
       hits,
       `Untranslated English literals — translate them, or add them to ALLOWED with a reason:\n${hits.join('\n')}`,
     ).toEqual([])
+  })
+
+  /**
+   * The exemptions above are the only way a real miss gets to hide, so each one
+   * is pinned to the thing that earned it. Without these the lists rot in the
+   * one direction that matters: a file gets renamed, or a new English string
+   * lands in an exempted file, and the exemption quietly becomes a permanent
+   * green light for that file.
+   */
+  it('the file-scoped allowlist covers only what it declares', () => {
+    for (const [rel, exempt] of ALLOWED_BY_FILE) {
+      const full = path.join(SRC, rel)
+      expect(fs.existsSync(full), `${rel} is allowlisted but no longer exists`).toBe(true)
+
+      // Nothing may be downgraded to the global list: a bare ALLOWED entry is
+      // keyed by string alone and would excuse the same word in every file.
+      for (const v of exempt) {
+        expect(ALLOWED.has(v), `${JSON.stringify(v)} is in both ALLOWED and ALLOWED_BY_FILE`).toBe(false)
+      }
+
+      // Every prose literal in the file must be declared. A new heading added
+      // next to the existing ones is exactly the regression this catches.
+      // Presence is tracked separately from prose-ness: 'IP' is two characters
+      // and so never reaches the sweep at all, but it is still a string the
+      // exemption names and must not be reported as stale.
+      const src = fs.readFileSync(full, 'utf8')
+      const present = new Set<string>()
+      const inFile = new Set<string>()
+      for (const m of src.matchAll(STR_LITERAL)) {
+        const v = m[2].trim()
+        if (!v) continue
+        present.add(v)
+        if (isProse(v)) inFile.add(v)
+      }
+      const undeclared = [...inFile].filter((v) => !exempt.has(v))
+      expect(
+        undeclared,
+        `${rel} has English prose the allowlist does not declare: ${undeclared.join(', ')}\n` +
+          'Either translate it, or add it to ALLOWED_BY_FILE with a reason.',
+      ).toEqual([])
+
+      // And no entry may outlive the literal it was written for.
+      const stale = [...exempt].filter((v) => !present.has(v))
+      expect(stale, `${rel} is allowlisted for strings it no longer contains`).toEqual([])
+    }
+  })
+
+  it('no dynamic table waives its whole value set', () => {
+    // `verbatim` exists for protocol names. If it ever covered a whole table
+    // the entry would assert nothing at all while still reading as coverage.
+    for (const table of DYNAMIC_TABLES) {
+      if (!table.verbatim?.length) continue
+      const src = fs.readFileSync(path.join(SRC, table.file), 'utf8')
+      const all = valuesOf(src, table)
+      const waived = all.filter((v) => (table.verbatim ?? []).includes(v))
+      expect(waived.length, `${table.what} waives every value it has`).toBeLessThan(all.length)
+    }
   })
 
   /**
@@ -359,7 +639,6 @@ describe('no English string literal reaches a render site untranslated', () => {
       /^[a-z0-9_.-]+$/.test(s) ||
       /^[a-z0-9.-]+\.(com|net|org|io|lan|local)$/i.test(s)
 
-    const dict = dictionaryKeys()
     const hits: string[] = []
     for (const f of files) {
       let inBlock = false
@@ -399,6 +678,48 @@ describe('no English string literal reaches a render site untranslated', () => {
     expect(
       hits,
       `Lower-case English hints reaching the screen — wrap them in t():\n${hits.join('\n')}`,
+    ).toEqual([])
+  })
+
+  /**
+   * Every read of the check-method table must be wrapped in `t()`.
+   *
+   * This is the one gap the other checks cannot close. The literal sweep skips
+   * table values (they are data), the dictionary test only asks whether `Ping`
+   * *has* an entry, and neither notices that a render site stopped calling
+   * `t()` — the value is still translated, it just is not being read any more.
+   * That is exactly how PendingDeviceModal's picker shipped a bare English
+   * `Ping` next to a fully-Chinese form: NodeModal had been fixed, the second
+   * copy of the table had not, and all 2071 tests were green.
+   *
+   * The tables are now one, so this asserts that neither caller can quietly
+   * drop the wrapper again, and a re-introduced local copy would fail too.
+   */
+  it('routes every check-method caption read through t()', () => {
+    const CALLERS = [
+      'components/modals/NodeModal.tsx',
+      'components/modals/PendingDeviceModal.tsx',
+    ]
+    const hits: string[] = []
+    for (const rel of CALLERS) {
+      const src = fs.readFileSync(path.join(SRC, rel), 'utf8')
+      let inBlock = false
+      for (const [i, raw] of src.split(/\r?\n/).entries()) {
+        const { code: line, inBlock: stillInBlock } = stripComments(raw, inBlock)
+        inBlock = stillInBlock
+        // The import is the one legitimate bare mention.
+        if (/^\s*import\b/.test(line)) continue
+        for (const m of line.matchAll(/\bCHECK_METHOD_LABELS\b/g)) {
+          const before = line.slice(0, m.index)
+          // `t(CHECK_METHOD_LABELS[…])` is the only acceptable shape.
+          if (/\bt\(\s*$/.test(before)) continue
+          hits.push(`${rel}:${i + 1}  CHECK_METHOD_LABELS read without t()`)
+        }
+      }
+    }
+    expect(
+      hits,
+      `Check-method captions reaching the screen untranslated:\n${hits.join('\n')}`,
     ).toEqual([])
   })
 })

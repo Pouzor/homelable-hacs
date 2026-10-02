@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from '@/i18n'
 import { Download, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -35,7 +36,7 @@ export function ExportModal({ open, onClose, getElement }: ExportModalProps) {
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="bg-[#161b22] border-border max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-foreground">Export Canvas</DialogTitle>
+          <DialogTitle className="text-foreground">{t('Export Canvas')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-2 py-2">
@@ -51,8 +52,8 @@ export function ExportModal({ open, onClose, getElement }: ExportModalProps) {
                   : 'border-border bg-[#0d1117] text-muted-foreground hover:border-muted-foreground',
               ].join(' ')}
             >
-              <span className="font-medium">{opt.label}</span>
-              <span className="text-xs opacity-70">{opt.hint}</span>
+              <span className="font-medium">{t(opt.label)}</span>
+              <span className="text-xs opacity-70">{t(opt.hint)}</span>
             </button>
           ))}
 
@@ -67,20 +68,20 @@ export function ExportModal({ open, onClose, getElement }: ExportModalProps) {
             ].join(' ')}
           >
             <span className="font-medium">SVG</span>
-            <span className="text-xs opacity-70">vector — scalable, small file</span>
+            <span className="text-xs opacity-70">{t('vector — scalable, small file')}</span>
           </button>
         </div>
 
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={exporting}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose} disabled={exporting}>{t('Cancel')}</Button>
           <Button
             onClick={handleExport}
             disabled={exporting}
             style={{ background: '#00d4ff', color: '#0d1117' }}
           >
             {exporting
-              ? <><Loader2 size={14} className="animate-spin mr-1.5" />Exporting…</>
-              : <><Download size={14} className="mr-1.5" />Download</>
+              ? <><Loader2 size={14} className="animate-spin mr-1.5" />{t('Exporting…')}</>
+              : <><Download size={14} className="mr-1.5" />{t('Download')}</>
             }
           </Button>
         </DialogFooter>

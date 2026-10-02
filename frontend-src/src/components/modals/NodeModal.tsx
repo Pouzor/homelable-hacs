@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { NODE_TYPE_LABELS, type NodeData, type NodeType, type CheckMethod, type NodeTypeStyle } from '@/types'
+import { NODE_TYPE_LABELS, CHECK_METHOD_LABELS, type NodeData, type NodeType, type CheckMethod, type NodeTypeStyle } from '@/types'
 import { useThemeStore } from '@/stores/themeStore'
 import { resolveNodeColors } from '@/utils/nodeColors'
 import { ICON_REGISTRY, NODE_TYPE_DEFAULT_ICONS, isBrandIconKey, brandIconSlug, brandIconUrl } from '@/utils/nodeIcons'
@@ -83,16 +83,6 @@ function CPStepper({ label, side, value, onChange }: {
 const CHECK_METHODS: CheckMethod[] = ['none', 'ping', 'http', 'https', 'tcp', 'ssh', 'prometheus', 'health']
 const CONTAINER_MODE_TYPES: NodeType[] = ['proxmox', 'vm', 'lxc', 'docker_host']
 
-const CHECK_METHOD_LABELS: Record<CheckMethod, string> = {
-  none: 'None',
-  ping: 'Ping',
-  http: 'HTTP',
-  https: 'HTTPS',
-  tcp: 'TCP',
-  ssh: 'SSH',
-  prometheus: 'Prometheus',
-  health: 'Health',
-}
 
 // Ping/SSH probe a bare host; tcp wants host:port; http-family wants a URL.
 // A misleading `http://...` placeholder makes users enter a URL for ping,
@@ -376,13 +366,13 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <Select value={form.check_method ?? 'ping'} onValueChange={(v) => set('check_method', v as CheckMethod)}>
                     <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label={t('Check method selector')}>
                       <SelectValue>
-                        {(form.check_method ?? 'ping') === 'health' ? t('Health') : CHECK_METHOD_LABELS[(form.check_method ?? 'ping') as CheckMethod]}
+                        {(form.check_method ?? 'ping') === 'health' ? t('Health') : t(CHECK_METHOD_LABELS[(form.check_method ?? 'ping') as CheckMethod])}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent className="bg-[#21262d] border-[#30363d]">
                       {CHECK_METHODS.map((m) => (
                         <SelectItem key={m} value={m} className="text-sm">
-                          {m === 'health' ? t('Health') : CHECK_METHOD_LABELS[m]}
+                          {m === 'health' ? t('Health') : t(CHECK_METHOD_LABELS[m])}
                         </SelectItem>
                       ))}
                     </SelectContent>
