@@ -3,9 +3,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.homelable import async_setup_entry, async_unload_entry, scanner
+from custom_components.homelable import (
+    async_setup,
+    async_setup_entry,
+    async_unload_entry,
+    scanner,
+)
 from custom_components.homelable.const import CONF_PANEL_ADMIN_ONLY, DOMAIN
 
 
@@ -99,3 +105,34 @@ async def test_setup_passes_the_admin_only_option_to_the_panel(
         assert await async_setup_entry(hass, entry) is True
 
     register_panel.assert_awaited_once_with(hass, admin_only=expected)
+
+
+async def test_component_setup_registers_the_card(hass: HomeAssistant) -> None:
+    """The card is served before any entry is set up (issue #119)."""
+    with patch("custom_components.homelable.async_register_card") as register_card:
+        assert await async_setup(hass, {}) is True
+
+    register_card.assert_awaited_once_with(hass)
+
+
+async def test_setup_registers_the_card_even_when_the_first_refresh_fails(
+    hass: HomeAssistant,
+) -> None:
+    """A slow or failing first status sweep must not hold the card back (issue #119)."""
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    hass.data[DOMAIN] = {}
+    coordinator = MagicMock(
+        async_config_entry_first_refresh=AsyncMock(side_effect=ConfigEntryNotReady)
+    )
+
+    with (
+        patch("custom_components.homelable.HomelableCoordinator", return_value=coordinator),
+        patch("custom_components.homelable.async_register_panel") as register_panel,
+        patch("custom_components.homelable.async_register_card") as register_card,
+        pytest.raises(ConfigEntryNotReady),
+    ):
+        await async_setup_entry(hass, entry)
+
+    register_card.assert_awaited_once_with(hass)
+    register_panel.assert_not_called()
