@@ -32,11 +32,20 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the Homelable component (YAML setup not supported)."""
     hass.data.setdefault(DOMAIN, {})
+    # The card module URL is baked into the page HA serves, so a dashboard
+    # loaded before it is registered never gets the card. Register it here,
+    # ahead of any entry setup, to keep that window short (issue #119).
+    await async_register_card(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Homelable from a config entry."""
+    # Before the first refresh: it sweeps every device, and may fail and be
+    # retried. Idempotent — only does work when the last entry was removed and
+    # one is added back without a restart.
+    await async_register_card(hass)
+
     coordinator = HomelableCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
@@ -51,7 +60,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_PANEL_ADMIN_ONLY, DEFAULT_PANEL_ADMIN_ONLY
         ),
     )
-    await async_register_card(hass)
     await async_register_media(hass)
 
     if PLATFORMS:
