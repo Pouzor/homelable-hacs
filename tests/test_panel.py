@@ -155,3 +155,22 @@ async def test_panel_registration_uses_the_hashed_bundle(
 
     config = register_panel.call_args.kwargs["config"]
     assert config["_panel_custom"]["module_url"] == f"{PANEL_URL}/{name}"
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [({}, False), ({"admin_only": False}, False), ({"admin_only": True}, True)],
+)
+async def test_panel_admin_only_drives_require_admin(
+    hass: HomeAssistant, frontend_dir: Path, kwargs: dict, expected: bool
+) -> None:
+    """Non-admins see the panel unless the admin opted out (issue #118)."""
+    _bundle(frontend_dir, "homelable-panel-abc123.js")
+
+    with (
+        patch.object(hass.http, "async_register_static_paths", return_value=None),
+        patch.object(panel.frontend, "async_register_built_in_panel") as register_panel,
+    ):
+        await panel.async_register_panel(hass, **kwargs)
+
+    assert register_panel.call_args.kwargs["require_admin"] is expected

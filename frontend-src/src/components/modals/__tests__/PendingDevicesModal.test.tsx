@@ -487,6 +487,39 @@ describe('PendingDevicesModal — rackable filter and picker mode', () => {
   })
 })
 
+describe('PendingDevicesModal — shortcuts while typing (homelable #546)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockPending.mockResolvedValue({ data: [DEVICE_IP] } as never)
+    mockHidden.mockResolvedValue({ data: [] } as never)
+  })
+
+  it('toggles select mode on "s" outside a field', async () => {
+    render(<PendingDevicesModal {...baseProps} />)
+    await screen.findByTestId('pending-card-dev-a')
+    fireEvent.keyDown(document.body, { key: 's' })
+    expect(screen.getByRole('button', { name: 'Exit select' })).toBeInTheDocument()
+  })
+
+  // The HA panel lives in a shadow root: the window listener sees the host as
+  // `target`, so a tagName guard let "S" through and swallowed the keystroke.
+  it('leaves "s" alone when typed in an input inside a shadow root', async () => {
+    render(<PendingDevicesModal {...baseProps} />)
+    await screen.findByTestId('pending-card-dev-a')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const input = document.createElement('input')
+    host.attachShadow({ mode: 'open' }).appendChild(input)
+
+    const event = new KeyboardEvent('keydown', { key: 'S', bubbles: true, composed: true, cancelable: true })
+    input.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(screen.getByRole('button', { name: 'Select mode' })).toBeInTheDocument()
+    host.remove()
+  })
+})
+
 describe('PendingDevicesModal — the inventory row owns the device (homelable #339)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
