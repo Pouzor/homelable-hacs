@@ -342,6 +342,40 @@ describe('zh-CN dictionary completeness', () => {
     expect(bad).toEqual([])
   })
 
+  it('merges every part file into the dictionary that ships', () => {
+    // This is the failure the other two checks cannot see: a part file can hold
+    // perfect entries, pass every "does this key have a translation?" scan, and
+    // still never reach the UI — because zh-CN.ts forgot to spread it. That
+    // happened once already, with node-types.ts: 49 device and link type
+    // captions sat on disk, every scan read them, and none of them rendered.
+    // The scans read the part files, so only a check against the *merged*
+    // export can catch it.
+    const onDisk = new Set<string>()
+    for (const name of PART_NAMES) {
+      for (const key of Object.keys(PARTS[name])) onDisk.add(key)
+    }
+    const unmerged = [...onDisk].filter((k) => !(k in fileDict))
+    expect(
+      unmerged,
+      `These keys exist in a part file but not in the merged dictionary — check zh-CN.ts imports and spreads every part:\n${unmerged.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('has no part file the barrel forgets to import', () => {
+    // The reverse direction of the check above, stated structurally: a new
+    // part file added to the directory but not wired up is silent otherwise.
+    const dir = path.join(SRC_ROOT, 'i18n/locales/parts')
+    const onDisk = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => f.replace(/\.ts$/, ''))
+    const missing = onDisk.filter((name) => !(PART_NAMES as readonly string[]).includes(name))
+    expect(
+      missing,
+      `Part files not listed in PART_NAMES, so no test checks them:\n${missing.join('\n')}`,
+    ).toEqual([])
+  })
+
   it('scans a real source tree, not an empty one', () => {
     // Guards the two scans below: a broken path would report zero files and make
     // every assertion pass vacuously.

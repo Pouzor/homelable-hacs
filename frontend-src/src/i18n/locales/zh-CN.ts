@@ -1,8 +1,8 @@
-/**
+﻿/**
  * Simplified Chinese translations for the Home Assistant panel.
  *
  * Keys are the English source strings used at the call site (`t('Save')`), so a
- * missing key renders the English text rather than blank space — a gap degrades
+ * missing key renders the English text rather than blank space 鈥?a gap degrades
  * to English instead of breaking the UI. See ../core.ts for the rationale.
  *
  * The dictionary is split into `parts/*` because the work was spread across a
@@ -17,7 +17,7 @@
  *   - Keep technical identifiers verbatim: Proxmox, Z-Wave, Zigbee, MQTT, IP,
  *     LQI, Markdown, VLAN, NAS, SFP.
  *   - A part file is a *copy* of the main app's part, trimmed to the keys this
- *     panel actually renders — shipping unused entries would fail the stale-key
+ *     panel actually renders 鈥?shipping unused entries would fail the stale-key
  *     check that keeps the dictionary honest.
  *   - `__tests__/i18n.test.tsx` and `__tests__/coverage.test.ts` scan the
  *     source tree and fail on any key used in code that is missing here, on any
@@ -36,8 +36,9 @@ import rack from './parts/rack'
 // the Lovelace card picker entry, the Zigbee / Z-Wave import modals,
 // pending-device approval, scan configuration and the design editor.
 import panel from './parts/panel'
-// Values handed to t() at the render site rather than written as literals —
+// Values handed to t() at the render site rather than written as literals 鈥?
 // see DYNAMIC_TABLES in ../dynamicTables.ts.
+import nodeTypes from './parts/node-types'
 import designIcons from './parts/design-icons'
 import icons from './parts/icons'
 
@@ -51,6 +52,7 @@ const zhCN: Record<string, string> = {
   ...documentation,
   ...rack,
   ...panel,
+  ...nodeTypes,
   ...designIcons,
   ...icons,
 }
