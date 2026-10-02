@@ -21,6 +21,7 @@ import { buildMacProperty } from '@/utils/macProperty'
 import { formatRelative, formatTimestamp } from '@/utils/timeFormat'
 import { getCenteredPosition } from '@/utils/viewportCenter'
 import { applyAutoEdges, type AutoEdge } from '@/utils/autoEdges'
+import { isTypingTarget } from '@/utils/keyboard'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
@@ -482,8 +483,7 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      const inField = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')
+      const inField = isTypingTarget(e)
       if (e.key === 'Escape') {
         if (selectMode && selectedIds.size > 0) { e.preventDefault(); setSelectedIds(new Set()) }
         return

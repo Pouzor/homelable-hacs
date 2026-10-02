@@ -10,6 +10,7 @@ import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
 import { getCenteredPosition } from '@/utils/viewportCenter'
+import { isTypingTarget } from '@/utils/keyboard'
 import { resolveVirtualEdgeParent, needsVirtualEdge } from '@/utils/virtualEdgeParent'
 import { planContainerModeEdgeSync } from '@/utils/containerEdgeSync'
 import { generateMarkdownTable } from '@/utils/exportMarkdown'
@@ -274,8 +275,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey
       // Ignore shortcuts when typing in an input/textarea
-      const tag = (e.target as HTMLElement).tagName
-      const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable
+      const isInput = isTypingTarget(e)
 
       if (ctrl && e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
       // History and clipboard belong to the logical canvas; on a rack canvas
