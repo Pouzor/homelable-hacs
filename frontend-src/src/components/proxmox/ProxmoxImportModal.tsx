@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { proxmoxApi, type ProxmoxConnection } from '@/api/ha'
+import { t, useLocale } from '@/i18n'
 import { toast } from 'sonner'
 import type { ProxmoxNode, ProxmoxEdge, ProxmoxNodeType } from './types'
 
@@ -41,12 +42,6 @@ const DEVICE_TYPE_ICON: Record<ProxmoxNodeType, typeof Server> = {
   lxc: Container,
 }
 
-const DEVICE_TYPE_LABEL: Record<ProxmoxNodeType, string> = {
-  proxmox: 'Hosts',
-  vm: 'Virtual Machines',
-  lxc: 'LXC Containers',
-}
-
 const DEVICE_TYPE_COLOR: Record<ProxmoxNodeType, string> = {
   proxmox: '#e57000',
   vm: '#00d4ff',
@@ -54,6 +49,14 @@ const DEVICE_TYPE_COLOR: Record<ProxmoxNodeType, string> = {
 }
 
 export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImported }: ProxmoxImportModalProps) {
+  useLocale()
+  // Built inside the component so the labels go through `t`; a module-level
+  // table would be created once at import, before the locale is known.
+  const deviceTypeLabel: Record<ProxmoxNodeType, string> = {
+    proxmox: t('Hosts'),
+    vm: t('Virtual Machines'),
+    lxc: t('LXC Containers'),
+  }
   const [form, setForm] = useState<ConnectionForm>(DEFAULT_FORM)
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle')
   const [connectionMsg, setConnectionMsg] = useState('')
@@ -102,7 +105,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
     err instanceof Error ? err.message : undefined
 
   const handleTestConnection = async () => {
-    if (!form.host.trim()) { toast.error('Enter a Proxmox host'); return }
+    if (!form.host.trim()) { toast.error(t('Enter a Proxmox host')); return }
     setConnectionStatus('testing')
     try {
       const res = await proxmoxApi.testConnection(buildPayload())
@@ -110,17 +113,17 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
       setConnectionMsg(res.data.message)
     } catch (err) {
       setConnectionStatus('fail')
-      setConnectionMsg(extractError(err) ?? 'Request failed — check host address')
+      setConnectionMsg(extractError(err) ?? t('Request failed — check host address'))
     }
   }
 
   const handleFetchDevices = async () => {
-    if (!form.host.trim()) { toast.error('Enter a Proxmox host'); return }
+    if (!form.host.trim()) { toast.error(t('Enter a Proxmox host')); return }
     setLoading(true)
     try {
       if (importMode === 'pending') {
         await proxmoxApi.importToPending(buildPayload())
-        toast.success('Proxmox import started — track progress in Scan History')
+        toast.success(t('Proxmox import started — track progress in Scan History'))
         onPendingImported?.()
         handleClose()
       } else {
@@ -130,13 +133,16 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
         setChecked(new Set(res.data.nodes.map((n) => n.id)))
         if (res.data.advisory) toast.warning(res.data.advisory)
         if (res.data.device_count === 0) {
-          toast.info('No Proxmox guests found')
+          toast.info(t('No Proxmox guests found'))
         } else {
-          toast.success(`Found ${res.data.device_count} device${res.data.device_count !== 1 ? 's' : ''}`)
+          toast.success(t('Found {count} device{plural}', {
+            count: res.data.device_count,
+            plural: res.data.device_count !== 1 ? 's' : '',
+          }))
         }
       }
     } catch (err: unknown) {
-      toast.error(extractError(err) ?? 'Failed to fetch Proxmox inventory')
+      toast.error(extractError(err) ?? t('Failed to fetch Proxmox inventory'))
     } finally {
       setLoading(false)
     }
@@ -158,7 +164,10 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
     const selectedIds = new Set(selectedDevices.map((d) => d.id))
     const selectedEdges = edges.filter((e) => selectedIds.has(e.source) && selectedIds.has(e.target))
     onAddToCanvas(selectedDevices, selectedEdges)
-    toast.success(`Added ${selectedDevices.length} device${selectedDevices.length !== 1 ? 's' : ''} to canvas`)
+    toast.success(t('Added {count} device{plural} to canvas', {
+      count: selectedDevices.length,
+      plural: selectedDevices.length !== 1 ? 's' : '',
+    }))
     onClose()
   }
 
@@ -184,7 +193,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <Server size={16} style={{ color: ACCENT }} />
-            Proxmox VE Import
+            {t('Proxmox VE Import')}
           </DialogTitle>
         </DialogHeader>
 
@@ -192,7 +201,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1">
-                <Label className="text-xs text-muted-foreground">Proxmox Host</Label>
+                <Label className="text-xs text-muted-foreground">{t('Proxmox Host')}</Label>
                 <Input
                   value={form.host}
                   onChange={(e) => updateField('host', e.target.value)}
@@ -201,7 +210,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Port</Label>
+                <Label className="text-xs text-muted-foreground">{t('Port')}</Label>
                 <Input
                   value={form.port}
                   onChange={(e) => updateField('port', e.target.value)}
@@ -211,7 +220,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Token ID</Label>
+                <Label className="text-xs text-muted-foreground">{t('Token ID')}</Label>
                 <Input
                   value={form.token_id}
                   onChange={(e) => updateField('token_id', e.target.value)}
@@ -220,7 +229,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 />
               </div>
               <div className="col-span-2 space-y-1">
-                <Label className="text-xs text-muted-foreground">Token Secret</Label>
+                <Label className="text-xs text-muted-foreground">{t('Token Secret')}</Label>
                 <Input
                   value={form.token_secret}
                   onChange={(e) => updateField('token_secret', e.target.value)}
@@ -239,7 +248,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                     className="w-3 h-3 cursor-pointer"
                     style={{ accentColor: ACCENT }}
                   />
-                  Verify TLS certificate
+                  {t('Verify TLS certificate')}
                 </label>
               </div>
             </div>
@@ -255,12 +264,12 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 {connectionStatus === 'testing' && <Loader2 size={12} className="animate-spin" />}
                 {connectionStatus === 'ok' && <CheckCircle2 size={12} />}
                 {connectionStatus === 'fail' && <XCircle size={12} />}
-                <span>{connectionStatus === 'testing' ? 'Testing…' : connectionMsg}</span>
+                <span>{connectionStatus === 'testing' ? t('Testing…') : connectionMsg}</span>
               </div>
             )}
 
             <div className="space-y-2 rounded-md border border-border bg-[#0d1117]/60 px-3 py-2.5">
-              <span className="block text-xs text-muted-foreground">Send devices to</span>
+              <span className="block text-xs text-muted-foreground">{t('Send devices to')}</span>
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
                 <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
                   <input
@@ -271,7 +280,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                     className="cursor-pointer"
                     style={{ accentColor: ACCENT }}
                   />
-                  Device inventory only
+                  {t('Device inventory only')}
                 </label>
                 <label className="flex items-center gap-1.5 cursor-pointer text-foreground">
                   <input
@@ -282,7 +291,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                     className="cursor-pointer"
                     style={{ accentColor: ACCENT }}
                   />
-                  Inventory + canvas
+                  {t('Inventory + canvas')}
                 </label>
               </div>
             </div>
@@ -297,7 +306,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 {connectionStatus === 'testing'
                   ? <Loader2 size={13} className="animate-spin" />
                   : <CheckCircle2 size={13} />}
-                Test Connection
+                {t('Test Connection')}
               </Button>
               <Button
                 size="sm"
@@ -307,14 +316,14 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                 disabled={loading || connectionStatus === 'testing'}
               >
                 {loading ? <Loader2 size={13} className="animate-spin" /> : <Server size={13} />}
-                {importMode === 'pending' ? 'Import to Inventory' : 'Fetch Guests'}
+                {importMode === 'pending' ? t('Import to Inventory') : t('Fetch Guests')}
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground italic">
               {tokenConfigured
-                ? 'Leave the token blank to use the token configured in the integration options.'
-                : 'Set a token here, or configure one in the integration options for reuse and auto-sync.'}
-              {' '}A read-only <span className="font-mono">PVEAuditor</span> role is enough.
+                ? t('Leave the token blank to use the token configured in the integration options.')
+                : t('Set a token here, or configure one in the integration options for reuse and auto-sync.')}{' '}
+              {t('A read-only')} <span className="font-mono">PVEAuditor</span> {t('role is enough.')}
             </p>
           </div>
 
@@ -329,10 +338,10 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                     onChange={toggleAll}
                     className="w-3 h-3 cursor-pointer"
                     style={{ accentColor: ACCENT }}
-                    title="Select all"
+                    title={t('Select all')}
                   />
                   <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                    Devices ({checked.size}/{devices.length} selected)
+                    {t('Devices ({checked}/{total} selected)', { checked: checked.size, total: devices.length })}
                   </span>
                 </div>
               </div>
@@ -347,7 +356,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
                       <div className="flex items-center gap-1.5 mb-1">
                         <Icon size={11} style={{ color }} />
                         <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color }}>
-                          {DEVICE_TYPE_LABEL[type]} ({group.length})
+                          {deviceTypeLabel[type]} ({group.length})
                         </span>
                       </div>
                       {group.map((device) => (
@@ -391,7 +400,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
         </div>
 
         <DialogFooter className="gap-2 shrink-0 pt-2 border-t border-border">
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose}>{t('Cancel')}</Button>
           {devices.length > 0 && (
             <Button
               onClick={handleAddToCanvas}
@@ -400,7 +409,7 @@ export function ProxmoxImportModal({ open, onClose, onAddToCanvas, onPendingImpo
               className="gap-1.5"
             >
               <Plus size={13} />
-              Add {checked.size} to Canvas
+              {t('Add {count} to Canvas', { count: checked.size })}
             </Button>
           )}
         </DialogFooter>

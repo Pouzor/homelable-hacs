@@ -22,6 +22,7 @@ import { ProxmoxImportModal } from '@/components/proxmox/ProxmoxImportModal'
 import { buildProxmoxClusterEdges } from '@/components/proxmox/clusterEdges'
 import type { ProxmoxNode, ProxmoxEdge } from '@/components/proxmox/types'
 import { getCenteredPosition } from '@/utils/viewportCenter'
+import { t, useLocale } from '@/i18n'
 import type { NodeData } from '@/types'
 import type { Node, Connection } from '@xyflow/react'
 
@@ -29,6 +30,8 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 type SidebarView = 'canvas' | 'pending' | 'hidden' | 'history'
 
+// `label` is a key, resolved at render — a module-level table would freeze the
+// locale at import time, before Home Assistant's language is known.
 const ALL_VIEWS = [
   { id: 'canvas' as SidebarView, icon: LayoutDashboard, label: 'Canvas' },
   { id: 'pending' as SidebarView, icon: ScanLine, label: 'Device Inventory' },
@@ -50,6 +53,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, onNodeApproved: _onNodeApproved, forceView, onClearForceView, highlightPendingId }: SidebarProps) {
+  useLocale()
   const [_collapsed, setCollapsed] = useState(false)
   const [_activeView, setActiveView] = useState<SidebarView>('canvas')
   const [zigbeeOpen, setZigbeeOpen] = useState(false)
@@ -168,7 +172,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       }
       setDesignModal(null)
     } catch {
-      toast.error(designModal.mode === 'create' ? 'Failed to create canvas' : 'Failed to update canvas')
+      toast.error(designModal.mode === 'create' ? t('Failed to create canvas') : t('Failed to update canvas'))
     }
   }, [designModal, addDesign, updateDesign, setFloorMap])
 
@@ -177,7 +181,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       const { url } = await mediaApi.upload(file)
       return url
     } catch {
-      toast.error('Image upload failed')
+      toast.error(t('Image upload failed'))
       throw new Error('upload failed')
     }
   }, [])
@@ -201,14 +205,14 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
   }, [designs, activeDesignId, openDesignModal])
 
   const handleDesignDelete = useCallback(async (d: Design) => {
-    if (designs.length <= 1) { toast.error('Cannot delete the only canvas'); return }
-    if (!window.confirm(`Delete canvas "${d.name}"? Its nodes and links will be removed.`)) return
+    if (designs.length <= 1) { toast.error(t('Cannot delete the only canvas')); return }
+    if (!window.confirm(t('Delete canvas "{name}"? Its nodes and links will be removed.', { name: d.name }))) return
     try {
       await designsApi.delete(d.id)
       removeDesign(d.id)
-      toast.success('Canvas deleted')
+      toast.success(t('Canvas deleted'))
     } catch {
-      toast.error('Failed to delete canvas')
+      toast.error(t('Failed to delete canvas'))
     }
   }, [designs.length, removeDesign])
 
@@ -248,8 +252,8 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
             {activeDesignId ? (() => {
               const active = designs.find((d) => d.id === activeDesignId)
               const Icon = resolveDesignIcon(active?.icon)
-              return <><Icon size={14} className="shrink-0 text-[#00d4ff]" /><span className="truncate text-foreground">{active?.name ?? 'Select Canvas'}</span></>
-            })() : <span className="text-muted-foreground">Select Canvas</span>}
+              return <><Icon size={14} className="shrink-0 text-[#00d4ff]" /><span className="truncate text-foreground">{active?.name ?? t('Select Canvas')}</span></>
+            })() : <span className="text-muted-foreground">{t('Select Canvas')}</span>}
           </button>
           {designSwitcherOpen && (
             <>
@@ -274,16 +278,16 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                         <span className="truncate">{d.name}</span>
                       </button>
                       <button
-                        aria-label={`Edit ${d.name}`}
-                        title="Edit canvas"
+                        aria-label={t('Edit {name}', { name: d.name })}
+                        title={t('Edit canvas')}
                         onClick={() => { openDesignModal({ mode: 'edit', design: d }); setDesignSwitcherOpen(false) }}
                         className="shrink-0 p-1.5 text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         <Pencil size={12} />
                       </button>
                       <button
-                        aria-label={`Delete ${d.name}`}
-                        title="Delete canvas"
+                        aria-label={t('Delete {name}', { name: d.name })}
+                        title={t('Delete canvas')}
                         disabled={designs.length <= 1}
                         onClick={() => handleDesignDelete(d)}
                         className="shrink-0 p-1.5 pr-2 text-muted-foreground hover:text-[#f85149] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0"
@@ -299,7 +303,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#00d4ff] hover:bg-[#00d4ff]/10 transition-colors cursor-pointer"
                 >
                   <PlusCircle size={14} />
-                  <span>New Canvas</span>
+                  <span>{t('New Canvas')}</span>
                 </button>
               </div>
             </>
@@ -313,7 +317,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
           <SidebarItem
             key={id}
             icon={id === 'canvas' && isRack ? Rows3 : Icon}
-            label={id === 'canvas' && isRack ? 'Rack view' : label}
+            label={t(id === 'canvas' && isRack ? 'Rack view' : label)}
             collapsed={collapsed}
             active={activeView === id}
             onClick={() => {
@@ -348,15 +352,15 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       {!collapsed && !isRack && (
         <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
           <div className="flex justify-between">
-            <span>Total</span>
+            <span>{t('Total')}</span>
             <span className="text-foreground font-mono">{networkNodes.length}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#39d353]">Online</span>
+            <span className="text-[#39d353]">{t('Online')}</span>
             <span className="font-mono text-[#39d353]">{onlineCount}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#f85149]">Offline</span>
+            <span className="text-[#f85149]">{t('Offline')}</span>
             <span className="font-mono text-[#f85149]">{offlineCount}</span>
           </div>
         </div>
@@ -365,20 +369,20 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       {/* Actions */}
       <div className="flex flex-col gap-0.5 p-2 border-t border-border">
         {isRack ? (
-          <SidebarItem icon={Plus} label="Add Device" collapsed={collapsed} onClick={() => openDeviceEditor()} />
+          <SidebarItem icon={Plus} label={t('Add Device')} collapsed={collapsed} onClick={() => openDeviceEditor()} />
         ) : (
           <>
-            <SidebarItem icon={Plus} label="Add Node" collapsed={collapsed} onClick={onAddNode} />
-            <SidebarItem icon={Square} label="Add Zone" collapsed={collapsed} onClick={onAddGroupRect} />
-            <SidebarItem icon={Type} label="Add Text" collapsed={collapsed} onClick={onAddText} />
-            {!STANDALONE && <SidebarItem icon={ScanLine} label="Scan Network" collapsed={collapsed} onClick={handleScan} />}
-            <SidebarItem icon={Radio} label="Import Zigbee" collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
-            <SidebarItem icon={RadioTower} label="Import Z-Wave" collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
-            {!STANDALONE && <SidebarItem icon={Server} label="Import Proxmox" collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
-            {!STANDALONE && <SidebarItem icon={Map} label="Add Floorplan" collapsed={collapsed} onClick={openFloorPlan} />}
+            <SidebarItem icon={Plus} label={t('Add Node')} collapsed={collapsed} onClick={onAddNode} />
+            <SidebarItem icon={Square} label={t('Add Zone')} collapsed={collapsed} onClick={onAddGroupRect} />
+            <SidebarItem icon={Type} label={t('Add Text')} collapsed={collapsed} onClick={onAddText} />
+            {!STANDALONE && <SidebarItem icon={ScanLine} label={t('Scan Network')} collapsed={collapsed} onClick={handleScan} />}
+            <SidebarItem icon={Radio} label={t('Import Zigbee')} collapsed={collapsed} onClick={() => setZigbeeOpen(true)} />
+            <SidebarItem icon={RadioTower} label={t('Import Z-Wave')} collapsed={collapsed} onClick={() => setZwaveOpen(true)} />
+            {!STANDALONE && <SidebarItem icon={Server} label={t('Import Proxmox')} collapsed={collapsed} onClick={() => setProxmoxOpen(true)} />}
+            {!STANDALONE && <SidebarItem icon={Map} label={t('Add Floorplan')} collapsed={collapsed} onClick={openFloorPlan} />}
             <SidebarItem
               icon={hideIp ? EyeOff : Eye}
-              label={hideIp ? 'Show IPs' : 'Hide IPs'}
+              label={hideIp ? t('Show IPs') : t('Hide IPs')}
               collapsed={collapsed}
               onClick={toggleHideIp}
               active={hideIp}
@@ -387,7 +391,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         )}
         <SidebarItem
           icon={Save}
-          label={isRack ? 'Save Rack' : 'Save Canvas'}
+          label={isRack ? t('Save Rack') : t('Save Canvas')}
           collapsed={collapsed}
           onClick={() => onSave()}
           badge={hasUnsavedChanges}
@@ -441,8 +445,8 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         initial={designModal?.mode === 'edit' && designModal.design
           ? { name: designModal.design.name, icon: designModal.design.icon ?? DEFAULT_DESIGN_ICON }
           : undefined}
-        title={designModal?.mode === 'edit' ? 'Edit Canvas' : 'New Canvas'}
-        submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
+        title={designModal?.mode === 'edit' ? t('Edit Canvas') : t('New Canvas')}
+        submitLabel={designModal?.mode === 'edit' ? t('Save') : t('Create')}
         sourceDesigns={designModal?.mode === 'create' ? designs : []}
         // A rack canvas has no floor plan to lay under it.
         showFloorMap={!STANDALONE && isActiveEdit && !isRack}
@@ -455,6 +459,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
 
 /** Rack equivalent of the node stats footer: capacity rather than reachability. */
 function RackStats() {
+  useLocale()
   const racks = useRackStore((s) => s.racks)
   const devices = useRackStore((s) => s.devices)
   const cables = useRackStore((s) => s.cables)
@@ -465,19 +470,19 @@ function RackStats() {
   return (
     <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
       <div className="flex justify-between">
-        <span>Racks</span>
+        <span>{t('Racks')}</span>
         <span className="text-foreground font-mono">{racks.length}</span>
       </div>
       <div className="flex justify-between">
-        <span>Mounted</span>
+        <span>{t('Mounted')}</span>
         <span className="text-foreground font-mono">{devices.length}</span>
       </div>
       <div className="flex justify-between">
-        <span>Cables</span>
+        <span>{t('Cables')}</span>
         <span className="text-foreground font-mono">{cables.length}</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-[#39d353]">Free</span>
+        <span className="text-[#39d353]">{t('Free')}</span>
         <span className="font-mono text-[#39d353]">{free}U / {total}U</span>
       </div>
     </div>
@@ -485,6 +490,7 @@ function RackStats() {
 }
 
 function VersionBadge() {
+  useLocale()
   const current = __APP_VERSION__
   const { latest, hasUpdate } = useLatestRelease(current)
 
@@ -505,7 +511,7 @@ function VersionBadge() {
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#e3b341]/15 text-[#e3b341] border border-[#e3b341]/30 hover:bg-[#e3b341]/25 transition-colors self-start"
         >
-          ↑ v{latest.version} available
+          {t('↑ v{version} available', { version: latest.version })}
         </a>
       )}
     </div>

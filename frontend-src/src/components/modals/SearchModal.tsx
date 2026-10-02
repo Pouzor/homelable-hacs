@@ -4,6 +4,7 @@ import { Search } from 'lucide-react'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { scanApi } from '@/api/client'
 import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
+import { t, useLocale } from '@/i18n'
 
 interface SearchModalProps {
   open: boolean
@@ -12,6 +13,7 @@ interface SearchModalProps {
 }
 
 export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) {
+  useLocale()
   const [query, setQuery] = useState('')
   const [pendingDevices, setPendingDevices] = useState<PendingDevice[]>([])
   const nodes = useCanvasStore((s) => s.nodes)
@@ -70,7 +72,7 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search nodes, pending devices by IP or service…"
+            placeholder={t('Search nodes, pending devices by IP or service…')}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Escape') { onClose(); setQuery('') }
@@ -109,7 +111,7 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
                   className="flex items-center gap-3 px-4 py-2 hover:bg-[#21262d] cursor-pointer"
                   onClick={() => handleSelectPending(device.id)}
                 >
-                  <span className="text-xs font-mono text-[#e3b341] w-16 shrink-0">pending</span>
+                  <span className="text-xs font-mono text-[#e3b341] w-16 shrink-0">{t('pending')}</span>
                   <span className="text-sm text-foreground font-medium flex-1 truncate font-mono">{device.hostname ?? device.ip}</span>
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{serviceName ?? device.ip}</span>
                 </li>
@@ -119,11 +121,11 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
         )}
 
         {q.length > 0 && totalResults === 0 && (
-          <p className="px-4 py-3 text-sm text-muted-foreground">No results match "{query}"</p>
+          <p className="px-4 py-3 text-sm text-muted-foreground">{t('No results match "{query}"', { query })}</p>
         )}
 
         {q.length === 0 && (
-          <p className="px-4 py-3 text-xs text-muted-foreground">Type to search nodes and pending devices…</p>
+          <p className="px-4 py-3 text-xs text-muted-foreground">{t('Type to search nodes and pending devices…')}</p>
         )}
       </div>
     </div>

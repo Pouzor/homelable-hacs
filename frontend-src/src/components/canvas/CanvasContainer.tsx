@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { t } from '@/i18n'
 import {
   ReactFlow,
   Background,
@@ -222,7 +223,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         <Controls>
           <ControlButton
             onClick={() => setLassoMode((m) => !m)}
-            title={lassoMode ? 'Switch to pan mode (Space to pan)' : 'Switch to lasso mode'}
+            title={lassoMode ? t('Switch to pan mode (Space to pan)') : t('Switch to lasso mode')}
           >
             {lassoMode ? <MousePointer2 size={12} /> : <Hand size={12} />}
           </ControlButton>

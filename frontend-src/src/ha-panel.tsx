@@ -9,6 +9,7 @@ import { StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import App from './App'
 import { HassContext, setHass, type Hass } from './lib/hass'
+import { syncLocaleFromHass } from './i18n'
 import { ShadowRootContext } from './lib/portal'
 import { injectShadowStyles } from './lib/shadowCss'
 
@@ -18,6 +19,7 @@ class HomelablePanel extends HTMLElement {
   private _mountPoint: HTMLDivElement | null = null
   private _resizeObserver: ResizeObserver | null = null
   private _onResize = () => this._applyHeight()
+  private _language: string | undefined
 
   constructor() {
     super()
@@ -43,6 +45,13 @@ class HomelablePanel extends HTMLElement {
     const first = this._hass === null
     this._hass = value
     setHass(value)
+    // HA re-assigns `hass` on every state change, which can be dozens of times
+    // a second. Re-deriving the locale each time would hit localStorage on every
+    // tick, so only do it when the language itself moved.
+    if (value.language !== this._language) {
+      this._language = value.language
+      syncLocaleFromHass(value.language)
+    }
     if (first) this._mount()
     else this._render()
   }

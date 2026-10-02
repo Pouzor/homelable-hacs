@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { scanApi } from '@/api/client'
 import { toast } from 'sonner'
+import { t, useLocale } from '@/i18n'
 
 interface ScanConfigModalProps {
   open: boolean
@@ -14,6 +15,7 @@ interface ScanConfigModalProps {
 }
 
 export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalProps) {
+  useLocale()
   const [ranges, setRanges] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
@@ -44,7 +46,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
 
   const handleScanNow = async () => {
     if (ranges.length === 0) {
-      toast.error('No IP ranges configured — set them in the integration options')
+      toast.error(t('No IP ranges configured — set them in the integration options'))
       return
     }
     setSaving(true)
@@ -55,14 +57,14 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
         verify_tls: verifyTls,
       })
       if (res.data?.status === 'already_running') {
-        toast.message('A scan is already running')
+        toast.message(t('A scan is already running'))
       } else {
-        toast.success('Scan started — track progress in History')
+        toast.success(t('Scan started — track progress in History'))
       }
       onScanNow()
       onClose()
     } catch {
-      toast.error('Failed to start scan')
+      toast.error(t('Failed to start scan'))
     } finally {
       setSaving(false)
     }
@@ -72,15 +74,15 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="bg-[#161b22] border-border max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-foreground">Scan Configuration</DialogTitle>
+          <DialogTitle className="text-foreground">{t('Scan Configuration')}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label className="text-sm text-muted-foreground">IP Ranges (CIDR)</Label>
+            <Label className="text-sm text-muted-foreground">{t('IP Ranges (CIDR)')}</Label>
             {ranges.length === 0 ? (
               <p className="text-sm text-muted-foreground italic">
-                No ranges configured.
+                {t('No ranges configured.')}
               </p>
             ) : (
               ranges.map((r, i) => (
@@ -103,18 +105,17 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
             >
               {deepOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              Deep Scan
+              {t('Deep Scan')}
             </button>
 
             {deepOpen && (
               <div className="space-y-3 pl-1">
                 <p className="text-xs text-muted-foreground">
-                  Scan extra ports and probe HTTP services to identify apps on custom ports.
-                  Applies to this scan only.
+                  {t('Scan extra ports and probe HTTP services to identify apps on custom ports. Applies to this scan only.')}
                 </p>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Extra port ranges</Label>
+                  <Label className="text-xs text-muted-foreground">{t('Extra port ranges')}</Label>
                   <Input
                     value={httpRangesText}
                     onChange={(e) => setHttpRangesText(e.target.value)}
@@ -130,7 +131,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                     onChange={(e) => setHttpProbe(e.target.checked)}
                     className="accent-[#00d4ff]"
                   />
-                  Enable HTTP probe
+                  {t('Enable HTTP probe')}
                 </label>
 
                 <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
@@ -140,7 +141,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                     onChange={(e) => setVerifyTls(e.target.checked)}
                     className="accent-[#00d4ff]"
                   />
-                  Verify TLS certificates
+                  {t('Verify TLS certificates')}
                 </label>
               </div>
             )}
@@ -149,20 +150,20 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
           <p className="text-xs text-muted-foreground flex items-start gap-1.5">
             <Settings size={11} className="mt-0.5 shrink-0" />
             <span>
-              Ranges are managed in <strong>Settings → Devices &amp; services → Homelable → Configure</strong>.
-              Status check interval is configured there too.
+              {t('Ranges are managed in ')}<strong>{t('Settings → Devices & services → Homelable → Configure')}</strong>
+              {t('. Status check interval is configured there too.')}
             </span>
           </p>
         </div>
 
         <DialogFooter className="gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={onClose}>{t('Cancel')}</Button>
           <Button
             onClick={handleScanNow}
             disabled={saving || ranges.length === 0}
             style={{ background: '#00d4ff', color: '#0d1117' }}
           >
-            Scan Now
+            {t('Scan Now')}
           </Button>
         </DialogFooter>
       </DialogContent>

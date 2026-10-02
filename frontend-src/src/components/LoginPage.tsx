@@ -5,8 +5,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authApi } from '@/api/client'
 import { useAuthStore } from '@/stores/authStore'
+import { t, useLocale } from '@/i18n'
 
 export function LoginPage() {
+  useLocale()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -22,7 +24,11 @@ export function LoginPage() {
       login(res.data.access_token)
     } catch (err: unknown) {
       const hasResponse = err && typeof err === 'object' && 'response' in err
-      setError(hasResponse ? 'Invalid username or password' : 'Could not reach the server — check your CORS_ORIGINS setting')
+      setError(
+        hasResponse
+          ? t('Invalid username or password')
+          : t('Could not reach the server — check your CORS_ORIGINS setting'),
+      )
     } finally {
       setLoading(false)
     }
@@ -47,7 +53,7 @@ export function LoginPage() {
           </div>
           <div className="text-center">
             <h1 className="text-xl font-semibold text-foreground tracking-wide">Homelable</h1>
-            <p className="text-xs text-muted-foreground mt-0.5">HomeLab Visualizer</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t('HomeLab Visualizer')}</p>
           </div>
         </div>
 
@@ -57,7 +63,7 @@ export function LoginPage() {
           className="flex flex-col gap-4 bg-[#161b22] border border-[#30363d] rounded-xl p-6"
         >
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="username" className="text-xs text-muted-foreground">Username</Label>
+            <Label htmlFor="username" className="text-xs text-muted-foreground">{t('Username')}</Label>
             <Input
               id="username"
               autoComplete="username"
@@ -70,7 +76,7 @@ export function LoginPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password" className="text-xs text-muted-foreground">Password</Label>
+            <Label htmlFor="password" className="text-xs text-muted-foreground">{t('Password')}</Label>
             <Input
               id="password"
               type="password"
@@ -91,12 +97,12 @@ export function LoginPage() {
             disabled={loading}
             className="mt-1 bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90 font-medium"
           >
-            {loading ? <Loader2 size={15} className="animate-spin" /> : 'Sign in'}
+            {loading ? <Loader2 size={15} className="animate-spin" /> : t('Sign in')}
           </Button>
         </form>
 
         <p className="text-center text-[10px] text-muted-foreground/40 mt-4">
-          Credentials configured in <span className="font-mono">.env</span>
+          {t('Credentials configured in')} <span className="font-mono">.env</span>
         </p>
       </div>
     </div>

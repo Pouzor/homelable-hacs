@@ -32,6 +32,7 @@ import { nodeTypes } from '@/components/canvas/nodes/nodeTypes'
 import { edgeTypes } from '@/components/canvas/edges/edgeTypes'
 import { FloorMapLayer } from '@/components/canvas/FloorMapLayer'
 import { useHass } from '@/lib/hass'
+import { t, useLocale } from '@/i18n'
 import type { HomelableCardConfig } from '@/lib/cardConfig'
 import type { NodeData } from '@/types'
 
@@ -44,6 +45,7 @@ interface ReadOnlyCanvasProps {
 }
 
 function CanvasBody({ config }: ReadOnlyCanvasProps) {
+  useLocale()
   const hass = useHass()
   const nodes = useCanvasStore((s) => s.nodes)
   const edges = useCanvasStore((s) => s.edges)
@@ -148,10 +150,10 @@ function CanvasBody({ config }: ReadOnlyCanvasProps) {
     return (
       <Message>
         {state === 'loading'
-          ? 'Loading canvas…'
+          ? t('Loading canvas…')
           : state === 'empty'
-            ? 'This design has no devices yet. Open the Homelable panel to build it.'
-            : 'Canvas unavailable. Is the Homelable integration still set up?'}
+            ? t('This design has no devices yet. Open the Homelable panel to build it.')
+            : t('Canvas unavailable. Is the Homelable integration still set up?')}
       </Message>
     )
   }

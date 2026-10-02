@@ -3,6 +3,7 @@ import { RadioTower, Loader2, ScanLine } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { zwaveApi } from '@/api/ha'
+import { t, useLocale } from '@/i18n'
 import { toast } from 'sonner'
 
 /**
@@ -40,18 +41,19 @@ function extractWsError(err: unknown): WsErrorShape {
 }
 
 export function ZwaveImportModal({ open, onClose, onImported }: ZwaveImportModalProps) {
+  useLocale()
   const [starting, setStarting] = useState(false)
 
   const handleStart = async () => {
     setStarting(true)
     try {
       await zwaveApi.startImport()
-      toast.success('Z-Wave scan started — check Scan History for results')
+      toast.success(t('Z-Wave scan started — check Scan History for results'))
       onImported?.()
       onClose()
     } catch (err) {
       const { message } = extractWsError(err)
-      toast.error(message ?? 'Failed to start Z-Wave scan')
+      toast.error(message ?? t('Failed to start Z-Wave scan'))
     } finally {
       setStarting(false)
     }
@@ -63,26 +65,22 @@ export function ZwaveImportModal({ open, onClose, onImported }: ZwaveImportModal
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <RadioTower size={16} className="text-[#ff6e00]" />
-            Z-Wave JS UI Import
+            {t('Z-Wave JS UI Import')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Fetches the Z-Wave node list via Home Assistant's MQTT integration and
-            adds discovered devices to Pending, where you can approve them onto
-            the canvas.
+            {t("Fetches the Z-Wave node list via Home Assistant's MQTT integration and adds discovered devices to Pending, where you can approve them onto the canvas.")}
           </p>
           <p className="text-[11px] text-muted-foreground italic">
-            The scan runs in the background — Z-Wave JS UI can take a few minutes
-            on large meshes as the gateway polls every node. Progress shows in
-            Scan History; you can keep working meanwhile.
+            {t('The scan runs in the background — Z-Wave JS UI can take a few minutes on large meshes as the gateway polls every node. Progress shows in Scan History; you can keep working meanwhile.')}
           </p>
         </div>
 
         <DialogFooter className="gap-2 shrink-0 pt-2 border-t border-border">
           <Button variant="ghost" onClick={onClose} disabled={starting}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button
             onClick={handleStart}
@@ -91,7 +89,7 @@ export function ZwaveImportModal({ open, onClose, onImported }: ZwaveImportModal
             className="gap-1.5"
           >
             {starting ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />}
-            Start Z-Wave scan
+            {t('Start Z-Wave scan')}
           </Button>
         </DialogFooter>
       </DialogContent>

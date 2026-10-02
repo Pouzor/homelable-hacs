@@ -44,6 +44,7 @@ import { PropertyList } from '@/components/common/PropertyList'
 import { ServiceModal } from './ServiceModal'
 import { DeepScanModal } from './DeepScanModal'
 import { scanApi } from '@/api/ha'
+import { t, useLocale } from '@/i18n'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { deviceFactsToNodeData } from '@/utils/deviceFacts'
@@ -86,6 +87,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const CHECK_METHODS: CheckMethod[] = ['ping', 'http', 'https', 'tcp', 'ssh', 'prometheus', 'health', 'none']
 
+// Protocol names stay verbatim; only the two English words are translated.
 const CHECK_METHOD_LABELS: Record<CheckMethod, string> = {
   none: 'None',
   ping: 'Ping',
@@ -97,15 +99,38 @@ const CHECK_METHOD_LABELS: Record<CheckMethod, string> = {
   health: 'Health',
 }
 
-/** Live reachability — not the pending/approved/hidden lifecycle. */
-const LIVE_META: Record<string, { color: string; label: string }> = {
-  online: { color: '#39d353', label: 'Online' },
-  offline: { color: '#f85149', label: 'Offline' },
-  pending: { color: '#e3b341', label: 'Checking' },
-  unknown: { color: '#8b949e', label: 'Unknown' },
+/** Live reachability — not the pending/approved/hidden lifecycle.
+ *  Only the colour lives here; the caption goes through `liveLabel` below so it
+ *  can be translated. */
+const LIVE_META: Record<string, { color: string }> = {
+  online: { color: '#39d353' },
+  offline: { color: '#f85149' },
+  pending: { color: '#e3b341' },
+  unknown: { color: '#8b949e' },
 }
 
 const INPUT = 'bg-[#21262d] border-[#30363d] text-sm h-8'
+
+/**
+ * Captions for the `DEVICE_TYPE_GROUPS` categories, written out as literals so
+ * the zh-CN dictionary can be checked against them. Zigbee / Z-Wave are
+ * protocol names and stay verbatim.
+ */
+function useTypeGroupLabel() {
+  useLocale()
+  return (label: string) => {
+    switch (label) {
+      case 'Hardware': return t('Hardware')
+      case 'Virtualization': return t('Virtualization')
+      case 'IoT': return t('IoT')
+      case 'Zigbee': return t('Zigbee')
+      case 'Z-Wave': return t('Z-Wave')
+      case 'Personal': return t('Personal')
+      case 'Electrical': return t('Electrical')
+      default: return t('Generic')
+    }
+  }
+}
 
 function categoryColor(category: string | null | undefined) {
   if (!category) return '#8b949e'
@@ -152,6 +177,7 @@ function Chip({ color, children, title }: { color: string; children: React.React
 
 /** Copies a technical value; the row keeps its own confirmation state. */
 function CopyButton({ label, value }: { label: string; value: string }) {
+  useLocale()
   const [copied, setCopied] = useState(false)
   const copy = () => {
     // `clipboard` is absent outside a secure context (and in jsdom), so the
@@ -163,12 +189,12 @@ function CopyButton({ label, value }: { label: string; value: string }) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1200)
       })
-      .catch(() => toast.error('Could not copy'))
+      .catch(() => toast.error(t('Could not copy')))
   }
   return (
     <button
       onClick={copy}
-      aria-label={`Copy ${label}`}
+      aria-label={t('Copy {label}', { label })}
       className="ml-auto shrink-0 text-muted-foreground/50 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-[#00d4ff] transition-opacity cursor-pointer"
     >
       {copied ? <Check size={11} className="text-[#39d353]" /> : <Copy size={11} />}
@@ -265,6 +291,8 @@ const numeric = (v: string) => (v.trim() === '' ? null : Number(v))
  * `key={device.id}` so pointing it at another device starts a fresh form.
  */
 export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnore, onSaved }: PendingDeviceModalProps) {
+  useLocale()
+  const typeGroupLabel = useTypeGroupLabel()
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<EditForm>(() => (device ? toForm(device) : toForm({} as PendingDevice)))
   const [properties, setProperties] = useState<NodeProperty[]>(device?.properties ?? [])
@@ -299,11 +327,11 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
         if (stopped || run.status === 'running') return
         setRescanRunId(null)
         if (run.status === 'error') {
-          toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
+          toast.error(t('Scan failed: {error}', { error: run.error ?? t('unknown error') }))
           return
         }
         if (run.status === 'cancelled') {
-          toast.info('Scan stopped')
+          toast.info(t('Scan stopped'))
           return
         }
         const { data: rows } = await scanApi.pending()
@@ -315,13 +343,13 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
         useCanvasStore.getState().notifyScanDeviceFound()
         onSavedRef.current?.(fresh)
         const n = fresh.services?.length ?? 0
-        const summary = `${n} service${n !== 1 ? 's' : ''}`
+        const summary = t('{count} service{plural}', { count: n, plural: n !== 1 ? 's' : '' })
         // A done run can still carry an advisory: the sweep ran out of budget
         // before every port range. Saying "done" flat would read as complete.
         if (run.error) {
-          toast.warning(`Scan partial — ${summary}. ${run.error}`)
+          toast.warning(t('Scan partial — {summary}. {error}', { summary, error: run.error }))
         } else {
-          toast.success(`Scan done — ${summary}`)
+          toast.success(t('Scan done — {summary}', { summary }))
         }
       } catch {
         // Transient failure: keep polling, the run is still on the server.
@@ -345,7 +373,14 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
   const rackOnly = isRackDevice(device)
   const sources = orderedSources(device)
   const live = LIVE_META[device.status_live ?? 'unknown'] ?? LIVE_META.unknown
-  const titleLabel = device.label ?? device.friendly_name ?? device.hostname ?? device.ip ?? device.ieee_address ?? 'Pending device'
+  // The four live captions, written out so each is a literal the dictionary can
+  // be checked against rather than a lookup behind a variable key.
+  const liveLabel =
+    device.status_live === 'online' ? t('Online')
+    : device.status_live === 'offline' ? t('Offline')
+    : device.status_live === 'pending' ? t('Checking')
+    : t('Unknown')
+  const titleLabel = device.label ?? device.friendly_name ?? device.hostname ?? device.ip ?? device.ieee_address ?? t('Pending device')
 
   const set = <K extends keyof EditForm>(key: K, value: EditForm[K]) => setForm((f) => ({ ...f, [key]: value }))
 
@@ -366,13 +401,13 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
     try {
       const res = await scanApi.rescanDevice(device.id, { ports })
       if (res.data.status === 'already_running') {
-        toast.error('A scan is already running — wait for it or stop it first')
+        toast.error(t('A scan is already running — wait for it or stop it first'))
         return
       }
       setRescanRunId(res.data.run_id)
-      toast.info(`Deep scan started — ${countPorts(ports).toLocaleString('en-US')} ports, this takes a few minutes`)
+      toast.info(t('Deep scan started — {ports} ports, this takes a few minutes', { ports: countPorts(ports).toLocaleString('en-US') }))
     } catch (err) {
-      toast.error((err as { message?: string } | null)?.message ?? 'Could not start the scan')
+      toast.error((err as { message?: string } | null)?.message ?? t('Could not start the scan'))
     } finally {
       setRescanStarting(false)
     }
@@ -383,7 +418,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
     try {
       await scanApi.stop()
     } catch {
-      toast.error('Could not stop the scan')
+      toast.error(t('Could not stop the scan'))
     }
   }
 
@@ -434,22 +469,22 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
       // save (even one for a moved node) would report them as an edit and roll
       // the row back.
       useCanvasStore.getState().applyDeviceFacts(device.id, deviceFactsToNodeData(res.data))
-      toast.success('Device updated')
+      toast.success(t('Device updated'))
       setEditing(false)
       onSaved?.(res.data)
     } catch {
-      toast.error('Could not update device')
+      toast.error(t('Could not update device'))
     } finally {
       setSaving(false)
     }
   }
 
   const timestamps: { label: string; iso: string }[] = []
-  if (device.discovered_at) timestamps.push({ label: 'Discovered', iso: device.discovered_at })
-  if (device.node_created_at) timestamps.push({ label: 'On canvas', iso: device.node_created_at })
-  if (device.node_last_scan) timestamps.push({ label: 'Last scan', iso: device.node_last_scan })
-  if (device.node_last_seen) timestamps.push({ label: 'Last seen', iso: device.node_last_seen })
-  if (device.node_last_modified) timestamps.push({ label: 'Modified', iso: device.node_last_modified })
+  if (device.discovered_at) timestamps.push({ label: t('Discovered'), iso: device.discovered_at })
+  if (device.node_created_at) timestamps.push({ label: t('On canvas'), iso: device.node_created_at })
+  if (device.node_last_scan) timestamps.push({ label: t('Last scan'), iso: device.node_last_scan })
+  if (device.node_last_seen) timestamps.push({ label: t('Last seen'), iso: device.node_last_seen })
+  if (device.node_last_modified) timestamps.push({ label: t('Modified'), iso: device.node_last_modified })
 
   return (
     <Dialog open={!!device} onOpenChange={(o) => !o && onClose()}>
@@ -470,26 +505,26 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                   <Chip key={s} color={SOURCE_META[s].color}>{SOURCE_META[s].label}</Chip>
                 ))}
                 {(device.type ?? device.suggested_type) && (
-                  <Chip color={roleColor}>{NODE_TYPE_LABELS[resolvedType] ?? resolvedType}</Chip>
+                  <Chip color={roleColor}>{t(NODE_TYPE_LABELS[resolvedType] ?? resolvedType)}</Chip>
                 )}
                 <span
                   className="flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
                   style={{ background: `${live.color}22`, color: live.color }}
-                  title="Live reachability"
+                  title={t('Live reachability')}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: live.color }} />
-                  {live.label}
+                  {liveLabel}
                 </span>
                 {(device.canvas_count ?? 0) > 0 && (
                   <span
                     className="flex items-center gap-1 text-[9px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider bg-[#00d4ff]/15 text-[#00d4ff]"
-                    title={`Drawn on ${device.canvas_count} canvas${device.canvas_count !== 1 ? 'es' : ''}`}
+                    title={t('Drawn on {count} canvas{plural}', { count: device.canvas_count ?? 0, plural: device.canvas_count !== 1 ? 'es' : '' })}
                   >
                     <Layers size={10} />
                     {device.canvas_count}
                   </span>
                 )}
-                {device.status === 'hidden' && <Chip color="#8b949e">Hidden</Chip>}
+                {device.status === 'hidden' && <Chip color="#8b949e">{t('Hidden')}</Chip>}
                 {device.lqi != null && <Chip color="#8b949e">LQI {device.lqi}</Chip>}
               </div>
             </div>
@@ -500,7 +535,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 className={`shrink-0 gap-1.5 text-[#00d4ff] hover:text-[#00d4ff] hover:bg-[#00d4ff]/10 ${modalStyles['modal-interactive']}`}
                 onClick={() => setEditing(true)}
               >
-                <Pencil size={13} /> Edit
+                <Pencil size={13} /> {t('Edit')}
               </Button>
             )}
           </div>
@@ -511,26 +546,26 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
           {editing ? (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               <div className="flex flex-col gap-4 min-w-0">
-                <Section title="Identity" icon={Fingerprint}>
+                <Section title={t('Identity')} icon={Fingerprint}>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Name" className="col-span-2">
-                      <Input value={form.label} onChange={(e) => set('label', e.target.value)} placeholder="Display name" className={INPUT} />
+                    <Field label={t('Name')} className="col-span-2">
+                      <Input value={form.label} onChange={(e) => set('label', e.target.value)} placeholder={t('Display name')} className={INPUT} />
                     </Field>
-                    <Field label="Type" className="col-span-2">
+                    <Field label={t('Type')} className="col-span-2">
                       <Select value={form.type || undefined} onValueChange={(v) => set('type', (v as string | null) ?? '')}>
-                        <SelectTrigger className={`${INPUT} w-full cursor-pointer ${modalStyles['modal-interactive']}`} aria-label="Device type selector">
-                          <SelectValue placeholder="Pick a type" />
+                        <SelectTrigger className={`${INPUT} w-full cursor-pointer ${modalStyles['modal-interactive']}`} aria-label={t('Device type selector')}>
+                          <SelectValue placeholder={t('Pick a type')} />
                         </SelectTrigger>
                         <SelectContent className="bg-[#21262d] border-[#30363d]">
                           {DEVICE_TYPE_GROUPS.map((group, i) => (
                             <SelectGroup key={group.label}>
                               {i > 0 && <SelectSeparator className="bg-[#30363d]" />}
                               <SelectLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 px-2 py-1">
-                                {group.label}
+                                {typeGroupLabel(group.label)}
                               </SelectLabel>
-                              {group.types.map((t) => (
-                                <SelectItem key={t} value={t} className="text-sm pl-4">
-                                  {NODE_TYPE_LABELS[t] ?? t}
+                              {group.types.map((t2) => (
+                                <SelectItem key={t2} value={t2} className="text-sm pl-4">
+                                  {t(NODE_TYPE_LABELS[t2] ?? t2)}
                                 </SelectItem>
                               ))}
                             </SelectGroup>
@@ -538,66 +573,68 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Hostname">
+                    <Field label={t('Hostname')}>
                       <Input value={form.hostname} onChange={(e) => set('hostname', e.target.value)} placeholder="server.lan" className={`${INPUT} font-mono`} />
                     </Field>
-                    <Field label="IP" hint="comma-separated">
+                    <Field label={t('IP')} hint={t('comma-separated')}>
                       <Input value={form.ip} onChange={(e) => set('ip', e.target.value)} placeholder="10.0.0.5, 10.0.1.5" className={`${INPUT} font-mono`} />
                     </Field>
-                    <Field label="MAC">
+                    <Field label={t('MAC')}>
                       <Input value={form.mac} onChange={(e) => set('mac', e.target.value)} placeholder="aa:bb:cc:dd:ee:ff" className={`${INPUT} font-mono`} />
                     </Field>
-                    <Field label="OS">
+                    <Field label={t('OS')}>
                       <Input value={form.os} onChange={(e) => set('os', e.target.value)} placeholder="Debian 12" className={INPUT} />
                     </Field>
                   </div>
                 </Section>
 
-                <Section title="Make & model" icon={Factory}>
+                <Section title={t('Make & model')} icon={Factory}>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Vendor">
+                    <Field label={t('Vendor')}>
                       <Input value={form.vendor} onChange={(e) => set('vendor', e.target.value)} className={INPUT} />
                     </Field>
-                    <Field label="Model">
+                    <Field label={t('Model')}>
                       <Input value={form.model} onChange={(e) => set('model', e.target.value)} className={INPUT} />
                     </Field>
-                    <Field label="Friendly name">
+                    <Field label={t('Friendly name')}>
                       <Input value={form.friendly_name} onChange={(e) => set('friendly_name', e.target.value)} className={INPUT} />
                     </Field>
-                    <Field label="Role">
-                      <Input value={form.device_subtype} onChange={(e) => set('device_subtype', e.target.value)} placeholder="e.g. router" className={INPUT} />
+                    <Field label={t('Role')}>
+                      <Input value={form.device_subtype} onChange={(e) => set('device_subtype', e.target.value)} placeholder={t('e.g. router')} className={INPUT} />
                     </Field>
                   </div>
                 </Section>
               </div>
 
               <div className="flex flex-col gap-4 min-w-0">
-                <Section title="Monitoring" icon={HeartPulse}>
+                <Section title={t('Monitoring')} icon={HeartPulse}>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Check method">
+                    <Field label={t('Check method')}>
                       <Select value={form.check_method || undefined} onValueChange={(v) => set('check_method', (v as string | null) ?? '')}>
-                        <SelectTrigger className={`${INPUT} w-full cursor-pointer ${modalStyles['modal-interactive']}`} aria-label="Check method selector">
-                          <SelectValue placeholder="None" />
+                        <SelectTrigger className={`${INPUT} w-full cursor-pointer ${modalStyles['modal-interactive']}`} aria-label={t('Check method selector')}>
+                          <SelectValue placeholder={t('None')} />
                         </SelectTrigger>
                         <SelectContent className="bg-[#21262d] border-[#30363d]">
                           {CHECK_METHODS.map((m) => (
-                            <SelectItem key={m} value={m} className="text-sm">{CHECK_METHOD_LABELS[m]}</SelectItem>
+                            <SelectItem key={m} value={m} className="text-sm">
+                              {m === 'none' ? t('None') : m === 'health' ? t('Health') : CHECK_METHOD_LABELS[m]}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </Field>
-                    <Field label="Check target">
-                      <Input value={form.check_target} onChange={(e) => set('check_target', e.target.value)} placeholder="host:port or URL" className={`${INPUT} font-mono`} />
+                    <Field label={t('Check target')}>
+                      <Input value={form.check_target} onChange={(e) => set('check_target', e.target.value)} placeholder={t('host:port or URL')} className={`${INPUT} font-mono`} />
                     </Field>
                   </div>
                 </Section>
 
-                <Section title="Notes" icon={StickyNote}>
+                <Section title={t('Notes')} icon={StickyNote}>
                   <Textarea
                     value={form.notes}
                     onChange={(e) => set('notes', e.target.value)}
                     rows={6}
-                    placeholder="Anything worth remembering about this device."
+                    placeholder={t('Anything worth remembering about this device.')}
                     className="bg-[#21262d] border-[#30363d] text-sm"
                   />
                 </Section>
@@ -612,7 +649,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                     // Whether a canvas draws a property is that node's own
                     // answer; the flag here only decides what a node drawing
                     // this device from now on starts out showing.
-                    visibleLabel="Show on new nodes"
+                    visibleLabel={t('Show on new nodes')}
                     // Hardware is a property like any other; these are the keys
                     // the Proxmox import and the YAML import already mint.
                     suggestions={['CPU Model', 'CPU Cores', 'RAM', 'Disk']}
@@ -620,19 +657,19 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 </section>
 
                 <Section
-                  title={`Services${services.length > 0 ? ` (${services.length})` : ''}`}
+                  title={`${t('Services')}${services.length > 0 ? ` (${services.length})` : ''}`}
                   icon={Network}
                   action={
                     <button
                       onClick={() => setSvcModal({ index: null })}
                       className="flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors cursor-pointer"
                     >
-                      <Plus size={10} /> Add
+                      <Plus size={10} /> {t('Add')}
                     </button>
                   }
                 >
                   {services.length === 0 ? (
-                    <Empty>No services — click Add to register one.</Empty>
+                    <Empty>{t('No services — click Add to register one.')}</Empty>
                   ) : (
                     <div className="flex flex-col gap-1.5">
                       {services.map((svc, i) => (
@@ -643,14 +680,14 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                           <div className="ml-auto flex items-center gap-1.5 shrink-0">
                             <button
                               onClick={() => setSvcModal({ index: i, form: serviceToForm(svc) })}
-                              title="Edit service"
+                              title={t('Edit service')}
                               className="text-[#8b949e] hover:text-[#00d4ff] cursor-pointer"
                             >
                               <Pencil size={11} />
                             </button>
                             <button
                               onClick={() => setServices((prev) => prev.filter((_, j) => j !== i))}
-                              title="Remove service"
+                              title={t('Remove service')}
                               className="text-[#8b949e] hover:text-[#f85149] cursor-pointer"
                             >
                               <X size={11} />
@@ -667,32 +704,32 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               {/* What the device is: how to reach it, and what answers there. */}
               <div className="flex flex-col gap-4 min-w-0" data-testid="device-column-identity">
-                <Section title="Identity" icon={Fingerprint}>
+                <Section title={t('Identity')} icon={Fingerprint}>
                   <div className="flex flex-col">
-                    {device.ip && <InfoRow label="IP" value={device.ip} copyable />}
-                    {device.hostname && <InfoRow label="Hostname" value={device.hostname} copyable />}
-                    {device.mac && <InfoRow label="MAC" value={device.mac} copyable />}
+                    {device.ip && <InfoRow label={t('IP')} value={device.ip} copyable />}
+                    {device.hostname && <InfoRow label={t('Hostname')} value={device.hostname} copyable />}
+                    {device.mac && <InfoRow label={t('MAC')} value={device.mac} copyable />}
                     {device.ieee_address && <InfoRow label="IEEE" value={device.ieee_address} copyable />}
-                    {device.os && <InfoRow label="OS" value={device.os} />}
+                    {device.os && <InfoRow label={t('OS')} value={device.os} />}
                     {(device.type ?? device.suggested_type) && (
-                      <InfoRow label="Type" value={(device.type ?? device.suggested_type) as string} />
+                      <InfoRow label={t('Type')} value={(device.type ?? device.suggested_type) as string} />
                     )}
                     {device.friendly_name && device.friendly_name !== device.hostname && (
-                      <InfoRow label="Name" value={device.friendly_name} />
+                      <InfoRow label={t('Name')} value={device.friendly_name} />
                     )}
-                    {device.vendor && <InfoRow label="Vendor" value={device.vendor} />}
-                    {device.model && <InfoRow label="Model" value={device.model} />}
-                    {device.device_subtype && <InfoRow label="Role" value={device.device_subtype} />}
+                    {device.vendor && <InfoRow label={t('Vendor')} value={device.vendor} />}
+                    {device.model && <InfoRow label={t('Model')} value={device.model} />}
+                    {device.device_subtype && <InfoRow label={t('Role')} value={device.device_subtype} />}
                     {device.lqi != null && <InfoRow label="LQI" value={String(device.lqi)} />}
                     {!device.ip && !device.hostname && !device.mac && !device.ieee_address && (
-                      <Empty>Nothing identifying recorded yet.</Empty>
+                      <Empty>{t('Nothing identifying recorded yet.')}</Empty>
                     )}
                   </div>
                 </Section>
 
                 {!isMesh && (
                   <Section
-                    title={`Services found (${device.services.length})`}
+                    title={t('Services found ({count})', { count: device.services.length })}
                     icon={Network}
                     action={
                       // Deep scan: the fix for a device added before the
@@ -705,24 +742,24 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                             data-testid="device-rescan-stop"
                             className="flex items-center gap-1 text-[10px] text-[#f85149] hover:text-[#f85149]/80 transition-colors cursor-pointer"
                           >
-                            <Loader2 size={10} className="animate-spin" /> Scanning — stop
+                            <Loader2 size={10} className="animate-spin" /> {t('Scanning — stop')}
                           </button>
                         ) : (
                           <button
                             onClick={() => setDeepScanOpen(true)}
                             disabled={rescanStarting}
                             data-testid="device-rescan"
-                            title="Pick a port range and refresh the services"
+                            title={t('Pick a port range and refresh the services')}
                             className="flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Radar size={10} /> Deep scan
+                            <Radar size={10} /> {t('Deep scan')}
                           </button>
                         )
                       ) : undefined
                     }
                   >
                     {device.services.length === 0 ? (
-                      <Empty>No services detected</Empty>
+                      <Empty>{t('No services detected')}</Empty>
                     ) : (
                       <div className="flex flex-col gap-1.5 max-h-72 overflow-y-auto">
                         {device.services.map((svc, i) => (
@@ -752,39 +789,39 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
 
               {/* How it is watched, and what happened to it. */}
               <div className="flex flex-col gap-4 min-w-0" data-testid="device-column-operations">
-                <Section title="Monitoring" icon={HeartPulse}>
+                <Section title={t('Monitoring')} icon={HeartPulse}>
                   <div className="flex flex-col">
                     {device.check_method ? (
                       <InfoRow
-                        label="Check"
+                        label={t('Check')}
                         value={device.check_target ? `${device.check_method} → ${device.check_target}` : device.check_method}
                       />
                     ) : (
-                      <Empty>Not monitored — pick a check method from Edit.</Empty>
+                      <Empty>{t('Not monitored — pick a check method from Edit.')}</Empty>
                     )}
-                    {device.response_time_ms != null && <InfoRow label="Response" value={`${device.response_time_ms} ms`} />}
-                    {device.discovery_source && <InfoRow label="Source" value={device.discovery_source.toUpperCase()} />}
+                    {device.response_time_ms != null && <InfoRow label={t('Response')} value={`${device.response_time_ms} ms`} />}
+                    {device.discovery_source && <InfoRow label={t('Source')} value={device.discovery_source.toUpperCase()} />}
                     {device.canvas_count != null && device.canvas_count > 0 && (
-                      <InfoRow label="Canvases" value={String(device.canvas_count)} />
+                      <InfoRow label={t('Canvases')} value={String(device.canvas_count)} />
                     )}
                   </div>
                 </Section>
 
-                <Section title="Activity" icon={History}>
+                <Section title={t('Activity')} icon={History}>
                   <div className="flex flex-col">
                     {timestamps.length === 0 ? (
-                      <Empty>No activity recorded.</Empty>
+                      <Empty>{t('No activity recorded.')}</Empty>
                     ) : (
-                      timestamps.map((t) => <TimeRow key={t.label} label={t.label} iso={t.iso} />)
+                      timestamps.map((row) => <TimeRow key={row.label} label={row.label} iso={row.iso} />)
                     )}
                   </div>
                 </Section>
 
-                <Section title="Notes" icon={StickyNote}>
+                <Section title={t('Notes')} icon={StickyNote}>
                   {device.notes ? (
                     <p className="text-xs text-foreground/80 whitespace-pre-wrap">{device.notes}</p>
                   ) : (
-                    <Empty>No notes.</Empty>
+                    <Empty>{t('No notes.')}</Empty>
                   )}
                 </Section>
               </div>
@@ -792,7 +829,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
               {/* What the user curated. */}
               <div className="flex flex-col gap-4 min-w-0" data-testid="device-column-curation">
                 <Section
-                  title={`Properties${device.properties && device.properties.length > 0 ? ` (${device.properties.length})` : ''}`}
+                  title={`${t('Properties')}${device.properties && device.properties.length > 0 ? ` (${device.properties.length})` : ''}`}
                   icon={Tags}
                 >
                   {device.properties && device.properties.length > 0 ? (
@@ -805,7 +842,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                       ))}
                     </div>
                   ) : (
-                    <Empty>No properties.</Empty>
+                    <Empty>{t('No properties.')}</Empty>
                   )}
                 </Section>
 
@@ -818,15 +855,15 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
         <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-t border-[#30363d] bg-[#161b22]">
           <p className="text-[11px] text-muted-foreground/70 min-w-0 truncate">
             {editing
-              ? 'These facts belong to the device — every canvas drawing it follows.'
+              ? t('These facts belong to the device — every canvas drawing it follows.')
               : rackOnly
-                ? 'Rack gear — mounted from a rack canvas, never placed on a logical one.'
-                : 'One device, one row. Editing here updates every canvas drawing it.'}
+                ? t('Rack gear — mounted from a rack canvas, never placed on a logical one.')
+                : t('One device, one row. Editing here updates every canvas drawing it.')}
           </p>
           {editing ? (
             <div className="flex items-center gap-2 shrink-0">
               <Button size="sm" variant="ghost" onClick={handleCancel} className="text-muted-foreground hover:text-foreground">
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button
                 size="sm"
@@ -834,7 +871,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 onClick={handleSave}
                 disabled={saving}
               >
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? t('Saving…') : t('Save')}
               </Button>
             </div>
           ) : (
@@ -845,7 +882,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 className="text-muted-foreground hover:text-foreground hover:bg-[#30363d]"
                 onClick={handleHide}
               >
-                Hide
+                {t('Hide')}
               </Button>
               <Button
                 size="sm"
@@ -853,7 +890,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                 className="text-[#f85149] hover:text-[#f85149] hover:bg-[#f85149]/10"
                 onClick={handleIgnore}
               >
-                Delete
+                {t('Delete')}
               </Button>
               {/* Rack gear is mounted from a rack canvas, never approved onto a
                   logical one — so it gets no Approve button at all. */}
@@ -863,7 +900,7 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
                   className="bg-[#39d353]/15 text-[#39d353] hover:bg-[#39d353]/25 border border-[#39d353]/30"
                   onClick={handleApprove}
                 >
-                  Approve
+                  {t('Approve')}
                 </Button>
               )}
             </div>
@@ -886,8 +923,8 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
             onClose={() => setSvcModal(null)}
             onSubmit={handleSubmitService}
             initial={svcModal.form}
-            title={svcModal.index === null ? 'Add Service' : 'Edit Service'}
-            confirmLabel={svcModal.index === null ? 'Add' : 'Save'}
+            title={svcModal.index === null ? t('Add Service') : t('Edit Service')}
+            confirmLabel={svcModal.index === null ? t('Add') : t('Save')}
           />
         )}
       </DialogContent>

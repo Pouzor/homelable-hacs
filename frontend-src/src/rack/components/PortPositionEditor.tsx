@@ -8,6 +8,7 @@
  * relative to the artwork they sit on.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { t, useLocale } from '@/i18n'
 import { Faceplate } from './Faceplate'
 import { INNER_WIDTH_PX, U_PX } from '../layout'
 import { clampPort, snapThreshold, snapToPeers } from '../portLayout'
@@ -75,6 +76,7 @@ export function PortPositionEditor({
   onSelect,
   onChange,
 }: Props) {
+  useLocale()
   const palette = useRackPalette()
   const plateRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -222,7 +224,7 @@ export function PortPositionEditor({
               <button
                 key={port.id}
                 type="button"
-                aria-label={`Move port ${port.label}`}
+                aria-label={t('Move port {label}', { label: port.label })}
                 data-port-handle={port.id}
                 className="absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border text-[8px] active:cursor-grabbing"
                 style={{
@@ -248,8 +250,7 @@ export function PortPositionEditor({
 
       {interactive && (
         <p className="text-[11px] text-muted-foreground">
-          Drag a port to place it, or nudge the selected one with the arrow keys. Ports snap to the
-          row or column of their neighbours.
+          {t('Drag a port to place it, or nudge the selected one with the arrow keys. Ports snap to the row or column of their neighbours.')}
         </p>
       )}
     </div>

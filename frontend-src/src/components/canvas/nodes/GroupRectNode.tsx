@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from '@/i18n'
 import { Handle, Position, NodeResizer, type NodeProps, type Node } from '@xyflow/react'
 import { ChevronDown } from 'lucide-react'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -165,7 +166,11 @@ export function GroupRectNode({ id, data, selected }: NodeProps<Node<NodeData>>)
               transition: 'all 0.2s ease-out, transform 0.2s ease-out',
               transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
             }}
-            title={isCollapsed ? `Show ${childrenCount} hidden items` : `Hide ${childrenCount} items`}
+            title={
+          isCollapsed
+            ? t('Show {count} hidden items', { count: childrenCount })
+            : t('Hide {count} items', { count: childrenCount })
+        }
           >
             <ChevronDown size={14} />
           </button>

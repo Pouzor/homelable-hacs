@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { t } from '@/i18n'
 import { useReactFlow } from '@xyflow/react'
 import { Search, X } from 'lucide-react'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -144,7 +145,7 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, IP, hostname or service…"
+            placeholder={t('Search by name, IP, hostname or service…')}
             style={{
               flex: 1,
               background: 'transparent',
@@ -161,7 +162,7 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
           )}
           <button
             onClick={() => { setOpen(false); setQuery('') }}
-            aria-label="Close search"
+            aria-label={t('Close search')}
             style={{ color: '#8b949e', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
           >
             <X size={14} />

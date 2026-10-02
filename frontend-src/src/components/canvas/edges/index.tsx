@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { t } from '@/i18n'
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -102,7 +103,7 @@ function WaypointHandle({ edgeId, index, waypoint, waypoints, color, pathStyle, 
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onDoubleClick={handleDoubleClick}
-      title="Drag to move · Double-click to remove"
+      title={t('Drag to move · Double-click to remove')}
     />
   )
 }
@@ -153,7 +154,7 @@ function AddWaypointHandle({ edgeId, insertIndex, x, y, waypoints, color, pathSt
         zIndex: 9,
         opacity: 0.7,
       }}
-      title="Click to add waypoint"
+      title={t('Click to add waypoint')}
     >
       +
     </div>
@@ -296,7 +297,7 @@ function EndpointDot({ edgeId, role, x, y, position, color, source, target, sour
         zIndex: 1000,
         touchAction: 'none',
       }}
-      title="Drag to reconnect"
+      title={t('Drag to reconnect')}
     />
   )
 }

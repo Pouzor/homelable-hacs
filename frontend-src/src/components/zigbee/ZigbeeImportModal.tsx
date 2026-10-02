@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { zigbeeApi } from '@/api/ha'
 import type { ZigbeeBackend, ZigbeeGateway } from '@/components/zigbee/types'
+import { t, useLocale } from '@/i18n'
 import { toast } from 'sonner'
 
 /**
@@ -51,12 +52,14 @@ function extractWsError(err: unknown): WsErrorShape {
   return {}
 }
 
+/** Product names, not copy — ZHA and Zigbee2MQTT keep themselves in any locale. */
 const BACKEND_LABEL: Record<ZigbeeBackend, string> = {
   zha: 'ZHA',
   z2m: 'Zigbee2MQTT',
 }
 
 export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportModalProps) {
+  useLocale()
   const [starting, setStarting] = useState(false)
   const [gateway, setGateway] = useState<ZigbeeGateway | null>(null)
 
@@ -85,12 +88,12 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
     try {
       // No backend argument — the integration options are the authority.
       await zigbeeApi.startImport()
-      toast.success('Zigbee scan started — check Scan History for results')
+      toast.success(t('Zigbee scan started — check Scan History for results'))
       onImported?.()
       onClose()
     } catch (err) {
       const { message } = extractWsError(err)
-      toast.error(message ?? 'Failed to start Zigbee scan')
+      toast.error(message ?? t('Failed to start Zigbee scan'))
     } finally {
       setStarting(false)
     }
@@ -102,59 +105,55 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <Network size={16} className="text-[#00d4ff]" />
-            Zigbee Import
+            {t('Zigbee Import')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Reads your Zigbee mesh and adds every device to Pending, where you approve
-            them onto the canvas. Works with <strong className="text-foreground">ZHA</strong>{' '}
-            or <strong className="text-foreground">Zigbee2MQTT</strong>.
+            {t('Reads your Zigbee mesh and adds every device to Pending, where you approve them onto the canvas. Works with ')}
+            <strong className="text-foreground">ZHA</strong>
+            {t(' or ')}
+            <strong className="text-foreground">Zigbee2MQTT</strong>
+            {t('.')}
           </p>
 
           <p className="text-xs text-muted-foreground">
-            Gateway:{' '}
+            {t('Gateway: ')}
             <span className="text-foreground font-medium">
-              {active ? BACKEND_LABEL[active] : 'checking…'}
+              {active ? BACKEND_LABEL[active] : t('checking…')}
             </span>
-            {gateway?.source === 'auto' && active && ' (auto-detected)'}
+            {gateway?.source === 'auto' && active && ` ${t('(auto-detected)')}`}
           </p>
 
           {active === 'zha' && (
             <p className="text-[11px] text-muted-foreground italic">
-              ZHA is read straight from the integration — no MQTT broker, no
-              re-pairing, and it returns almost instantly. Routers, end devices and
-              LQI come from the radio's neighbour tables. Results show in Scan
-              History.
+              {t("ZHA is read straight from the integration — no MQTT broker, no re-pairing, and it returns almost instantly. Routers, end devices and LQI come from the radio's neighbour tables. Results show in Scan History.")}
             </p>
           )}
           {active === 'z2m' && (
             <p className="text-[11px] text-muted-foreground italic">
-              Zigbee2MQTT is fetched over the MQTT broker HA already uses (base topic
-              set in the integration options). The scan runs in the background — it
-              can take a few minutes on large meshes as the coordinator polls every
-              router. Progress shows in Scan History; you can keep working meanwhile.
+              {t('Zigbee2MQTT is fetched over the MQTT broker HA already uses (base topic set in the integration options). The scan runs in the background — it can take a few minutes on large meshes as the coordinator polls every router. Progress shows in Scan History; you can keep working meanwhile.')}
             </p>
           )}
           {active === null && (
             <p className="text-[11px] text-muted-foreground italic">
-              Homelable picks the gateway for you: ZHA when its integration is set up,
-              otherwise Zigbee2MQTT. Nothing to configure for ZHA.
+              {t('Homelable picks the gateway for you: ZHA when its integration is set up, otherwise Zigbee2MQTT. Nothing to configure for ZHA.')}
             </p>
           )}
 
           {active && (
             <p className="text-[11px] text-muted-foreground">
-              Running the other one? Change <strong className="text-foreground">Zigbee gateway</strong>{' '}
-              in Settings → Devices &amp; services → Homelable → Configure.
+              {t('Running the other one? Change ')}
+              <strong className="text-foreground">{t('Zigbee gateway')}</strong>
+              {t(' in Settings → Devices & services → Homelable → Configure.')}
             </p>
           )}
         </div>
 
         <DialogFooter className="gap-2 shrink-0 pt-2 border-t border-border">
           <Button variant="ghost" onClick={onClose} disabled={starting}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button
             onClick={handleStart}
@@ -163,7 +162,7 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
             className="gap-1.5"
           >
             {starting ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />}
-            Start Zigbee scan
+            {t('Start Zigbee scan')}
           </Button>
         </DialogFooter>
       </DialogContent>

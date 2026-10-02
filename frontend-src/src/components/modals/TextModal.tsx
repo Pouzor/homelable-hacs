@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { hexToRgba, rgbaToHex8 } from '@/utils/colorUtils'
+import { t, useLocale } from '@/i18n'
 
 export type TextBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none'
 
@@ -18,14 +19,6 @@ export interface TextFormData {
   border_width: number
   background_color: string
 }
-
-const BORDER_STYLES: { value: TextBorderStyle; label: string; preview: string }[] = [
-  { value: 'none',   label: 'None',   preview: '   ' },
-  { value: 'solid',  label: 'Solid',  preview: '───' },
-  { value: 'dashed', label: 'Dashed', preview: '╌╌╌' },
-  { value: 'dotted', label: 'Dotted', preview: '···' },
-  { value: 'double', label: 'Double', preview: '═══' },
-]
 
 const TEXT_SIZES: { value: number; label: string }[] = [
   { value: 10, label: '10' },
@@ -44,6 +37,7 @@ const BORDER_WIDTHS: { value: number; label: string }[] = [
   { value: 5, label: '5px' },
 ]
 
+// Font names stay verbatim — they name a typeface, not a prose label.
 const FONTS = [
   { value: 'inter', label: 'Inter (sans-serif)' },
   { value: 'mono',  label: 'JetBrains Mono' },
@@ -71,8 +65,24 @@ interface TextModalProps {
   title?: string
 }
 
+// `title` keeps its English default so the `===` still matches; only the
+// render goes through `t`. Callers may pass an already-translated title, so
+// both forms of the default are matched — otherwise zh-CN would never reach
+// the "Add" branch.
 export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 'Add Text' }: TextModalProps) {
+  useLocale()
   const [form, setForm] = useState<TextFormData>({ ...DEFAULT_FORM, ...initial })
+  const isAddMode = title === 'Add Text' || title === t('Add Text')
+
+  // Built inside the component so the labels go through `t`; a module-level
+  // table would be created once at import, before the locale is known.
+  const borderStyles: { value: TextBorderStyle; label: string; preview: string }[] = [
+    { value: 'none',   label: t('None'),   preview: '   ' },
+    { value: 'solid',  label: t('Solid'),  preview: '───' },
+    { value: 'dashed', label: t('Dashed'), preview: '╌╌╌' },
+    { value: 'dotted', label: t('Dotted'), preview: '···' },
+    { value: 'double', label: t('Double'), preview: '═══' },
+  ]
 
   const set = <K extends keyof TextFormData>(key: K, value: TextFormData[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
@@ -84,26 +94,26 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
   }
 
   const colorFields = [
-    { key: 'text_color' as const,       label: 'Text' },
-    { key: 'border_color' as const,     label: 'Border' },
-    { key: 'background_color' as const, label: 'Background' },
+    { key: 'text_color' as const,       label: t('Text') },
+    { key: 'border_color' as const,     label: t('Border') },
+    { key: 'background_color' as const, label: t('Background') },
   ]
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="bg-[#161b22] border-[#30363d] text-foreground max-w-sm">
         <DialogHeader>
-          <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
+          <DialogTitle className="text-sm font-semibold">{t(title)}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           {/* Text content */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Text</Label>
+            <Label className="text-xs text-muted-foreground">{t('Text')}</Label>
             <textarea
               value={form.text}
               onChange={(e) => set('text', e.target.value)}
-              placeholder="Type text…"
+              placeholder={t('Type text…')}
               rows={3}
               className={`bg-[#21262d] border border-[#30363d] text-sm p-2 resize-y min-h-[60px] focus:outline-none focus:border-[#00d4ff] ${modalStyles['modal-radius']}`}
             />
@@ -111,7 +121,7 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
 
           {/* Font (Police) */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Police</Label>
+            <Label className="text-xs text-muted-foreground">{t('Police')}</Label>
             <Select value={form.font} onValueChange={(v: string | null) => set('font', v ?? 'inter')}>
               <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`}>
                 <SelectValue>
@@ -130,7 +140,7 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
 
           {/* Colors */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Colors</Label>
+            <Label className="text-xs text-muted-foreground">{t('Colors')}</Label>
             <div className="grid grid-cols-3 gap-2">
               {colorFields.map(({ key, label }) => {
                 const { hex6, alpha } = hexToRgba(form[key])
@@ -155,7 +165,7 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
                       value={alpha}
                       onChange={(e) => set(key, rgbaToHex8(hex6, Number(e.target.value)))}
                       className="w-full h-1 accent-[#00d4ff] cursor-pointer"
-                      title={`Opacity: ${alpha}%`}
+                      title={t('Opacity: {alpha}%', { alpha })}
                     />
                     <span className="text-[9px] text-muted-foreground/60">{label} {alpha}%</span>
                   </div>
@@ -166,7 +176,7 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
 
           {/* Text size */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Size</Label>
+            <Label className="text-xs text-muted-foreground">{t('Size')}</Label>
             <div className="grid grid-cols-6 gap-1">
               {TEXT_SIZES.map(({ value, label }) => {
                 const isSelected = form.text_size === value
@@ -192,9 +202,9 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
 
           {/* Border style */}
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Border Style</Label>
+            <Label className="text-xs text-muted-foreground">{t('Border Style')}</Label>
             <div className="grid grid-cols-5 gap-1">
-              {BORDER_STYLES.map(({ value, label, preview }) => {
+              {borderStyles.map(({ value, label, preview }) => {
                 const isSelected = form.border_style === value
                 return (
                   <button
@@ -220,7 +230,7 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
           {/* Border width (only when style != none) */}
           {form.border_style !== 'none' && (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">Border Width</Label>
+              <Label className="text-xs text-muted-foreground">{t('Border Width')}</Label>
               <div className="grid grid-cols-5 gap-1">
                 {BORDER_WIDTHS.map(({ value, label }) => {
                   const isSelected = form.border_width === value
@@ -253,15 +263,15 @@ export function TextModal({ open, onClose, onSubmit, onDelete, initial, title = 
                 className="text-[#f85149] hover:text-[#f85149] hover:bg-[#f85149]/10 cursor-pointer"
                 onClick={() => { onDelete(); onClose() }}
               >
-                Delete
+                {t('Delete')}
               </Button>
             )}
             <div className="flex gap-2 ml-auto">
               <Button type="button" variant="ghost" size="sm" className={`cursor-pointer ${modalStyles['modal-cancel-hover']}`} onClick={onClose}>
-                Cancel
+                {t('Cancel')}
               </Button>
               <Button type="submit" size="sm" className="bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90 cursor-pointer">
-                {title === 'Add Text' ? 'Add' : 'Save'}
+                {isAddMode ? t('Add') : t('Save')}
               </Button>
             </div>
           </div>

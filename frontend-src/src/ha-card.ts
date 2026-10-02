@@ -11,6 +11,10 @@
  */
 import { CARD_EDITOR_TYPE } from './card-editor'
 import { CARD_TYPE, cardSize, parseCardConfig, type HomelableCardConfig } from './lib/cardConfig'
+// `@i18n/core`, not `@i18n` — the barrel pulls in React via useSyncExternalStore,
+// and this bundle is loaded on every HA page. The picker entry is built once
+// here, so it reads whatever locale is current at load time.
+import { getLocale, subscribe, syncLocaleFromHass, t } from './i18n/core'
 import type { Hass } from './lib/hass'
 import type { CardMount } from './lib/cardMount'
 
@@ -30,6 +34,7 @@ class HomelableCanvasCard extends HTMLElement {
   private _hass: Hass | null = null
   private _config: HomelableCardConfig | null = null
   private _mount: CardMount | null = null
+  private _language: string | undefined
 
   constructor() {
     super()
@@ -44,6 +49,11 @@ class HomelableCanvasCard extends HTMLElement {
 
   set hass(value: Hass) {
     this._hass = value
+    // HA reassigns `hass` many times a second; only re-derive on a real change.
+    if (value.language !== this._language) {
+      this._language = value.language
+      syncLocaleFromHass(value.language)
+    }
     this.renderCard()
   }
 
@@ -112,11 +122,22 @@ if (!customElements.get(CARD_TYPE)) {
     customCards?: Array<Record<string, unknown>>
   }
   w.customCards = w.customCards ?? []
-  w.customCards.push({
+  const entry: Record<string, unknown> = {
     type: CARD_TYPE,
-    name: 'Homelable Canvas',
-    description: 'Read-only view of a Homelable network canvas.',
+    name: t('Homelable Canvas'),
+    description: t('Read-only view of a Homelable network canvas.'),
     preview: false,
     documentationURL: 'https://github.com/Pouzor/homelable-hacs',
+  }
+  w.customCards.push(entry)
+
+  // This module runs on every HA page, long before a `hass` object exists, so
+  // the locale is still the English default when `entry` is built. HA reads
+  // `customCards` fresh each time the picker opens, so refreshing the same
+  // object in place is enough — no re-registration and no second entry.
+  subscribe(() => {
+    if (getLocale() === 'en') return
+    entry.name = t('Homelable Canvas')
+    entry.description = t('Read-only view of a Homelable network canvas.')
   })
 }
