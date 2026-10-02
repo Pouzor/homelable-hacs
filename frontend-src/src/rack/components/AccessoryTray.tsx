@@ -8,6 +8,7 @@
  * cable managers) are rack-only artwork with no inventory row, so they stay.
  */
 import { FACEPLATES } from '../faceplates'
+import { t } from '@/i18n'
 import { endDrag, startDrag } from './dragPayload'
 
 export function AccessoryTray() {
@@ -16,10 +17,10 @@ export function AccessoryTray() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2 text-sm text-foreground">
       <h2 className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Accessories
+        {t('Accessories')}
       </h2>
       <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
-        Drag onto a rack. Devices come from the Device Inventory — use + Device.
+        {t('Drag onto a rack. Devices come from the Device Inventory — use + Device.')}
       </p>
       <ul className="space-y-1">
         {accessories.map((plate) => (

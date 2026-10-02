@@ -6,6 +6,7 @@
  * one, and they attach to ports rather than to node handles.
  */
 import { ViewportPortal } from '@xyflow/react'
+import { t } from '@/i18n'
 import { visibleCables } from '../cableVisibility'
 import { portPosition } from '../layout'
 import { useRackPalette, type RackPalette } from '../rackTheme'
@@ -175,7 +176,7 @@ export function CableLayer() {
               >
                 <title>
                   {cable.label ? `${cable.label} — ${cable.type}` : cable.type}
-                  {' (click to select, Delete to remove)'}
+                  {t(' (click to select, Delete to remove)')}
                 </title>
               </path>
               <circle cx={from.x} cy={from.y} r={selected ? 3.2 : 2.2} fill={selected ? palette.accent : cable.color} />

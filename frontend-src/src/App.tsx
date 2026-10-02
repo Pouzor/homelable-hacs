@@ -44,12 +44,14 @@ import { hydrateCanvasPayload } from '@/utils/canvasPayload'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import { useRackStore } from '@/rack/store'
+import { t, useLocale } from '@/i18n'
 import type { NodeData, EdgeData, NodeType, DesignType } from '@/types'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
+  useLocale()
   const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes, addNodesToGroup, addNodesToContainer, addNodesToZone, importZoneSubnet, floorMap, setFloorMap } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
@@ -110,14 +112,14 @@ export default function App() {
         // Named explicitly: the design-switch flow saves the *old* design, and
         // the store refuses rather than writing under whichever one it holds.
         const ok = await useRackStore.getState().save(saveDesignId)
-        if (ok) toast.success('Rack canvas saved')
-        else toast.error('Save failed')
+        if (ok) toast.success(t('Rack canvas saved'))
+        else toast.error(t('Save failed'))
         return ok
       }
       if (STANDALONE) {
         localStorage.setItem(STANDALONE_STORAGE_KEY, JSON.stringify({ nodes, edges, theme_id: activeTheme, custom_style: customStyle }))
         markSaved()
-        toast.success('Canvas saved')
+        toast.success(t('Canvas saved'))
         return true
       }
       // Read the baseline at save time (not through the render-time destructure)
@@ -131,10 +133,10 @@ export default function App() {
       // What was sent, not what the store holds now: an edit made while the
       // save was in flight is not in the payload and must stay pending.
       markSaved({ nodes, edges })
-      toast.success('Canvas saved')
+      toast.success(t('Canvas saved'))
       return true
     } catch {
-      toast.error('Save failed')
+      toast.error(t('Save failed'))
       return false
     }
   }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId, floorMap, designTypeOf])
@@ -244,7 +246,7 @@ export default function App() {
           } else {
             // Save failed: keep the unsaved canvas on screen by reverting the
             // selection back to the old design.
-            toast.error('Switch cancelled — unsaved changes kept')
+            toast.error(t('Switch cancelled — unsaved changes kept'))
             revertingRef.current = true
             setActiveDesign(oldId)
           }
@@ -320,7 +322,7 @@ export default function App() {
       ...(isContainerNode ? { width: 300, height: 200 } : {}),
     }
     addNode(newNode)
-    toast.success(`Added "${data.label}"`)
+    toast.success(t('Added "{label}"', { label: data.label ?? '' }))
   }, [addNode, nodes, snapshotHistory])
 
   // Subnet import is a one-shot action on an existing zone, so on the Add modal
@@ -335,8 +337,8 @@ export default function App() {
   )
 
   const reportSubnetImport = useCallback((moved: number, cidr: string) => {
-    if (moved === 0) toast.info(`No unparented device in ${cidr}`)
-    else toast.success(`Moved ${moved} device${moved > 1 ? 's' : ''} from ${cidr} into the zone`)
+    if (moved === 0) toast.info(t('No unparented device in {cidr}', { cidr }))
+    else toast.success(t('Moved {count} device{plural} from {cidr} into the zone', { count: moved, plural: moved > 1 ? 's' : '', cidr }))
   }, [])
 
   const handleImportSubnetIntoZone = useCallback((zoneId: string, cidr: string) => {
@@ -534,21 +536,21 @@ export default function App() {
   const handleAutoLayout = useCallback(() => {
     const laid = applyDagreLayout(nodes, edges)
     loadCanvas(laid, edges)
-    toast.success('Canvas auto-arranged')
+    toast.success(t('Canvas auto-arranged'))
   }, [nodes, edges, loadCanvas])
 
   const handleExportMd = useCallback(async () => {
     const md = generateMarkdownTable(nodes)
-    if (!md) { toast.error('No nodes to export'); return }
+    if (!md) { toast.error(t('No nodes to export')); return }
     await navigator.clipboard.writeText(md)
-    toast.success('Markdown table copied to clipboard')
+    toast.success(t('Markdown table copied to clipboard'))
   }, [nodes])
 
   const handleExportYaml = useCallback(() => {
-    if (nodes.length === 0) { toast.error('No nodes to export'); return }
+    if (nodes.length === 0) { toast.error(t('No nodes to export')); return }
     const content = exportCanvasToYaml(nodes, edges)
     downloadYaml(content)
-    toast.success('Canvas exported as YAML')
+    toast.success(t('Canvas exported as YAML'))
   }, [nodes, edges])
 
   const handleImportYaml = useCallback((content: string) => {
@@ -557,15 +559,15 @@ export default function App() {
       snapshotHistory()
       loadCanvas(merged, mergedEdges)
       markUnsaved()
-      toast.success(`Imported ${imported} node${imported !== 1 ? 's' : ''}`)
+      toast.success(t('Imported {count} node{plural}', { count: imported, plural: imported !== 1 ? 's' : '' }))
     } catch (err) {
-      toast.error(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
+      toast.error(t('Import failed: {reason}', { reason: err instanceof Error ? err.message : String(err) }))
     }
   }, [nodes, edges, snapshotHistory, loadCanvas, markUnsaved])
 
   const handleExport = useCallback(() => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
-    if (!el) { toast.error('Canvas not ready'); return }
+    if (!el) { toast.error(t('Canvas not ready')); return }
     setExportModalOpen(true)
   }, [])
 
@@ -659,11 +661,11 @@ export default function App() {
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
                 {isRackDesign ? (
-                  <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">Loading rack…</div>}>
+                  <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">{t('Loading rack…')}</div>}>
                     <RackCanvas />
                   </Suspense>
                 ) : (
-                <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">Loading canvas…</div>}>
+                <Suspense fallback={<div className="flex h-full w-full items-center justify-center text-slate-400">{t('Loading canvas…')}</div>}>
                   <LazyCanvas
                     onConnect={handleEdgeConnect}
                     onEdgeDoubleClick={handleEdgeDoubleClick}
@@ -692,6 +694,9 @@ export default function App() {
           open={addNodeOpen}
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}
+          // `Add Node` / `Add Zone` / `Add Text` stay English literals: their
+          // modals pick the Add-vs-Save button set with `title === 'Add …'`, so
+          // a translated prop would silently land on the Save branch.
           title="Add Node"
           parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))}
           onEditTypeStyle={setStyleEditorType}
@@ -704,7 +709,7 @@ export default function App() {
           onClose={() => setEditNodeId(null)}
           onSubmit={handleUpdateNode}
           initial={editNode?.data}
-          title="Edit Node"
+          title={t('Edit Node')}
           parentCandidates={(() => {
             const descendants = new Set<string>()
             if (editNodeId) {
@@ -742,7 +747,7 @@ export default function App() {
           onDelete={handleEdgeDelete}
           onClearWaypoints={handleClearWaypoints}
           initial={editEdge?.data}
-          title="Edit Link"
+          title={t('Edit Link')}
         />
 
         {!STANDALONE && (
@@ -750,7 +755,7 @@ export default function App() {
             open={scanConfigOpen}
             onClose={() => setScanConfigOpen(false)}
             onScanNow={() => {
-              toast.success('Network scan started — check Scan History for results')
+              toast.success(t('Network scan started — check Scan History for results'))
             }}
           />
         )}
@@ -792,7 +797,7 @@ export default function App() {
               z_order: rc.z_order ?? 1,
             }
           })()}
-          title="Edit Zone"
+          title={t('Edit Zone')}
         />
 
         <TextModal
@@ -823,7 +828,7 @@ export default function App() {
               background_color: rc.background ?? '#00000000',
             }
           })()}
-          title="Edit Text"
+          title={t('Edit Text')}
         />
 
         {/* key forces re-mount on open so useState captures current theme as original */}

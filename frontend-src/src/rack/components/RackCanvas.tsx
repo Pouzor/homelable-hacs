@@ -7,6 +7,7 @@
  * rack flow when the user switches back and forth.
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { t } from '@/i18n'
 import {
   Background,
   BackgroundVariant,
@@ -172,7 +173,7 @@ function RackCanvasInner() {
         // z-10 clears .react-flow__renderer (z-index 4); without it the pane sits
         // on top and swallows the clicks as a canvas drag.
         <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm text-[#8b949e]">This rack canvas is empty.</p>
+          <p className="text-sm text-[#8b949e]">{t('This rack canvas is empty.')}</p>
           <div className="pointer-events-auto flex gap-2">
             <button
               type="button"

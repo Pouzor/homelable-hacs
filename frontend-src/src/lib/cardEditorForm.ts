@@ -4,6 +4,9 @@
  *
  * React-free, like the rest of the eager card entry.
  */
+// Imported from `core` rather than the React binding: this module stays
+// React-free so the card editor can be loaded without the panel's React graph.
+import { t } from '@/i18n/core'
 import { DEFAULT_HEIGHT, INTERACTIVE_MODES } from './cardConfig'
 
 export interface DesignOption {
@@ -36,8 +39,10 @@ const LABELS: Record<string, string> = {
   open_on_click: 'Open http://<ip> when a node is clicked',
 }
 
+/** The caption ha-form shows for a field. The table stays English; this is the
+ *  read point, so it is where the language is applied. */
 export function computeLabel(schema: { name: string }): string {
-  return LABELS[schema.name] ?? schema.name
+  return t(LABELS[schema.name] ?? schema.name)
 }
 
 /**
@@ -76,7 +81,7 @@ export function buildSchema(designs: DesignOption[] | null): FormSchemaEntry[] {
           mode: 'dropdown',
           options: INTERACTIVE_MODES.map((mode) => ({
             value: mode,
-            label: mode === 'pan' ? 'Pan and zoom' : 'Locked',
+            label: t(mode === 'pan' ? 'Pan and zoom' : 'Locked'),
           })),
         },
       },

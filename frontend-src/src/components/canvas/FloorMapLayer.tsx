@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { t } from '@/i18n'
 import { ViewportPortal, useReactFlow, useStore } from '@xyflow/react'
 import { useCanvasStore } from '@/stores/canvasStore'
 
@@ -153,7 +154,7 @@ export function FloorMapLayer() {
       >
         <img
           src={imageData}
-          alt="Floor plan"
+          alt={t('Floor plan')}
           draggable={false}
           style={{
             width: '100%',

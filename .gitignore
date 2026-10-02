@@ -16,12 +16,24 @@ build/
 node_modules/
 *.log
 npm-debug.log*
+# `eslint src -f json > eslint-*.json` is a scratch report, not a source file.
+# It is a few hundred KB and would otherwise be swept up by `git add -A`.
+eslint-*.json
+# Commit-message scratch files: `git commit -F msg.txt` leaves the file behind,
+# and a later `git add -A` sweeps it in. The `git add -A` that stages a fix is
+# exactly the one most likely to run while the file still exists.
+*-msg.txt
+fix-msg.txt
 
 # Frontend build output (regenerated each release)
 custom_components/homelable/frontend/homelable-panel-*
 custom_components/homelable/frontend/homelable-chunk-*
 custom_components/homelable/frontend/homelable-card-*
 !custom_components/homelable/frontend/.gitkeep
+# Locally built release archive (scripts/build-release-zip.py). CI produces its
+# own as a release asset; a copy in the working tree is 900 KB of build output
+# that `git add -A` would otherwise sweep in.
+homelable.zip
 
 # IDE
 .vscode/

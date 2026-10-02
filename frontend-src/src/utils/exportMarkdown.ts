@@ -42,6 +42,12 @@ export function generateMarkdownTable(nodes: Node<NodeData>[]): string {
 
   if (rows.length === 0) return ''
 
+  // Column headings stay English on purpose, and so does every value in the
+  // body: `d.type` renders as the stored id (`server`), `d.status` as `online`.
+  // Translating the headings alone would put 名称/状态 over values that are
+  // still machine English, which is worse than a consistent table — and this
+  // artifact is copied out to a doc, a spreadsheet or a model prompt, where
+  // the column names are part of a data contract rather than chrome.
   const headers = ['Label', 'Type', 'IP', 'Hostname', 'Status', 'Services']
   const separator = headers.map(() => '---')
 
