@@ -115,6 +115,15 @@ const part: Record<string, string> = {
   '{n}mo ago': '{n} 个月前',
   '{n}y ago': '{n} 年前',
 
+  // --- status ids ----------------------------------------------------------
+  // A node's status is rendered straight from its stored id, so the ids are
+  // keys in their own right. The capitalised spellings are the filter
+  // dropdown's labels and are separate entries; both are needed.
+  'running': '进行中',
+  'done': '已完成',
+  'cancelled': '已取消',
+  'error': '错误',
+
   // --- card / panel chrome ------------------------------------------------
   'Loading rack…': '正在加载机柜…',
   'Canvas unavailable. Is the Homelable integration still set up?':

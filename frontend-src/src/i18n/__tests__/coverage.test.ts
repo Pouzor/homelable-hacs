@@ -245,6 +245,69 @@ describe('no English string literal reaches a render site untranslated', () => {
     ).toEqual([])
   })
 
+  /**
+   * Status ids are rendered straight from stored data, so they never appear as
+   * a `t('…')` literal — `data.status` and `r.status` are variables. The sweep
+   * above cannot see them twice over: it wants a leading capital *and* a
+   * space, and these are single lower-case words.
+   *
+   * That is not hypothetical. `<span>{data.status}</span>` shipped and the
+   * detail panel showed a green **Online** badge in a Chinese interface while
+   * the sidebar next to it correctly said 在线. The helper that fixes it
+   * (`statusLabel()`) already existed and simply was not called.
+   *
+   * So this asserts the *render* is translated, not that a key exists: a value
+   * that passes through `t()`/`statusLabel()` is fine in any locale, and one
+   * that does not is a miss. Keys reach t() through a variable, so the check
+   * has to look at the JSX around the expression.
+   */
+  it('translates status ids rendered from stored data', () => {
+    const PATTERNS: { re: RegExp; why: string }[] = [
+      {
+        re: /\{([a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)*\.status)\}/g,
+        why: 'a stored status id rendered into the DOM',
+      },
+      {
+        re: /\btitle=\{([a-zA-Z_$][\w$]*(?:\.[a-zA-Z_$][\w$]*)*\.status)\}/g,
+        why: 'a stored status id used as a tooltip',
+      },
+    ]
+
+    const files: string[] = []
+    ;(function walk(d: string) {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, e.name)
+        if (e.isDirectory()) {
+          if (e.name === 'node_modules' || e.name === 'i18n' || e.name === '__tests__' || e.name === 'test') continue
+          walk(full)
+        } else if (/\.tsx$/.test(e.name) && !/\.test\.tsx$/.test(e.name)) {
+          files.push(full)
+        }
+      }
+    })(SRC)
+
+    const hits: string[] = []
+    for (const f of files) {
+      let inBlock = false
+      for (const [i, raw] of fs.readFileSync(f, 'utf8').split(/\r?\n/).entries()) {
+        const { code: line, inBlock: stillInBlock } = stripComments(raw, inBlock)
+        inBlock = stillInBlock
+        for (const { re, why } of PATTERNS) {
+          for (const m of line.matchAll(re)) {
+            const expr = m[1]
+            // Already routed through a translation helper.
+            if (/\bt\(\s*[\w.]+\s*\)/.test(line) || /statusLabel\(/.test(line)) continue
+            hits.push(`${path.relative(SRC, f)}:${i + 1}  ${JSON.stringify(expr)}  (${why})`)
+          }
+        }
+      }
+    }
+    expect(
+      hits,
+      `Status ids reaching the screen untranslated — wrap them in t() or statusLabel():\n${hits.join('\n')}`,
+    ).toEqual([])
+  })
+
   it('states a reason for every allowlisted string', () => {
     for (const [text, reason] of ALLOWED) {
       expect(reason.length, `ALLOWED entry ${JSON.stringify(text)} has no reason`).toBeGreaterThan(10)

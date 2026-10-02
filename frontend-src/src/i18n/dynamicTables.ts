@@ -221,6 +221,14 @@ export const NON_KEY_LITERALS = [
  */
 export const RENDER_SITE_TABLE_KEYS = [
   '192.168.1.10 (defaults to node IP)',
+  // A scan run's stored status id, rendered as {t(r.status)}. The ids are data,
+  // not copy, but they are read by a person, so they get Chinese captions too.
+  // The capitalised spellings ('Running', 'Done', …) are the filter dropdown's
+  // labels and live in the modal parts.
+  'running',
+  'done',
+  'cancelled',
+  'error',
 ] as const
 
 /** Every value this table can put in front of a user. */

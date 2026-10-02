@@ -253,7 +253,7 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
               <div key={r.id} className="rounded-lg border border-border bg-[#161b22] p-3">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
-                  <span className="font-mono text-sm text-foreground capitalize">{r.status}</span>
+                  <span className="font-mono text-sm text-foreground">{t(r.status)}</span>
                   {r.status === 'running' && <Loader2 size={12} className="animate-spin text-[#e3b341]" />}
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"

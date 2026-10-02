@@ -3,7 +3,7 @@ import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeO
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
-import { NODE_TYPE_LABELS, STATUS_COLORS, type ServiceInfo, type ServiceStatus, type NodeData, type NodeProperty } from '@/types'
+import { NODE_TYPE_LABELS, STATUS_COLORS, statusLabel, type ServiceInfo, type ServiceStatus, type NodeData, type NodeProperty } from '@/types'
 import { getServiceUrl } from '@/utils/serviceUrl'
 import { ServiceModal } from '@/components/modals/ServiceModal'
 import { serviceToForm, type ServiceFormData, type ServiceSubmitData } from '@/utils/serviceForm'
@@ -178,7 +178,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
 
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
-        <span className="text-sm capitalize" style={{ color: statusColor }}>{data.status}</span>
+        <span className="text-sm" style={{ color: statusColor }}>{statusLabel(data.status)}</span>
         {data.response_time_ms !== undefined && (
           <span className="ml-auto font-mono text-xs text-muted-foreground">{data.response_time_ms}ms</span>
         )}
