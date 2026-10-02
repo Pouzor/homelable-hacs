@@ -394,7 +394,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   <Input
                     value={form.check_target ?? ''}
                     onChange={(e) => set('check_target', e.target.value)}
-                    placeholder={CHECK_TARGET_PLACEHOLDERS[(form.check_method ?? 'ping') as CheckMethod]}
+                    placeholder={t(CHECK_TARGET_PLACEHOLDERS[(form.check_method ?? 'ping') as CheckMethod])}
                     className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
                   />
                 </div>

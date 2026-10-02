@@ -158,7 +158,7 @@ export function DesignModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-              placeholder="e.g. Home Network, Rack Power"
+              placeholder={t('e.g. Home Network, Rack Power')}
               autoFocus
             />
           </div>

@@ -32,6 +32,7 @@ import {
   FIELD_NAME_KEYS,
   NON_KEY_LITERALS,
   PROP_DEFAULTS,
+  RENDER_SITE_TABLE_KEYS,
   RUNTIME_KEY_PARTS,
   valuesOf,
 } from '../dynamicTables'
@@ -150,9 +151,18 @@ function literalsInCalls(src: string): string[] {
     for (const m of arg.matchAll(STR)) {
       const before = arg.slice(0, m.index).trimEnd()
       const after = arg.slice(m.index + m[0].length).trimStart()
-      if (/(?:===|!==|==|!=|>=|<=|[<>])$/.test(before)) continue
-      if (/^(?:===|!==|==|!=|>=|<=|[<>])/.test(after)) continue
-      const key = m[2].replace(/\\'/g, "'").replace(/\\"/g, '"')
+      if (/(?:===|!==|==|!=|>=|<=|[<>]|\?\?)$/.test(before)) continue
+      if (/^(?:===|!==|==|!=|>=|<=|[<>]|\?\?)/.test(after)) continue
+      // Unescape, because the dictionary holds the *runtime* value: the source
+      // writes 'a\nb' and the entry that matches is the one with a real newline
+      // in it. Reading the raw two-character `\n` reports a missing translation
+      // that is really a scanner artefact.
+      const key = m[2]
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t')
+        .replace(/\\'/g, "'")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, '\\')
       if (key) found.push(key)
     }
     i = end
@@ -387,6 +397,20 @@ describe('zh-CN dictionary completeness', () => {
     expect(missing, `Untranslated t() keys:\n${missing.join('\n')}`).toEqual([])
   })
 
+  it('translates every table value looked up at the render site', () => {
+    // These are exempt from the stale check precisely because the scan cannot
+    // see them, which makes this the only thing holding them in place. Without
+    // it, rewording the source string would drop the translation silently.
+    // Checked against the merged export, not a part file: a part can hold a
+    // perfect entry that never reaches the UI.
+    for (const key of RENDER_SITE_TABLE_KEYS) {
+      expect(
+        Object.prototype.hasOwnProperty.call(fileDict, key),
+        `${JSON.stringify(key)} is looked up with t() but has no entry in the merged dictionary`,
+      ).toBe(true)
+    }
+  })
+
   it('has no translation for a key the code no longer uses', () => {
     // Guards the opposite drift: a stale entry is dead weight and hides the fact
     // that its source string was reworded, which would silently untranslate it.
@@ -399,6 +423,7 @@ describe('zh-CN dictionary completeness', () => {
       ...DIALOG_TITLES,
       ...FIELD_NAME_KEYS,
       ...PROP_DEFAULTS,
+      ...RENDER_SITE_TABLE_KEYS,
     ])
     for (const table of DYNAMIC_TABLES) {
       const src = fs.readFileSync(path.join(SRC_ROOT, table.file), 'utf8')
@@ -410,7 +435,14 @@ describe('zh-CN dictionary completeness', () => {
         'utf8',
       )
       for (const m of body.matchAll(/^\s*(['"])((?:\\.|(?!\1)[^\\])*)\1\s*:/gm)) {
-        dynamicKeys.add(m[2].replace(/\\'/g, "'").replace(/\\"/g, '"'))
+        dynamicKeys.add(
+          m[2]
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t')
+            .replace(/\\'/g, "'")
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\'),
+        )
       }
     }
 

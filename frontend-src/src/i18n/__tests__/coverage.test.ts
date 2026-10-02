@@ -20,7 +20,16 @@ function dictionaryKeys(): Set<string> {
     if (!f.endsWith('.ts')) continue
     const src = fs.readFileSync(path.join(dir, f), 'utf8')
     for (const m of src.matchAll(/^\s*(['"])((?:\\.|(?!\1)[^\\])*)\1\s*:/gm)) {
-      keys.add(m[2].replace(/\\'/g, "'").replace(/\\"/g, '"'))
+      // Unescape so this matches the *runtime* key, not the source spelling:
+      // the part file writes 'a\nb' but the lookup at runtime is a real newline.
+      keys.add(
+        m[2]
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t')
+          .replace(/\\'/g, "'")
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\'),
+      )
     }
   }
   return keys
@@ -67,10 +76,15 @@ describe('no English string literal reaches a render site untranslated', () => {
   // A hit means "look at it by hand"; a hit that is deliberate belongs in
   // ALLOWED with the reason stated.
   const ALLOWED = new Map<string, string>([
-    // Sample input, not copy.
+    // Sample input, not copy. These have no dictionary entry on purpose.
     ['My Server', 'sample input'],
     ['Node host (app.example.com)', 'sample input'],
     ['Path (/admin)', 'sample input'],
+    ['Debian 12', 'sample input'],
+    // NOTE: do not list a hint here once it has been translated. ALLOWED makes
+    // both sweeps skip the string, so adding the newly-fixed placeholders would
+    // blind the check to exactly the regression it exists to catch — verified
+    // by reverting a fix and watching the test stay green.
     // Font stacks offered by the pickers. A typeface name is a proper noun in
     // any locale, and the "(sans-serif)" suffix is the fallback it is grouped by.
     ['Inter (sans-serif)', 'font name, a proper noun in any locale'],
@@ -235,5 +249,93 @@ describe('no English string literal reaches a render site untranslated', () => {
     for (const [text, reason] of ALLOWED) {
       expect(reason.length, `ALLOWED entry ${JSON.stringify(text)} has no reason`).toBeGreaterThan(10)
     }
+  })
+
+  /**
+   * The sweep above needs a leading capital, which is what keeps Tailwind class
+   * strings out — but it also means every hint that opens lower-case slips past.
+   * That is not hypothetical: `placeholder="e.g. Uplink to core"` and
+   * `<title>{' (click to select…)'}</title>` both shipped untranslated, and every
+   * other test was green.
+   *
+   * Lowering the capital requirement globally buries the signal in a few hundred
+   * `className` values, so this is a narrow, separate pass over the attributes
+   * that actually hold a hint. `className` is excluded by construction rather
+   * than by pattern-matching, which is why this stays quiet.
+   *
+   * Known limit: it reads one line at a time, so a JSX child written on the
+   * line *after* its element — `<title>` on one line, `{' …'}` on the next —
+   * is not seen. The CableLayer tooltip is in that shape. Widening this to a
+   * whole-file scan is the fix if a second one ever shows up.
+   */
+  it('translates hints that open with a lower-case letter', () => {
+    const HINT_PROPS = /\b(placeholder|title|hint|alt|aria-label)\s*=\s*(?:\{'([^']*)'\}|\{"([^"]*)"\}|"([^"]*)")/g
+    // The same hint can arrive as a JSX child rather than an attribute:
+    //   <title>{cable.label}{' (click to select, Delete to remove)'}</title>
+    // That shape shipped untranslated too, so the attribute regex alone is not
+    // enough to keep it fixed.
+    const HINT_CHILD = /<(?:title|hint|caption)\b[^>]*>\s*\{'((?:[^'\\]|\\.)*)'/g
+
+    const files: string[] = []
+    ;(function walk(d: string) {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, e.name)
+        if (e.isDirectory()) {
+          if (e.name === 'node_modules' || e.name === 'i18n' || e.name === '__tests__' || e.name === 'test') continue
+          walk(full)
+        } else if (/\.tsx$/.test(e.name) && !/\.test\.tsx$/.test(e.name)) {
+          files.push(full)
+        }
+      }
+    })(SRC)
+
+    // Sample input and data, not copy.
+    const isData = (s: string) =>
+      /^\d/.test(s) ||
+      /^#[0-9a-f]{3,8}$/i.test(s) ||
+      /^[a-z0-9_.-]+$/.test(s) ||
+      /^[a-z0-9.-]+\.(com|net|org|io|lan|local)$/i.test(s)
+
+    const dict = dictionaryKeys()
+    const hits: string[] = []
+    for (const f of files) {
+      let inBlock = false
+      for (const [i, raw] of fs.readFileSync(f, 'utf8').split(/\r?\n/).entries()) {
+        const { code: line, inBlock: stillInBlock } = stripComments(raw, inBlock)
+        inBlock = stillInBlock
+        if (/\b(className|data-[\w-]+=|from ['"]|import\b)/.test(line)) continue
+        // Already translated on this line.
+        if (/\b(placeholder|title|hint|alt|aria-label)\s*=\s*\{?\s*t\(/.test(line)) continue
+        if (/<(?:title|hint|caption)\b[^>]*>\s*\{t\(/.test(line)) continue
+
+        const candidates: string[] = []
+        for (const m of line.matchAll(HINT_PROPS)) {
+          candidates.push(m[2] ?? m[3] ?? m[4] ?? '')
+        }
+        for (const m of line.matchAll(HINT_CHILD)) {
+          candidates.push(m[1].replace(/\\'/g, "'").replace(/\\n/g, '\n'))
+        }
+
+        for (const raw of candidates) {
+          const value = raw.replace(/\\n/g, ' ').trim()
+          if (value.length < 4 || isData(value)) continue
+          // More than one token. A single lowercase word is an identifier or a
+          // data value; a hint is a phrase. Not "two consecutive letters"
+          // either — "e.g. 20" is a real hint and has no adjacent pair.
+          if (!/\s/.test(value)) continue
+          if ((value.match(/[A-Za-z]/g) ?? []).length < 2) continue
+          // Deliberately NOT skipped when the dictionary has an entry. Having
+          // an entry is not the same as calling t() on it — a translation that
+          // nothing looks up is the same dead entry that let a whole part file
+          // ship unloaded. Only ALLOWED excuses a raw literal here.
+          if (ALLOWED.has(value)) continue // sample input, declared above
+          hits.push(`${path.relative(SRC, f)}:${i + 1}  ${JSON.stringify(value)}`)
+        }
+      }
+    }
+    expect(
+      hits,
+      `Lower-case English hints reaching the screen — wrap them in t():\n${hits.join('\n')}`,
+    ).toEqual([])
   })
 })

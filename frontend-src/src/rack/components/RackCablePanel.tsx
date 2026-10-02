@@ -130,7 +130,7 @@ export function RackCablePanel() {
           value={cable.label ?? ''}
           onChange={(e) => updateCable(cable.id, { label: e.target.value })}
           aria-label={t('Cable label')}
-          placeholder="e.g. Uplink to core"
+          placeholder={t('e.g. Uplink to core')}
           className="mt-2 bg-[#21262d] border-[#30363d] text-xs h-7"
         />
         <label className="mt-2 flex items-center gap-2 cursor-pointer">

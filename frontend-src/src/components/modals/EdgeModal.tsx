@@ -111,7 +111,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
                 max={4094}
                 value={vlanId}
                 onChange={(e) => setVlanId(e.target.value)}
-                placeholder="e.g. 20"
+                placeholder={t('e.g. 20')}
                 className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
               />
             </div>
@@ -122,7 +122,7 @@ export function EdgeModal({ open, onClose, onSubmit, onDelete, onClearWaypoints,
             <Textarea
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder={'e.g. 1G, trunk...\nsecond line'}
+              placeholder={t('e.g. 1G, trunk...\nsecond line')}
               rows={2}
               className={`bg-[#21262d] border-[#30363d] text-sm ${modalStyles['modal-radius']}`}
             />

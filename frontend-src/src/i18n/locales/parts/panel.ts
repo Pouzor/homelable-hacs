@@ -90,6 +90,31 @@ const part: Record<string, string> = {
     '，请在 设置 → 设备与服务 → Homelable → 配置 中切换。',
   'Zigbee gateway': 'Zigbee 网关',
 
+  // --- form placeholder hints ---------------------------------------------
+  // "e.g." is kept in Latin script because that is how the form reads on an
+  // English keyboard, but the examples are Chinese so the hint matches the
+  // field it sits under. Sibling: 'e.g. router' in components-panels.ts.
+  'e.g. Home Network, Rack Power': '例如：家庭网络、机柜供电',
+  'e.g. 20': '例如：20',
+  'e.g. 1G, trunk...\nsecond line': '例如：1G、主干…\n第二行',
+  'e.g. Uplink to core': '例如：上联到核心',
+  // The host part is an example address and stays as-is; only the explanation
+  // is copy. CHECK_TARGET_PLACEHOLDERS stays in English and is translated at
+  // the render site — a module-level table would freeze the locale at import.
+  '192.168.1.10 (defaults to node IP)': '192.168.1.10（默认为节点 IP）',
+  // Cable tooltip. The leading space is part of the string: it is appended to
+  // "<label> — <type>" and English needs the separator.
+  ' (click to select, Delete to remove)': '（点击选中，Delete 键删除）',
+
+  // --- relative time (keys match the main app so both share one set) ------
+  'just now': '刚刚',
+  '{n}m ago': '{n} 分钟前',
+  '{n}h ago': '{n} 小时前',
+  '{n}d ago': '{n} 天前',
+  '{n}w ago': '{n} 周前',
+  '{n}mo ago': '{n} 个月前',
+  '{n}y ago': '{n} 年前',
+
   // --- card / panel chrome ------------------------------------------------
   'Loading rack…': '正在加载机柜…',
   'Canvas unavailable. Is the Homelable integration still set up?':

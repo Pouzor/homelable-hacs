@@ -208,6 +208,21 @@ export const NON_KEY_LITERALS = [
   'server',
 ] as const
 
+/**
+ * Table values that carry copy, looked up with `t()` at the render site, and
+ * therefore invisible to the literal scan.
+ *
+ * This is narrower than DYNAMIC_TABLES on purpose. `CHECK_TARGET_PLACEHOLDERS`
+ * is mostly data — `http://192.168.1.10:8080` and friends want no translation
+ * at all — so demanding an entry for every value would be wrong. Only the two
+ * that carry an English explanation are listed. The test asserts each one both
+ * resolves *and* is exempt from the stale check, so a reworded source string
+ * cannot quietly drop its translation.
+ */
+export const RENDER_SITE_TABLE_KEYS = [
+  '192.168.1.10 (defaults to node IP)',
+] as const
+
 /** Every value this table can put in front of a user. */
 export function valuesOf(source: string, table: DynamicTable): string[] {
   if (table.block) return valuesInBlock(source, table.block, table.fields)
