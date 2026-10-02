@@ -88,6 +88,35 @@ Run the integration against a real Home Assistant in Docker:
 After onboarding at <http://localhost:8123>, add the integration via
 **Settings → Devices & Services → Add Integration → Homelable**.
 
+### Testing against a real Home Assistant without Docker
+
+The built panel bundle is gitignored and HACS installs the release zip, so a
+branch's frontend changes are in **no** installable artifact until a tag is
+pushed and `release.yml` runs on GitHub. `dev-ha.sh` covers the Docker case;
+for a machine that has no Docker — or for installing into the Home Assistant
+you actually use — build the same archive the release workflow builds:
+
+```bash
+python3 scripts/build-release-zip.py                    # build + homelable.zip
+python3 scripts/build-release-zip.py --out-dir ~/.homeassistant
+python3 scripts/build-release-zip.py --skip-build       # reuse the current bundle
+```
+
+`--out-dir` is the directory that *contains* `custom_components/`, i.e. your
+HA `config/`. The integration is copied there, replacing any previous copy —
+stop Home Assistant first, or it will rewrite the folder on restart.
+
+The script writes the archive with Python's `zipfile` rather than the `zip`
+command (absent on Windows, often absent in WSL) and lays it out exactly as
+`release.yml` does, so a manual install is the same thing HACS would have
+given you. It refuses to overwrite an existing zip without `--force`, because
+a leftover archive from an earlier build is the easy way to install a stale
+bundle and then wonder why your change did not show up.
+
+To publish a branch as a real HACS-installable release instead, push a `v*`
+tag; `release.yml` builds the bundle and publishes `homelable.zip` as a
+release asset, which is what `hacs.json`'s `zip_release` points at.
+
 ---
 
 ## Project Structure

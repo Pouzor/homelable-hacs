@@ -30,6 +30,10 @@ custom_components/homelable/frontend/homelable-panel-*
 custom_components/homelable/frontend/homelable-chunk-*
 custom_components/homelable/frontend/homelable-card-*
 !custom_components/homelable/frontend/.gitkeep
+# Locally built release archive (scripts/build-release-zip.py). CI produces its
+# own as a release asset; a copy in the working tree is 900 KB of build output
+# that `git add -A` would otherwise sweep in.
+homelable.zip
 
 # IDE
 .vscode/
