@@ -14,6 +14,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_MQTT_RESPONSE_TIMEOUT,
+    CONF_PANEL_ADMIN_ONLY,
     CONF_PROXMOX_HOST,
     CONF_PROXMOX_PORT,
     CONF_PROXMOX_SYNC_ENABLED,
@@ -32,6 +33,7 @@ from .const import (
     CONF_ZWAVE_GATEWAY,
     CONF_ZWAVE_PREFIX,
     DEFAULT_MQTT_RESPONSE_TIMEOUT,
+    DEFAULT_PANEL_ADMIN_ONLY,
     DEFAULT_PROXMOX_PORT,
     DEFAULT_PROXMOX_SYNC_ENABLED,
     DEFAULT_PROXMOX_SYNC_INTERVAL,
@@ -237,6 +239,12 @@ class HomelableOptionsFlow(OptionsFlow):
                         CONF_PROXMOX_SYNC_INTERVAL, DEFAULT_PROXMOX_SYNC_INTERVAL
                     ),
                 ): vol.All(int, vol.Range(min=MIN_PROXMOX_SYNC_INTERVAL)),
+                vol.Required(
+                    CONF_PANEL_ADMIN_ONLY,
+                    default=data.get(
+                        CONF_PANEL_ADMIN_ONLY, DEFAULT_PANEL_ADMIN_ONLY
+                    ),
+                ): bool,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

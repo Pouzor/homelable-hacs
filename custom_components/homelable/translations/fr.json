@@ -42,7 +42,11 @@
           "proxmox_token_secret": "Secret du jeton d'API Proxmox (laisser vide pour conserver)",
           "proxmox_verify_tls": "Vérifier le certificat TLS de Proxmox",
           "proxmox_sync_enabled": "Activer la synchronisation automatique Proxmox",
-          "proxmox_sync_interval": "Intervalle de synchronisation automatique Proxmox (secondes)"
+          "proxmox_sync_interval": "Intervalle de synchronisation automatique Proxmox (secondes)",
+          "panel_admin_only": "Afficher le panneau Homelable aux administrateurs uniquement"
+        },
+        "data_description": {
+          "panel_admin_only": "Masque l'entrée de la barre latérale pour les utilisateurs non administrateurs. Les tableaux de bord utilisant la carte Homelable leur affichent toujours le canevas."
         }
       }
     }

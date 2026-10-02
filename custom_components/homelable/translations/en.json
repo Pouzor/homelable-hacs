@@ -42,7 +42,11 @@
           "proxmox_token_secret": "Proxmox API token secret (leave blank to keep)",
           "proxmox_verify_tls": "Verify Proxmox TLS certificate",
           "proxmox_sync_enabled": "Enable Proxmox auto-sync",
-          "proxmox_sync_interval": "Proxmox auto-sync interval (seconds)"
+          "proxmox_sync_interval": "Proxmox auto-sync interval (seconds)",
+          "panel_admin_only": "Show the Homelable panel to administrators only"
+        },
+        "data_description": {
+          "panel_admin_only": "Hides the sidebar entry from non-admin users. Dashboards using the Homelable card still show the canvas to them."
         }
       }
     }

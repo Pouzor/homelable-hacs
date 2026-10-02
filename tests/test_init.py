@@ -1,12 +1,12 @@
 """Tests for integration setup / unload wiring."""
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.homelable import async_unload_entry, scanner
-from custom_components.homelable.const import DOMAIN
+from custom_components.homelable import async_setup_entry, async_unload_entry, scanner
+from custom_components.homelable.const import CONF_PANEL_ADMIN_ONLY, DOMAIN
 
 
 @pytest.fixture(autouse=True)
@@ -74,3 +74,28 @@ async def test_unload_stops_serving_the_card_with_the_last_entry(
         assert await async_unload_entry(hass, entry) is True
 
     unregister_card.assert_called_once_with(hass)
+
+
+@pytest.mark.parametrize(
+    ("options", "expected"),
+    [({}, False), ({CONF_PANEL_ADMIN_ONLY: True}, True)],
+)
+async def test_setup_passes_the_admin_only_option_to_the_panel(
+    hass: HomeAssistant, options: dict, expected: bool
+) -> None:
+    """The option reaches the panel registration; off when never set (issue #118)."""
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options=options)
+    entry.add_to_hass(hass)
+    hass.data[DOMAIN] = {}
+    coordinator = MagicMock(async_config_entry_first_refresh=AsyncMock())
+
+    with (
+        patch("custom_components.homelable.HomelableCoordinator", return_value=coordinator),
+        patch("custom_components.homelable.async_register_websocket_commands"),
+        patch("custom_components.homelable.async_register_panel") as register_panel,
+        patch("custom_components.homelable.async_register_card"),
+        patch("custom_components.homelable.async_register_media"),
+    ):
+        assert await async_setup_entry(hass, entry) is True
+
+    register_panel.assert_awaited_once_with(hass, admin_only=expected)
