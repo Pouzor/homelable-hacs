@@ -78,7 +78,7 @@ describe('VersionBadge', () => {
     const link = screen.getByText(`v${__APP_VERSION__}`).closest('a')
     expect(link).toHaveAttribute(
       'href',
-      `https://github.com/Pouzor/homelable/releases/tag/v${__APP_VERSION__}`,
+      `https://github.com/Pouzor/homelable-hacs/releases/tag/v${__APP_VERSION__}`,
     )
     expect(link).toHaveAttribute('target', '_blank')
   })
