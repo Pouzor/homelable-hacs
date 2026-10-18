@@ -307,10 +307,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # starves small hosts and gets HA restarted by the watchdog (issue #73).
         sem = asyncio.Semaphore(STATUS_CHECK_CONCURRENCY)
 
-        async def _bounded(check: str, target: Any, ip: Any) -> dict[str, Any]:
+        async def _bounded(check: str, target: Any, ip: Any, hostname: Any) -> dict[str, Any]:
             async with sem:
                 return await status_checker.check_node(
-                    check, target, ip, allowed_networks=allowed_networks
+                    check, target, ip, hostname=hostname, allowed_networks=allowed_networks
                 )
 
         targets = self._check_targets()
@@ -321,8 +321,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 check = "none"
             else:
                 check = facts.get("check_method") or "ping"
-            target = facts.get("check_target") or facts.get("hostname")
-            tasks.append(_bounded(check, target, facts.get("ip")))
+            tasks.append(
+                _bounded(check, facts.get("check_target"), facts.get("ip"), facts.get("hostname"))
+            )
         checked = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
         # Advance last_seen on whatever a check just found up, but only once the
