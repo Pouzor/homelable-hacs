@@ -479,3 +479,51 @@ async def test_check_service_raw_print_port_is_unknown() -> None:
             status = await status_checker.check_service(svc, "10.0.0.5")
         assert status == "unknown"
         mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_check_unresolvable_hostname_falls_back_to_ip() -> None:
+    """A hostname DNS doesn't know is skipped in favour of the IP."""
+    with (
+        patch.object(status_checker, "_resolve_to_ip", return_value=None),
+        patch.object(status_checker, "_ping", AsyncMock(return_value=True)) as mock,
+    ):
+        result = await status_checker.check_node("ping", None, "10.0.0.1", hostname="alpha")
+    mock.assert_awaited_once_with("10.0.0.1")
+    assert result["status"] == "online"
+
+
+@pytest.mark.asyncio
+async def test_check_resolvable_hostname_wins_over_ip() -> None:
+    """A hostname that resolves is probed, so a DHCP move doesn't lose the device."""
+    import ipaddress
+
+    with (
+        patch.object(status_checker, "_resolve_to_ip", return_value=ipaddress.ip_address("10.0.0.9")),
+        patch.object(status_checker, "_ping", AsyncMock(return_value=True)) as mock,
+    ):
+        await status_checker.check_node("ping", None, "10.0.0.1", hostname="nas.lan")
+    mock.assert_awaited_once_with("nas.lan")
+
+
+@pytest.mark.asyncio
+async def test_check_unresolvable_hostname_without_ip_is_still_probed() -> None:
+    """With no IP to fall back to, the hostname is tried anyway."""
+    with (
+        patch.object(status_checker, "_resolve_to_ip", return_value=None),
+        patch.object(status_checker, "_ping", AsyncMock(return_value=False)) as mock,
+    ):
+        result = await status_checker.check_node("ping", None, None, hostname="alpha")
+    mock.assert_awaited_once_with("alpha")
+    assert result["status"] == "offline"
+
+
+@pytest.mark.asyncio
+async def test_check_explicit_target_is_never_replaced() -> None:
+    """check_target is probed as given even when it doesn't resolve."""
+    with (
+        patch.object(status_checker, "_resolve_to_ip", return_value=None),
+        patch.object(status_checker, "_ping", AsyncMock(return_value=False)) as mock,
+    ):
+        await status_checker.check_node("ping", "box.local", "10.0.0.1", hostname="alpha")
+    mock.assert_awaited_once_with("box.local")
