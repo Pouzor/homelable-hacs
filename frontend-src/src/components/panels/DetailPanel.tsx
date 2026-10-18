@@ -1,5 +1,7 @@
 import { createElement, useRef, useState } from 'react'
-import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff, GripVertical, Boxes } from 'lucide-react'
+import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff, GripVertical, Boxes, RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
+import { checkNodeStatus } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
@@ -180,6 +182,14 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         {data.response_time_ms !== undefined && (
           <span className="ml-auto font-mono text-xs text-muted-foreground">{data.response_time_ms}ms</span>
         )}
+        {hasStatusCheck(data) && (
+          <CheckNowButton
+            key={node.id}
+            nodeId={node.id}
+            method={data.check_method ?? 'ping'}
+            className={data.response_time_ms !== undefined ? '' : 'ml-auto'}
+          />
+        )}
       </div>
 
       <div className="flex flex-col gap-3 px-4 py-3 text-sm">
@@ -293,6 +303,50 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         </Button>
       </div>
     </aside>
+  )
+}
+
+// --- Check now (manual status check) ---
+
+/** Mesh imports (Zigbee / Z-Wave) and `none` are never probed by the backend,
+ *  so there is nothing to run on demand. */
+function hasStatusCheck(data: NodeData): boolean {
+  if (data.check_method === 'none') return false
+  return !data.type.startsWith('zigbee_') && !data.type.startsWith('zwave_')
+}
+
+function CheckNowButton({ nodeId, method, className = '' }: { nodeId: string; method: string; className?: string }) {
+  const [checking, setChecking] = useState(false)
+
+  const run = async () => {
+    setChecking(true)
+    try {
+      // The new status reaches the node through the status subscription.
+      const res = await checkNodeStatus(nodeId)
+      const ms = res.response_time_ms != null ? ` (${res.response_time_ms}ms)` : ''
+      toast.success(`${method}: ${res.status}${ms}`)
+    } catch (err) {
+      if ((err as { code?: string } | null)?.code === 'not_found') {
+        toast.error('Save the canvas first — this node is not known to the backend yet')
+      } else {
+        toast.error(`Check failed: ${(err as { message?: string } | null)?.message ?? String(err)}`)
+      }
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label="Check now"
+      title={`Check now (${method}). Uses the saved node settings.`}
+      disabled={checking}
+      onClick={() => { void run() }}
+      className={`${className} text-muted-foreground hover:text-[#00d4ff] disabled:opacity-60 disabled:cursor-wait transition-colors cursor-pointer`}
+    >
+      <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
+    </button>
   )
 }
 

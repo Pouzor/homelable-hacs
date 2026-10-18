@@ -175,6 +175,7 @@ Nodes: `proxmox` (host) / `vm` / `lxc`, linked host→guest by a `virtual` edge;
   | `health` | GET `/health` |
 
 - Checks run on a timer (the **status check interval**, 60s by default — set it in the integration options) and stream to the UI, no refresh. The sidebar footer keeps a running online/offline tally.
+- To check one node right away, select it and click **Check now** (the ⟳ icon next to its status in the details panel). It runs the node's saved check method for that node only, and the result shows up on every open canvas and card. Not shown for `none` and for Zigbee / Z-Wave nodes; a node added since the last save needs a **Save** first.
 
 ---
 

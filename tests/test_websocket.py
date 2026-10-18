@@ -295,6 +295,54 @@ async def test_status_get_returns_coordinator_data(
     assert msg["result"] == {"n1": {"status": "online"}}
 
 
+async def test_status_check_returns_result_and_pushes_to_subscribers(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    await setup_ws.save_canvas(
+        {
+            "nodes": [{"id": "n1", "type": "server", "position": {"x": 0, "y": 0},
+                       "data": {"ip": "10.0.0.1", "check_method": "tcp",
+                                "check_target": "10.0.0.1:443"}}],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": "homelable/status/subscribe"})
+    assert (await client.receive_json())["success"] is True
+    await client.receive_json()  # initial snapshot
+
+    fake = AsyncMock(return_value={"status": "online", "response_time_ms": 4})
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        await client.send_json(
+            {"id": 2, "type": "homelable/status/check", "node_id": "n1"}
+        )
+        # The push to the subscription and the command result can arrive in
+        # either order.
+        msgs = [await client.receive_json(), await client.receive_json()]
+
+    by_id = {m["id"]: m for m in msgs}
+    assert by_id[2]["success"] is True
+    assert by_id[2]["result"] == {"status": "online", "response_time_ms": 4}
+    assert by_id[1]["type"] == "event"
+    assert by_id[1]["event"]["n1"]["status"] == "online"
+    assert fake.await_args.args[0] == "tcp"
+
+
+async def test_status_check_unknown_node_is_not_found(
+    hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
+) -> None:
+    client = await hass_ws_client(hass)
+    await client.send_json(
+        {"id": 1, "type": "homelable/status/check", "node_id": "missing"}
+    )
+    msg = await client.receive_json()
+    assert msg["success"] is False
+    assert msg["error"]["code"] == "not_found"
+
+
 async def test_status_subscribe_pushes_initial_snapshot(
     hass: HomeAssistant, hass_ws_client, setup_ws  # noqa: ANN001
 ) -> None:

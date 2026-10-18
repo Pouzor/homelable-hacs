@@ -314,17 +314,64 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 )
 
         targets = self._check_targets()
-        tasks = []
-        for _, facts, _ in targets:
-            if _is_wireless(facts.get("type")):
-                # Zigbee / Z-Wave devices are one-shot mesh imports; no live check.
-                check = "none"
-            else:
-                check = facts.get("check_method") or "ping"
-            target = facts.get("check_target") or facts.get("hostname")
-            tasks.append(_bounded(check, target, facts.get("ip")))
+        tasks = [_bounded(*self._check_spec(facts)) for _, facts, _ in targets]
         checked = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+        return self._record_check_results(targets, checked)
 
+    async def async_check_node(self, node_id: str) -> dict[str, Any] | None:
+        """Run the status check for one node right now, outside the timer.
+
+        Backs the panel's "Check now" button. The device behind ``node_id`` is
+        probed with its configured check method — the same ``check_node`` call,
+        allowed-network guard and bookkeeping (``status_live``, ``last_seen``)
+        as the periodic refresh — and every node drawing that device gets the
+        result. The merged map is pushed to the status subscribers without
+        touching the refresh schedule. Returns the result, or None when the
+        node is not a status-checked node (unknown id, canvas furniture).
+        """
+        await self._ensure_loaded()
+        target = next(
+            (t for t in self._check_targets() if node_id in t[0]), None
+        )
+        if target is None:
+            return None
+        allowed_networks = status_checker._parse_allowed_networks(
+            self.get_scan_ranges()
+        )
+        check, check_target, ip = self._check_spec(target[1])
+        try:
+            res: dict[str, Any] | Exception = await status_checker.check_node(
+                check, check_target, ip, allowed_networks=allowed_networks
+            )
+        except Exception as exc:  # noqa: BLE001 — recorded as unknown, like gather()
+            res = exc
+        results = self._record_check_results([target], [res])
+        # Merge rather than replace: the other nodes keep their last result.
+        # Assigning data + notifying listeners (instead of
+        # async_set_updated_data) leaves the periodic schedule untouched.
+        self.data = {**(self.data or {}), **results}
+        self.async_update_listeners()
+        return results[node_id]
+
+    @staticmethod
+    def _check_spec(facts: dict[str, Any]) -> tuple[str, Any, Any]:
+        """``(check_method, target, ip)`` the status check runs for a device."""
+        target = facts.get("check_target") or facts.get("hostname")
+        if _is_wireless(facts.get("type")):
+            # Zigbee / Z-Wave devices are one-shot mesh imports; no live check.
+            return "none", target, facts.get("ip")
+        return facts.get("check_method") or "ping", target, facts.get("ip")
+
+    def _record_check_results(
+        self,
+        targets: list[tuple[list[str], dict[str, Any], dict[str, Any] | None]],
+        checked: list[Any],
+    ) -> dict[str, dict[str, Any]]:
+        """Fan check results out to their nodes and record them on the rows.
+
+        ``checked[i]`` is the result (or exception) for ``targets[i]``.
+        Returns ``{node_id: status_dict}``.
+        """
         # Advance last_seen on whatever a check just found up, but only once the
         # current value has aged past LAST_SEEN_PERSIST_INTERVAL, and then through
         # a debounced save. Writing on every poll where anything is online burns

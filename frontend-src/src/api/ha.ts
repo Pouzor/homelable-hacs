@@ -537,6 +537,17 @@ export interface StatusUpdate {
   [nodeId: string]: { status: string; response_time_ms: number | null }
 }
 
+/** Run one node's status check now (the panel's "Check now" button), with
+ *  the check method saved on the node. The result is also pushed to every
+ *  `subscribeStatus` listener, so callers don't need to apply it themselves.
+ *  Rejects with `{ code: 'not_found' }` for a node the backend doesn't know
+ *  yet (unsaved) or one that has no status check. */
+export async function checkNodeStatus(
+  nodeId: string
+): Promise<StatusUpdate[string]> {
+  return wsCall<StatusUpdate[string]>('homelable/status/check', { node_id: nodeId })
+}
+
 export async function subscribeStatus(
   cb: (update: StatusUpdate) => void
 ): Promise<() => void> {

@@ -39,6 +39,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_get_config)
     websocket_api.async_register_command(hass, ws_scan_clear)
     websocket_api.async_register_command(hass, ws_status_get)
+    websocket_api.async_register_command(hass, ws_status_check)
     websocket_api.async_register_command(hass, ws_status_subscribe)
     websocket_api.async_register_command(hass, ws_service_status_subscribe)
     websocket_api.async_register_command(hass, ws_scan_subscribe)
@@ -502,6 +503,36 @@ async def ws_status_get(
         _send_not_setup(connection, msg["id"])
         return
     connection.send_result(msg["id"], coord.data or {})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "homelable/status/check",
+        vol.Required("node_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_status_check(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Check one node now, with its configured check method.
+
+    Returns ``{status, response_time_ms}`` and pushes the updated map to every
+    ``homelable/status/subscribe`` client. Not admin-gated, like status/get:
+    the probe only ever targets what is already saved on the node, the same
+    host the periodic check hits.
+    """
+    coord = _coordinator(hass)
+    if coord is None:
+        _send_not_setup(connection, msg["id"])
+        return
+    result = await coord.async_check_node(msg["node_id"])
+    if result is None:
+        connection.send_error(
+            msg["id"], "not_found", "Node not found or has no status check"
+        )
+        return
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(

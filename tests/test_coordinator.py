@@ -1670,3 +1670,101 @@ async def test_orphan_reconcile_does_not_touch_a_run_started_in_this_process(
 
     assert runs["old"]["status"] == "error"
     assert runs[started["run_id"]]["status"] == "running"
+
+
+# ─── Manual "Check now" (async_check_node) ───────────────────────────────────
+
+
+async def _two_node_canvas(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {
+            "nodes": [
+                {"id": "n1", "type": "server", "position": {"x": 0, "y": 0},
+                 "data": {"ip": "10.0.0.1", "check_method": "http",
+                          "check_target": "http://10.0.0.1:8080"}},
+                {"id": "n2", "type": "server", "position": {"x": 0, "y": 0},
+                 "data": {"ip": "10.0.0.2", "check_method": "ping"}},
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_check_node_uses_the_configured_method_for_that_node_only(coord) -> None:  # noqa: ANN001
+    await _two_node_canvas(coord)
+    fake = AsyncMock(return_value={"status": "online", "response_time_ms": 12})
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        result = await coord.async_check_node("n1")
+
+    assert result == {"status": "online", "response_time_ms": 12}
+    fake.assert_awaited_once()
+    method, target, ip = fake.await_args.args
+    assert (method, target, ip) == ("http", "http://10.0.0.1:8080", "10.0.0.1")
+    assert "allowed_networks" in fake.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_check_node_merges_into_data_and_notifies_listeners(coord) -> None:  # noqa: ANN001
+    await _two_node_canvas(coord)
+    coord.data = {
+        "n1": {"status": "offline", "response_time_ms": None},
+        "n2": {"status": "online", "response_time_ms": 3},
+    }
+    listener = MagicMock()
+    unsub = coord.async_add_listener(listener)
+    try:
+        with patch(
+            "custom_components.homelable.coordinator.status_checker.check_node",
+            AsyncMock(return_value={"status": "online", "response_time_ms": 7}),
+        ):
+            await coord.async_check_node("n1")
+    finally:
+        unsub()
+
+    assert coord.data["n1"] == {"status": "online", "response_time_ms": 7}
+    # The other node keeps its last periodic result.
+    assert coord.data["n2"] == {"status": "online", "response_time_ms": 3}
+    listener.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_check_node_stamps_last_seen_when_online(coord) -> None:  # noqa: ANN001
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "ip": "10.0.0.5", "check_method": "ping"}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        AsyncMock(return_value={"status": "online", "response_time_ms": 5}),
+    ):
+        await coord.async_check_node("n1")
+    assert (await coord.get_canvas())["nodes"][0]["last_seen"] is not None
+
+
+@pytest.mark.asyncio
+async def test_check_node_reports_unknown_when_the_check_raises(coord) -> None:  # noqa: ANN001
+    await _two_node_canvas(coord)
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    ):
+        result = await coord.async_check_node("n2")
+    assert result == {"status": "unknown", "response_time_ms": None}
+
+
+@pytest.mark.asyncio
+async def test_check_node_unknown_id_returns_none(coord) -> None:  # noqa: ANN001
+    await _two_node_canvas(coord)
+    fake = AsyncMock()
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        assert await coord.async_check_node("nope") is None
+    fake.assert_not_awaited()
