@@ -112,6 +112,26 @@ describe('ProxmoxGroupNode', () => {
     expect(dot).not.toBeNull()
   })
 
+  it('hides the status dot when check method is "none" (group mode)', () => {
+    const { queryByTestId } = renderNode({ check_method: 'none', status: 'online' })
+    expect(queryByTestId('node-status-dot')).toBeNull()
+  })
+
+  it('hides the status dot when check method is "none" (card mode / BaseNode)', () => {
+    const { queryByTestId } = renderNode({ container_mode: false, check_method: 'none', status: 'online' })
+    expect(queryByTestId('node-status-dot')).toBeNull()
+  })
+
+  it('shows the status dot when a real check method is set (card mode / BaseNode)', () => {
+    const { queryByTestId } = renderNode({ container_mode: false, check_method: 'ping', status: 'online' })
+    expect(queryByTestId('node-status-dot')).not.toBeNull()
+  })
+
+  it('shows the status dot when check method is unset (defaults to ping)', () => {
+    const { queryByTestId } = renderNode({ container_mode: false, status: 'offline' })
+    expect(queryByTestId('node-status-dot')).not.toBeNull()
+  })
+
   it('container_mode === false renders as BaseNode (no group border)', () => {
     const { container } = renderNode({ container_mode: false })
     // The group container uses rounded-xl border-2; BaseNode does not.

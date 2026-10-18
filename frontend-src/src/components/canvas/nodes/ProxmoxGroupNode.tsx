@@ -34,6 +34,8 @@ export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
 
   const statusColor = theme.colors.statusColors[data.status]
   const isOnline = data.status === 'online'
+  // No status check configured → status is meaningless; hide the dot (see BaseNode).
+  const showStatusDot = data.check_method !== 'none'
   const glow = colors.border
   const resolvedIcon = resolveNodeIcon(Layers, data.custom_icon)
 
@@ -98,11 +100,14 @@ export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
             ))}
           </div>
           {/* Status dot */}
-          <div
-            className="ml-auto w-1.5 h-1.5 rounded-full shrink-0"
-            style={{ backgroundColor: statusColor }}
-            title={data.status}
-          />
+          {showStatusDot && (
+            <div
+              className="ml-auto w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ backgroundColor: statusColor }}
+              title={data.status}
+              data-testid="node-status-dot"
+            />
+          )}
         </div>
 
         {/* Properties */}

@@ -40,6 +40,10 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
   const colors = resolveNodeColors(data, activeTheme)
   const statusColor = theme.colors.statusColors[data.status]
   const isOnline = data.status === 'online'
+  // A node with check method "none" is never probed, so its status carries no
+  // information — the backend reports it as "online" and a green dot would be
+  // misleading. Don't draw a status dot at all for such nodes.
+  const showStatusDot = data.check_method !== 'none'
   // Hiding a service is a property of this node, not of the device: another
   // canvas drawing the same device answers for itself.
   const services = (data.services ?? []).filter((svc) => svc.visible !== false)
@@ -97,11 +101,14 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
       />
 
       {/* Status dot — absolute to avoid affecting node auto-width */}
-      <div
-        className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full"
-        style={{ backgroundColor: statusColor }}
-        title={data.status}
-      />
+      {showStatusDot && (
+        <div
+          className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full"
+          style={{ backgroundColor: statusColor }}
+          title={data.status}
+          data-testid="node-status-dot"
+        />
+      )}
 
       {/* Main row */}
       <div className="flex flex-row items-center gap-2.5 px-2.5 py-2 min-w-0 overflow-hidden">
