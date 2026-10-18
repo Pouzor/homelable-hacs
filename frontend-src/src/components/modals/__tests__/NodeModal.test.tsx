@@ -447,6 +447,26 @@ describe('NodeModal', () => {
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).parent_id).toBe('g1')
   })
 
+  it('keeps a zone parent_id on submit (e.g. after a rename)', () => {
+    const { onSubmit } = renderModal({
+      initial: { ...BASE, type: 'server', parent_id: 'z1' },
+      parentCandidates: [{ id: 'z1', label: 'My Zone', type: 'groupRect' }],
+    })
+    fireEvent.change(screen.getByPlaceholderText('My Server'), { target: { value: 'Renamed' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).parent_id).toBe('z1')
+  })
+
+  it('keeps a zone parent_id when the type changes', () => {
+    const { onSubmit } = renderModal({
+      initial: { ...BASE, type: 'server', parent_id: 'z1' },
+      parentCandidates: [{ id: 'z1', label: 'My Zone', type: 'groupRect' }],
+    })
+    fireEvent.change(selects()[0], { target: { value: 'nas' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).parent_id).toBe('z1')
+  })
+
   it('offers a group as a parent option for a plain node', () => {
     renderModal({
       initial: { ...BASE, type: 'server' },

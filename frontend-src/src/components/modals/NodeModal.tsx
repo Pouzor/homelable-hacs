@@ -16,6 +16,18 @@ import { MAX_HANDLES, MIN_HANDLES, clampHandles, sideDefault, handleCountField, 
 import { isValidParentNode } from '@/utils/virtualEdgeParent'
 import { NODE_TYPE_GROUPS } from '@/utils/nodeTypeGroups'
 
+/** May `parent` stay this node's parent after the edit?
+ *
+ *  A zone (groupRect) is not offered as a parent in this modal — nodes join one
+ *  by dropping onto it ("Add to Zone") — so isValidParentNode rejects it. A node
+ *  already in a zone must still keep it across an edit: otherwise saving the
+ *  modal (e.g. a rename) sends parent_id: undefined and silently detaches it.
+ */
+function keepsParent(childType: NodeType, parent: { type: NodeType; container_mode?: boolean }): boolean {
+  if (parent.type === 'groupRect') return childType !== 'group' && childType !== 'groupRect'
+  return isValidParentNode(childType, parent)
+}
+
 // Maps a side to its per-type default field on NodeTypeStyle.
 const SIDE_STYLE_KEY: Record<Side, keyof NodeTypeStyle> = {
   top: 'topHandles',
@@ -176,7 +188,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
     let safeParentId = form.parent_id
     if (safeParentId) {
       const parent = parentCandidates.find((n) => n.id === safeParentId)
-      if (!parent || !isValidParentNode(selectedType, parent)) safeParentId = undefined
+      if (!parent || !keepsParent(selectedType, parent)) safeParentId = undefined
     }
     const isGroupType = selectedType === 'groupRect' || selectedType === 'group'
     onSubmit({
@@ -220,7 +232,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   // Drop the parent only if it's no longer a valid target for the
                   // new type — keep container-mode parents (any node can nest).
                   const parent = parentCandidates.find((n) => n.id === f.parent_id)
-                  if (f.parent_id && !(parent && isValidParentNode(t, parent))) {
+                  if (f.parent_id && !(parent && keepsParent(t, parent))) {
                     next.parent_id = undefined
                   }
                   return next
