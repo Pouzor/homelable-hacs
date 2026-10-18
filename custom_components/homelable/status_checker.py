@@ -137,16 +137,26 @@ async def check_node(
     target: str | None,
     ip: str | None,
     *,
+    hostname: str | None = None,
     allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] | None = None,
 ) -> dict[str, Any]:
     """Run the appropriate check and return {status, response_time_ms}.
 
     status is one of: online, offline, unknown.
+
+    ``target`` is an explicit check target and is always probed as given.
+    ``hostname`` is what discovery or the user named the device; it is only
+    probed when it resolves, so a display name that DNS doesn't know falls
+    back to the IP instead of reporting the device offline.
     """
     if check_method == "none":
         return {"status": "online", "response_time_ms": None}
 
     raw_ip = ip.split(",")[0].strip() if ip else None
+    if not target and hostname:
+        resolved = await asyncio.to_thread(_resolve_to_ip, _extract_host(hostname) or hostname)
+        if resolved is not None or not raw_ip:
+            target = hostname
     host = target or raw_ip
     if not host:
         return {"status": "unknown", "response_time_ms": None}
