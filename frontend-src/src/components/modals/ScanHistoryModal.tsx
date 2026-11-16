@@ -104,9 +104,10 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
           toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
         }
         if (prev?.status === 'running' && run.status === 'done') {
-          if (run.kind === 'proxmox' && run.error) {
-            // A done Proxmox run carrying a non-fatal advisory (e.g. hosts
-            // imported but no guests visible) is a warning, not a success.
+          if ((run.kind === 'proxmox' || run.kind === 'zigbee') && run.error) {
+            // A done Proxmox / Zigbee run carrying a non-fatal advisory (hosts
+            // imported but no guests visible, one Zigbee2MQTT bridge silent)
+            // is a warning, not a success.
             toast.warning(run.error)
           } else if (run.kind === 'zigbee' || run.kind === 'zwave' || run.kind === 'proxmox') {
             const label = run.kind === 'zwave' ? 'Z-Wave' : run.kind === 'proxmox' ? 'Proxmox' : 'Zigbee'

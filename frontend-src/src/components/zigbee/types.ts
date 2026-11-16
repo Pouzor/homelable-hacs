@@ -34,7 +34,12 @@ export interface ZigbeeNetworkmap {
   nodes: ZigbeeNode[]
   edges: ZigbeeEdge[]
   backend: ZigbeeBackend
+  /** Comma-joined `base_topics`, kept for older callers. */
   base_topic: string
+  /** One Zigbee2MQTT base topic per instance. */
+  base_topics: string[]
+  /** Topics that did not answer, mapped to their error. */
+  failed_topics: Record<string, string>
 }
 
 export interface ZigbeeImportResult {

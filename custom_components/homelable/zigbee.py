@@ -27,6 +27,22 @@ class ZigbeeMqttNotReadyError(RuntimeError):
     """HA MQTT integration not loaded / not configured."""
 
 
+def parse_base_topics(raw: str | None) -> list[str]:
+    """Split the base-topic option into one topic per Zigbee2MQTT instance.
+
+    The option stays a plain string so existing single-topic installs keep
+    working unchanged; a comma separates several instances
+    (``"zigbee_r1, zigbee_r2"``). Blanks, surrounding spaces, trailing slashes
+    and repeats are dropped, order is kept.
+    """
+    topics: list[str] = []
+    for part in (raw or "").split(","):
+        topic = part.strip().rstrip("/")
+        if topic and topic not in topics:
+            topics.append(topic)
+    return topics
+
+
 def build_zigbee_properties(
     ieee: str | None,
     vendor: str | None,

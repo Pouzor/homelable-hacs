@@ -785,7 +785,7 @@ async def ws_zigbee_devices(
         return
     backend = coord.resolve_zigbee_backend(msg.get("backend"))
     try:
-        nodes, edges = await coord.fetch_zigbee_networkmap(backend)
+        nodes, edges, failures = await coord.fetch_zigbee_networkmap(backend)
     except ZhaNotReadyError as exc:
         connection.send_error(msg["id"], "zha_not_configured", str(exc))
         return
@@ -804,7 +804,11 @@ async def ws_zigbee_devices(
             "nodes": nodes,
             "edges": edges,
             "backend": backend,
-            "base_topic": coord.get_zigbee_base_topic(),
+            # `base_topic` keeps its old single-string shape for existing
+            # clients; `base_topics` / `failed_topics` carry the per-instance view.
+            "base_topic": ", ".join(coord.get_zigbee_base_topics()),
+            "base_topics": coord.get_zigbee_base_topics(),
+            "failed_topics": failures,
         },
     )
 
