@@ -1766,6 +1766,93 @@ async def test_check_node_reports_unknown_when_the_check_raises(coord) -> None: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "target", "ip"),
+    [
+        ({"ip": "10.0.0.1", "hostname": "alpha"}, None, "10.0.0.1"),
+        ({"ip": "10.0.0.1", "hostname": "alpha", "check_target": "box.local"},
+         "box.local", "10.0.0.1"),
+        ({"hostname": "nas.lan"}, "nas.lan", None),
+    ],
+    ids=["ip-beats-hostname", "check-target-wins", "hostname-when-no-ip"],
+)
+async def test_check_probes_check_target_then_ip_then_hostname(
+    coord, data, target, ip  # noqa: ANN001
+) -> None:
+    """A display hostname DNS can't resolve must not mask a reachable IP."""
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "type": "server", "position": {"x": 0, "y": 0},
+                       "data": {"check_method": "ping", **data}}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    fake = AsyncMock(return_value={"status": "online", "response_time_ms": 1})
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        await coord.async_check_node("n1")
+        await coord._async_update_data()
+
+    assert [c.args for c in fake.await_args_list] == [("ping", target, ip)] * 2
+
+
+@pytest.mark.asyncio
+async def test_check_node_concurrent_requests_share_one_probe(coord) -> None:  # noqa: ANN001
+    """A burst of "Check now" for one device forks one probe, not one each."""
+    await _two_node_canvas(coord)
+    release = asyncio.Event()
+
+    async def slow(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        await release.wait()
+        return {"status": "online", "response_time_ms": 4}
+
+    fake = AsyncMock(side_effect=slow)
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        calls = [asyncio.create_task(coord.async_check_node("n1")) for _ in range(5)]
+        await asyncio.sleep(0)
+        release.set()
+        results = await asyncio.gather(*calls)
+        assert fake.await_count == 1
+        assert all(r["status"] == "online" for r in results)
+        # Once it settles, the next click probes again.
+        await asyncio.sleep(0)
+        await coord.async_check_node("n1")
+    assert fake.await_count == 2
+    assert coord._manual_checks == {}
+
+
+@pytest.mark.asyncio
+async def test_check_node_respects_the_shared_concurrency_cap(coord) -> None:  # noqa: ANN001
+    """Manual checks take a slot of the same cap as the periodic refresh."""
+    await _two_node_canvas(coord)
+    coord._status_sem = asyncio.Semaphore(1)
+    in_flight = peak = 0
+
+    async def probe(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return {"status": "online", "response_time_ms": 1}
+
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node",
+        AsyncMock(side_effect=probe),
+    ):
+        await asyncio.gather(
+            coord.async_check_node("n1"),
+            coord.async_check_node("n2"),
+            coord._async_update_data(),
+        )
+    assert peak == 1
+
+
+@pytest.mark.asyncio
 async def test_check_node_unknown_id_returns_none(coord) -> None:  # noqa: ANN001
     await _two_node_canvas(coord)
     fake = AsyncMock()

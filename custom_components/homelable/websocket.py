@@ -520,7 +520,9 @@ async def ws_status_check(
     Returns ``{status, response_time_ms, check_method}`` and pushes the updated map to every
     ``homelable/status/subscribe`` client. Not admin-gated, like status/get:
     the probe only ever targets what is already saved on the node, the same
-    host the periodic check hits.
+    host the periodic check hits. The coordinator bounds it: probes share the
+    periodic refresh's concurrency cap, and repeat requests for a device wait
+    on the probe already in flight.
     """
     coord = _coordinator(hass)
     if coord is None:
