@@ -308,10 +308,11 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
 
 // --- Check now (manual status check) ---
 
-/** Mesh imports (Zigbee / Z-Wave) and `none` are never probed by the backend,
- *  so there is nothing to run on demand. */
+/** Mesh imports (Zigbee / Z-Wave), canvas furniture and `none` are never
+ *  probed by the backend, so there is nothing to run on demand. */
 function hasStatusCheck(data: NodeData): boolean {
   if (data.check_method === 'none') return false
+  if (data.type === 'text' || data.type === 'group' || data.type === 'groupRect') return false
   return !data.type.startsWith('zigbee_') && !data.type.startsWith('zwave_')
 }
 
@@ -324,7 +325,7 @@ function CheckNowButton({ nodeId, method, className = '' }: { nodeId: string; me
       // The new status reaches the node through the status subscription.
       const res = await checkNodeStatus(nodeId)
       const ms = res.response_time_ms != null ? ` (${res.response_time_ms}ms)` : ''
-      toast.success(`${method}: ${res.status}${ms}`)
+      toast.success(`${res.check_method}: ${res.status}${ms}`)
     } catch (err) {
       if ((err as { code?: string } | null)?.code === 'not_found') {
         toast.error('Save the canvas first — this node is not known to the backend yet')

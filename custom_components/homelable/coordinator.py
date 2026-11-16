@@ -326,8 +326,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         allowed-network guard and bookkeeping (``status_live``, ``last_seen``)
         as the periodic refresh — and every node drawing that device gets the
         result. The merged map is pushed to the status subscribers without
-        touching the refresh schedule. Returns the result, or None when the
-        node is not a status-checked node (unknown id, canvas furniture).
+        touching the refresh schedule. Returns the result plus the
+        ``check_method`` that actually ran (the saved one, which can differ
+        from an unsaved edit in the panel), or None when the node is not a
+        status-checked node (unknown id, canvas furniture).
         """
         await self._ensure_loaded()
         target = next(
@@ -351,7 +353,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # async_set_updated_data) leaves the periodic schedule untouched.
         self.data = {**(self.data or {}), **results}
         self.async_update_listeners()
-        return results[node_id]
+        return {**results[node_id], "check_method": check}
 
     @staticmethod
     def _check_spec(facts: dict[str, Any]) -> tuple[str, Any, Any]:

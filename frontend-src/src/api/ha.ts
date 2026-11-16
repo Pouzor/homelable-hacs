@@ -542,10 +542,15 @@ export interface StatusUpdate {
  *  `subscribeStatus` listener, so callers don't need to apply it themselves.
  *  Rejects with `{ code: 'not_found' }` for a node the backend doesn't know
  *  yet (unsaved) or one that has no status check. */
-export async function checkNodeStatus(
-  nodeId: string
-): Promise<StatusUpdate[string]> {
-  return wsCall<StatusUpdate[string]>('homelable/status/check', { node_id: nodeId })
+export interface CheckNodeResult {
+  status: string
+  response_time_ms: number | null
+  /** The method the backend ran — the saved one, not an unsaved edit. */
+  check_method: string
+}
+
+export async function checkNodeStatus(nodeId: string): Promise<CheckNodeResult> {
+  return wsCall<CheckNodeResult>('homelable/status/check', { node_id: nodeId })
 }
 
 export async function subscribeStatus(

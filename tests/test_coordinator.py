@@ -1700,7 +1700,9 @@ async def test_check_node_uses_the_configured_method_for_that_node_only(coord) -
     ):
         result = await coord.async_check_node("n1")
 
-    assert result == {"status": "online", "response_time_ms": 12}
+    assert result == {
+        "status": "online", "response_time_ms": 12, "check_method": "http"
+    }
     fake.assert_awaited_once()
     method, target, ip = fake.await_args.args
     assert (method, target, ip) == ("http", "http://10.0.0.1:8080", "10.0.0.1")
@@ -1725,6 +1727,8 @@ async def test_check_node_merges_into_data_and_notifies_listeners(coord) -> None
     finally:
         unsub()
 
+    # The pushed status map keeps its wire shape — check_method is only in the
+    # command's own result.
     assert coord.data["n1"] == {"status": "online", "response_time_ms": 7}
     # The other node keeps its last periodic result.
     assert coord.data["n2"] == {"status": "online", "response_time_ms": 3}
@@ -1756,7 +1760,9 @@ async def test_check_node_reports_unknown_when_the_check_raises(coord) -> None: 
         AsyncMock(side_effect=RuntimeError("boom")),
     ):
         result = await coord.async_check_node("n2")
-    assert result == {"status": "unknown", "response_time_ms": None}
+    assert result == {
+        "status": "unknown", "response_time_ms": None, "check_method": "ping"
+    }
 
 
 @pytest.mark.asyncio

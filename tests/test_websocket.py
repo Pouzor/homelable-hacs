@@ -325,7 +325,10 @@ async def test_status_check_returns_result_and_pushes_to_subscribers(
 
     by_id = {m["id"]: m for m in msgs}
     assert by_id[2]["success"] is True
-    assert by_id[2]["result"] == {"status": "online", "response_time_ms": 4}
+    assert by_id[2]["result"] == {
+        "status": "online", "response_time_ms": 4, "check_method": "tcp"
+    }
+    assert "check_method" not in by_id[1]["event"]["n1"]
     assert by_id[1]["type"] == "event"
     assert by_id[1]["event"]["n1"]["status"] == "online"
     assert fake.await_args.args[0] == "tcp"

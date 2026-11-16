@@ -517,7 +517,7 @@ async def ws_status_check(
 ) -> None:
     """Check one node now, with its configured check method.
 
-    Returns ``{status, response_time_ms}`` and pushes the updated map to every
+    Returns ``{status, response_time_ms, check_method}`` and pushes the updated map to every
     ``homelable/status/subscribe`` client. Not admin-gated, like status/get:
     the probe only ever targets what is already saved on the node, the same
     host the periodic check hits.

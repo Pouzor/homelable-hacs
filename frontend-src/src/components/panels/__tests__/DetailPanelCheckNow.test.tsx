@@ -41,7 +41,7 @@ describe('DetailPanel — Check now', () => {
   })
 
   it('runs the check for the selected node and reports the result', async () => {
-    vi.mocked(checkNodeStatus).mockResolvedValue({ status: 'online', response_time_ms: 9 })
+    vi.mocked(checkNodeStatus).mockResolvedValue({ status: 'online', response_time_ms: 9, check_method: 'http' })
     setupStore({ check_method: 'http' })
     render(<DetailPanel onEdit={vi.fn()} />)
 
@@ -52,7 +52,7 @@ describe('DetailPanel — Check now', () => {
   })
 
   it('disables the button while the check is running', async () => {
-    let resolve!: (v: { status: string; response_time_ms: number | null }) => void
+    let resolve!: (v: { status: string; response_time_ms: number | null; check_method: string }) => void
     vi.mocked(checkNodeStatus).mockReturnValue(new Promise((r) => { resolve = r }))
     setupStore({ check_method: 'ping' })
     render(<DetailPanel onEdit={vi.fn()} />)
@@ -61,9 +61,19 @@ describe('DetailPanel — Check now', () => {
     fireEvent.click(button)
     expect(button.disabled).toBe(true)
 
-    resolve({ status: 'offline', response_time_ms: null })
+    resolve({ status: 'offline', response_time_ms: null, check_method: 'ping' })
     await waitFor(() => expect(button.disabled).toBe(false))
     expect(toast.success).toHaveBeenCalledWith('ping: offline')
+  })
+
+  it('reports the method the backend ran, not an unsaved edit', async () => {
+    // The node was edited to https but not saved: the backend still ran ping.
+    vi.mocked(checkNodeStatus).mockResolvedValue({ status: 'online', response_time_ms: 2, check_method: 'ping' })
+    setupStore({ check_method: 'https' })
+    render(<DetailPanel onEdit={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Check now' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('ping: online (2ms)'))
   })
 
   it('defaults the label to ping when no check method is set', () => {
@@ -94,6 +104,7 @@ describe('DetailPanel — Check now', () => {
     [{ check_method: 'none' as const }],
     [{ type: 'zigbee_enddevice' as const }],
     [{ type: 'zwave_enddevice' as const }],
+    [{ type: 'text' as const }],
   ])('hides the button for nodes without a live check (%o)', (data) => {
     setupStore(data as Partial<NodeData>)
     render(<DetailPanel onEdit={vi.fn()} />)
