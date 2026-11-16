@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.homelable import zigbee
 from custom_components.homelable.const import (
     CONF_MQTT_RESPONSE_TIMEOUT,
+    CONF_ZIGBEE_BASE_TOPIC,
     DEFAULT_MQTT_RESPONSE_TIMEOUT,
     DOMAIN,
 )
@@ -248,6 +249,158 @@ async def test_fetch_zigbee_networkmap_passes_configured_timeout(
     fetch.assert_awaited_once_with(hass, "zigbee2mqtt", timeout=900.0)
 
 
+# ─── Several Zigbee2MQTT instances (comma-separated base topics) ─────────────
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("zigbee2mqtt", ["zigbee2mqtt"]),
+        ("zigbee_r1,zigbee_r2", ["zigbee_r1", "zigbee_r2"]),
+        (" zigbee_r1 , zigbee_r2/ ,, zigbee_r1 ", ["zigbee_r1", "zigbee_r2"]),
+        ("site/zigbee", ["site/zigbee"]),
+        ("", []),
+        (None, []),
+    ],
+)
+def test_parse_base_topics(raw: str | None, expected: list[str]) -> None:
+    assert zigbee.parse_base_topics(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("options", "data", "expected"),
+    [
+        # Installs configured before multi-topic support read exactly as before.
+        ({}, {}, ["zigbee2mqtt"]),
+        ({}, {CONF_ZIGBEE_BASE_TOPIC: "custom"}, ["custom"]),
+        ({CONF_ZIGBEE_BASE_TOPIC: "custom"}, {}, ["custom"]),
+        ({CONF_ZIGBEE_BASE_TOPIC: "zigbee_r1, zigbee_r2"}, {}, ["zigbee_r1", "zigbee_r2"]),
+        # A blank option never publishes to "/bridge/request/networkmap".
+        ({CONF_ZIGBEE_BASE_TOPIC: " "}, {}, ["zigbee2mqtt"]),
+    ],
+)
+async def test_get_zigbee_base_topics(
+    hass: HomeAssistant, options: dict, data: dict, expected: list[str]
+) -> None:
+    entry = _mock_entry()
+    entry.options = options
+    entry.data = {**entry.data, **data}
+    coord = HomelableCoordinator(hass, entry)
+    assert coord.get_zigbee_base_topics() == expected
+    assert coord._zigbee_run_target("z2m") == expected
+    assert coord._zigbee_run_target("zha") == ["zha"]
+
+
+def _multi_topic_coord(hass: HomeAssistant, topics: str) -> HomelableCoordinator:
+    entry = _mock_entry()
+    entry.options = {CONF_ZIGBEE_BASE_TOPIC: topics}
+    return HomelableCoordinator(hass, entry)
+
+
+def _mesh(prefix: str) -> tuple[list[dict], list[dict]]:
+    payload = {
+        "data": {
+            "value": {
+                "nodes": [_coord_node(f"{prefix}C"), _router(f"{prefix}R")],
+                "links": [
+                    {
+                        "source": {"ieeeAddr": f"{prefix}C"},
+                        "target": {"ieeeAddr": f"{prefix}R"},
+                    }
+                ],
+            }
+        }
+    }
+    return zigbee.parse_networkmap(payload)
+
+
+async def test_fetch_zigbee_networkmap_merges_every_topic(hass: HomeAssistant) -> None:
+    coord = _multi_topic_coord(hass, "zigbee_r1, zigbee_r2")
+    meshes = {"zigbee_r1": _mesh("0x1"), "zigbee_r2": _mesh("0x2")}
+
+    async def fake_fetch(hass_, base_topic, timeout=300.0):  # noqa: ARG001
+        return meshes[base_topic]
+
+    with patch.object(zigbee, "fetch_networkmap", new=AsyncMock(side_effect=fake_fetch)) as fetch:
+        nodes, edges, failures = await coord.fetch_zigbee_networkmap("z2m")
+
+    assert [c.args[1] for c in fetch.await_args_list] == ["zigbee_r1", "zigbee_r2"]
+    assert {n["id"] for n in nodes} == {"0x1C", "0x1R", "0x2C", "0x2R"}
+    # Each router hangs off its own coordinator, never the other mesh's.
+    parents = {n["id"]: n["parent_id"] for n in nodes}
+    assert parents["0x1R"] == "0x1C"
+    assert parents["0x2R"] == "0x2C"
+    assert len(edges) == 2
+    assert failures == {}
+
+
+async def test_fetch_zigbee_networkmap_keeps_answering_topics(hass: HomeAssistant) -> None:
+    coord = _multi_topic_coord(hass, "zigbee_r1,zigbee_r2")
+
+    async def fake_fetch(hass_, base_topic, timeout=300.0):  # noqa: ARG001
+        if base_topic == "zigbee_r2":
+            raise TimeoutError("no answer")
+        return _mesh("0x1")
+
+    with patch.object(zigbee, "fetch_networkmap", new=AsyncMock(side_effect=fake_fetch)):
+        nodes, _edges, failures = await coord.fetch_zigbee_networkmap("z2m")
+
+    assert {n["id"] for n in nodes} == {"0x1C", "0x1R"}
+    assert failures == {"zigbee_r2": "no answer"}
+
+
+async def test_fetch_zigbee_networkmap_raises_when_every_topic_fails(
+    hass: HomeAssistant,
+) -> None:
+    coord = _multi_topic_coord(hass, "zigbee_r1,zigbee_r2")
+    fetch = AsyncMock(side_effect=TimeoutError("no answer"))
+    with patch.object(zigbee, "fetch_networkmap", new=fetch), pytest.raises(TimeoutError):
+        await coord.fetch_zigbee_networkmap("z2m")
+
+
+async def test_trigger_zigbee_import_partial_failure_is_done_with_advisory(
+    hass: HomeAssistant,
+) -> None:
+    coord = _multi_topic_coord(hass, "zigbee_r1,zigbee_r2")
+
+    async def fake_fetch(hass_, base_topic, timeout=300.0):  # noqa: ARG001
+        if base_topic == "zigbee_r2":
+            raise TimeoutError("no answer")
+        return _mesh("0x1")
+
+    with patch.object(zigbee, "fetch_networkmap", new=AsyncMock(side_effect=fake_fetch)):
+        await coord.trigger_zigbee_import("z2m")
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    run = (await coord.list_runs())[0]
+    assert run["status"] == "done"
+    assert run["ranges"] == ["zigbee_r1", "zigbee_r2"]
+    assert run["devices_found"] == 2
+    assert run["error"] == "No answer from Zigbee2MQTT on zigbee_r2 (no answer)"
+    assert len(await coord.list_pending(source="zigbee")) == 2
+
+
+async def test_reimport_refreshes_devices_of_every_topic(hass: HomeAssistant) -> None:
+    """The issue #41 symptom: switching the single topic only ever refreshed
+    the last mesh. With every topic configured, one import sees them all."""
+    coord = _multi_topic_coord(hass, "zigbee_r1,zigbee_r2")
+    meshes = {"zigbee_r1": _mesh("0x1"), "zigbee_r2": _mesh("0x2")}
+
+    async def fake_fetch(hass_, base_topic, timeout=300.0):  # noqa: ARG001
+        return meshes[base_topic]
+
+    with patch.object(zigbee, "fetch_networkmap", new=AsyncMock(side_effect=fake_fetch)):
+        nodes, _edges, _failures = await coord.fetch_zigbee_networkmap("z2m")
+        first = await coord.import_zigbee_devices(nodes)
+        nodes, _edges, _failures = await coord.fetch_zigbee_networkmap("z2m")
+        again = await coord.import_zigbee_devices(nodes)
+
+    assert first == {"added": 4, "skipped": 0, "refreshed": 0}
+    # Nothing new, nothing lost: both meshes are still seen on the second pass.
+    assert again["added"] == 0
+    assert again["skipped"] + again["refreshed"] == 4
+
+
 async def test_import_zigbee_devices_adds_to_pending(coordinator: HomelableCoordinator) -> None:
     devs = [
         {
@@ -283,8 +436,8 @@ async def test_trigger_zigbee_import_records_running_then_done(
         {"id": "0xR", "ieee_address": "0xR", "friendly_name": "Router", "type": "zigbee_router"},
     ]
 
-    async def fake_fetch(backend: str | None = None) -> tuple[list[dict], list[dict]]:  # noqa: ARG001
-        return nodes, []
+    async def fake_fetch(backend: str | None = None) -> tuple[list[dict], list[dict], dict]:  # noqa: ARG001
+        return nodes, [], {}
 
     monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", fake_fetch)
 
@@ -314,7 +467,7 @@ async def test_trigger_zigbee_import_records_error_run(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def boom(backend: str | None = None) -> tuple[list[dict], list[dict]]:  # noqa: ARG001
+    async def boom(backend: str | None = None) -> tuple[list[dict], list[dict], dict]:  # noqa: ARG001
         raise RuntimeError("mqtt not ready")
 
     monkeypatch.setattr(coordinator, "fetch_zigbee_networkmap", boom)
@@ -559,7 +712,7 @@ async def test_ws_zigbee_import_pushes_to_pending(
         }
     ]
     with patch.object(
-        setup_ws, "fetch_zigbee_networkmap", new=AsyncMock(return_value=(nodes, []))
+        setup_ws, "fetch_zigbee_networkmap", new=AsyncMock(return_value=(nodes, [], {}))
     ):
         client = await hass_ws_client(hass)
         await client.send_json({"id": 1, "type": "homelable/zigbee/import"})
@@ -606,6 +759,8 @@ async def test_ws_zigbee_devices_happy_path_with_mocked_mqtt(
     assert msg["success"] is True
     assert {n["id"] for n in msg["result"]["nodes"]} == {"0xC", "0xR1"}
     assert msg["result"]["base_topic"] == "zigbee2mqtt"
+    assert msg["result"]["base_topics"] == ["zigbee2mqtt"]
+    assert msg["result"]["failed_topics"] == {}
 
 
 async def test_ws_scan_ignore_removes_pending(

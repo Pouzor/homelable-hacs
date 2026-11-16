@@ -2696,6 +2696,16 @@ class HomelableCoordinator(DataUpdateCoordinator):
             self.entry.data.get(CONF_ZIGBEE_BASE_TOPIC, DEFAULT_ZIGBEE_BASE_TOPIC),
         )
 
+    def get_zigbee_base_topics(self) -> list[str]:
+        """Every configured Zigbee2MQTT base topic, one per instance.
+
+        A blank option falls back to the default topic rather than publishing
+        to ``/bridge/request/networkmap``, which no bridge listens on.
+        """
+        return zigbee.parse_base_topics(self.get_zigbee_base_topic()) or [
+            DEFAULT_ZIGBEE_BASE_TOPIC
+        ]
+
     def get_zigbee_source(self) -> str:
         """The configured Zigbee gateway: ``"auto"``, ``"zha"`` or ``"z2m"``."""
         value = self.entry.options.get(
@@ -2744,24 +2754,56 @@ class HomelableCoordinator(DataUpdateCoordinator):
         """What to show in Scan History's `ranges` column for this backend."""
         if backend == "zha":
             return ["zha"]
-        base = self.get_zigbee_base_topic()
-        return [base] if base else []
+        return self.get_zigbee_base_topics()
 
     async def fetch_zigbee_networkmap(
         self, backend: str | None = None
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Fetch the Zigbee mesh and return parsed (nodes, edges).
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+        """Fetch the Zigbee mesh and return parsed (nodes, edges, failures).
 
         ZHA reads straight from the running integration; Z2M does an MQTT
-        networkmap round-trip. Both return the same node/edge shape.
+        networkmap round-trip per configured base topic, all at once, and
+        merges the meshes. Both return the same node/edge shape.
+
+        ``failures`` maps each Z2M topic that did not answer to its error. One
+        bridge being down must not hide the others, so a partial answer is
+        returned; only when every topic fails is the first error raised, which
+        keeps the single-topic behaviour exactly as it was.
         """
         if self.resolve_zigbee_backend(backend) == "zha":
-            return await zha.fetch_zha_network(self.hass)
-        return await zigbee.fetch_networkmap(
-            self.hass,
-            self.get_zigbee_base_topic(),
-            timeout=self.get_mqtt_response_timeout(),
+            nodes, edges = await zha.fetch_zha_network(self.hass)
+            return nodes, edges, {}
+        topics = self.get_zigbee_base_topics()
+        timeout = self.get_mqtt_response_timeout()
+        results = await asyncio.gather(
+            *(
+                zigbee.fetch_networkmap(self.hass, topic, timeout=timeout)
+                for topic in topics
+            ),
+            return_exceptions=True,
         )
+        nodes: list[dict[str, Any]] = []
+        edges: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        failures: dict[str, str] = {}
+        first_error: BaseException | None = None
+        for topic, result in zip(topics, results, strict=True):
+            if isinstance(result, BaseException):
+                if not isinstance(result, Exception):
+                    raise result  # CancelledError & co. are not a bridge failure
+                _LOGGER.warning("Zigbee2MQTT networkmap on %r failed: %s", topic, result)
+                failures[topic] = str(result)
+                first_error = first_error or result
+                continue
+            topic_nodes, topic_edges = result
+            for node in topic_nodes:
+                if node["id"] not in seen:
+                    seen.add(node["id"])
+                    nodes.append(node)
+            edges.extend(topic_edges)
+        if first_error is not None and len(failures) == len(topics):
+            raise first_error
+        return nodes, edges, failures
 
     async def trigger_zigbee_import(
         self, backend: str | None = None
@@ -2810,7 +2852,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         """Background Zigbee import body: fetch network map, import, record."""
         ranges = self._zigbee_run_target(backend)
         try:
-            nodes, _edges = await self.fetch_zigbee_networkmap(backend)
+            nodes, _edges, failures = await self.fetch_zigbee_networkmap(backend)
             await self.import_zigbee_devices(nodes, backend=backend)
         except Exception as exc:  # noqa: BLE001 — record any failure, then exit
             _LOGGER.exception("Zigbee import %s failed", run_id)
@@ -2832,6 +2874,14 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 {"event": "scan_error", "run_id": run_id, "error": str(exc)},
             )
             return
+        # Some bridges answered, some did not: a done run carrying an advisory,
+        # like a partial Proxmox import — never passed off as complete.
+        advisory = (
+            "No answer from Zigbee2MQTT on "
+            + "; ".join(f"{topic} ({err})" for topic, err in failures.items())
+            if failures
+            else None
+        )
         await self._record_run(
             {
                 "id": run_id,
@@ -2841,7 +2891,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
                 "devices_found": len(nodes),
                 "started_at": started_at,
                 "finished_at": _utc_now_iso(),
-                "error": None,
+                "error": advisory,
             }
         )
         async_dispatcher_send(
