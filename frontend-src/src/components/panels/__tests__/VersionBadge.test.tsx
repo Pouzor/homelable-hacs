@@ -78,7 +78,7 @@ describe('VersionBadge', () => {
     const link = screen.getByText(`v${__APP_VERSION__}`).closest('a')
     expect(link).toHaveAttribute(
       'href',
-      `https://github.com/Pouzor/homelable/releases/tag/v${__APP_VERSION__}`,
+      `https://github.com/Pouzor/homelable-hacs/releases/tag/v${__APP_VERSION__}`,
     )
     expect(link).toHaveAttribute('target', '_blank')
   })
@@ -90,7 +90,7 @@ describe('VersionBadge', () => {
 
   it('shows update badge when a newer version is available', async () => {
     vi.mocked(useLatestRelease).mockReturnValue({
-      latest: { version: '9.9.9', url: 'https://github.com/Pouzor/homelable/releases/tag/v9.9.9' },
+      latest: { version: '9.9.9', url: 'https://github.com/Pouzor/homelable-hacs/releases/tag/v9.9.9' },
       hasUpdate: true,
     })
     renderSidebar()
@@ -99,13 +99,13 @@ describe('VersionBadge', () => {
 
   it('update badge links to the latest release URL', async () => {
     vi.mocked(useLatestRelease).mockReturnValue({
-      latest: { version: '9.9.9', url: 'https://github.com/Pouzor/homelable/releases/tag/v9.9.9' },
+      latest: { version: '9.9.9', url: 'https://github.com/Pouzor/homelable-hacs/releases/tag/v9.9.9' },
       hasUpdate: true,
     })
     renderSidebar()
     await waitFor(() => {
       const badge = screen.getByText('↑ v9.9.9 available').closest('a')
-      expect(badge).toHaveAttribute('href', 'https://github.com/Pouzor/homelable/releases/tag/v9.9.9')
+      expect(badge).toHaveAttribute('href', 'https://github.com/Pouzor/homelable-hacs/releases/tag/v9.9.9')
       expect(badge).toHaveAttribute('target', '_blank')
     })
   })

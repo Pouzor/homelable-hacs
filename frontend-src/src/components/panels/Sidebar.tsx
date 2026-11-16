@@ -491,7 +491,7 @@ function VersionBadge() {
   return (
     <div className="px-3 py-2 border-t border-border flex flex-col gap-1">
       <a
-        href={`https://github.com/Pouzor/homelable/releases/tag/v${current}`}
+        href={`https://github.com/Pouzor/homelable-hacs/releases/tag/v${current}`}
         target="_blank"
         rel="noopener noreferrer"
         className="font-mono text-[11px] text-muted-foreground hover:text-foreground transition-colors"
