@@ -283,8 +283,15 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self._service_check_unsub: Callable[[], None] | None = None
         self._periodic_scan_unsub: Callable[[], None] | None = None
         self._proxmox_sync_unsub: Callable[[], None] | None = None
+        # One cap on in-flight status probes, shared by the periodic refresh and
+        # "Check now", so a burst of WS requests can't fork `ping`s past it
+        # (issue #73: unbounded pings got HA restarted by the watchdog).
+        self._status_sem = asyncio.Semaphore(STATUS_CHECK_CONCURRENCY)
+        # In-flight manual checks, keyed by device: concurrent "Check now"
+        # requests for the same device await one probe instead of each forking.
+        self._manual_checks: dict[str, asyncio.Task[tuple[dict[str, Any], str]]] = {}
 
-    # ─── Status checks (periodic) ────────────────────────────────────────────
+    # ─── Status checks (periodic)────────────────────────────────────────────
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Check every device once and fan the result out to its nodes.
@@ -305,10 +312,8 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # and blow past HA's 60s setup deadline (issue #51 → CancelledError at
         # startup); fully unbounded forks one `ping` per node at once, which
         # starves small hosts and gets HA restarted by the watchdog (issue #73).
-        sem = asyncio.Semaphore(STATUS_CHECK_CONCURRENCY)
-
         async def _bounded(check: str, target: Any, ip: Any) -> dict[str, Any]:
-            async with sem:
+            async with self._status_sem:
                 return await status_checker.check_node(
                     check, target, ip, allowed_networks=allowed_networks
                 )
@@ -330,6 +335,10 @@ class HomelableCoordinator(DataUpdateCoordinator):
         ``check_method`` that actually ran (the saved one, which can differ
         from an unsaved edit in the panel), or None when the node is not a
         status-checked node (unknown id, canvas furniture).
+
+        The command is open to any HA user, so it is bounded: the probe takes a
+        slot of the shared ``_status_sem``, and concurrent requests for the
+        same device share the one probe already in flight.
         """
         await self._ensure_loaded()
         target = next(
@@ -337,14 +346,38 @@ class HomelableCoordinator(DataUpdateCoordinator):
         )
         if target is None:
             return None
+        # Every node of a device lists the same node ids, so the first one keys
+        # the device whichever of its nodes was clicked.
+        key = target[0][0]
+        task = self._manual_checks.get(key)
+        if task is None:
+            task = asyncio.create_task(self._run_manual_check(target))
+            self._manual_checks[key] = task
+            # A done callback, not a `finally` in the task: it runs after the
+            # assignment above even when the probe finishes without suspending.
+            task.add_done_callback(
+                lambda t: self._manual_checks.pop(key, None)
+                if self._manual_checks.get(key) is t
+                else None
+            )
+        # shield: one caller going away (WS closed) must not cancel the probe
+        # the others are waiting on.
+        results, check = await asyncio.shield(task)
+        return {**results[node_id], "check_method": check}
+
+    async def _run_manual_check(
+        self, target: tuple[list[str], dict[str, Any], dict[str, Any] | None]
+    ) -> tuple[dict[str, Any], str]:
+        """Probe one device under the shared cap and publish its result."""
         allowed_networks = status_checker._parse_allowed_networks(
             self.get_scan_ranges()
         )
         check, check_target, ip = self._check_spec(target[1])
         try:
-            res: dict[str, Any] | Exception = await status_checker.check_node(
-                check, check_target, ip, allowed_networks=allowed_networks
-            )
+            async with self._status_sem:
+                res: dict[str, Any] | Exception = await status_checker.check_node(
+                    check, check_target, ip, allowed_networks=allowed_networks
+                )
         except Exception as exc:  # noqa: BLE001 — recorded as unknown, like gather()
             res = exc
         results = self._record_check_results([target], [res])
@@ -353,7 +386,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         # async_set_updated_data) leaves the periodic schedule untouched.
         self.data = {**(self.data or {}), **results}
         self.async_update_listeners()
-        return {**results[node_id], "check_method": check}
+        return results, check
 
     @staticmethod
     def _check_spec(facts: dict[str, Any]) -> tuple[str, Any, Any]:
