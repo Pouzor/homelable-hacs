@@ -137,8 +137,12 @@ describe('PendingDevicesModal — Device Inventory', () => {
     // zwave_enddevice accent from the default theme = #a855f7 (violet), applied
     // to both the text colour and a translucent background.
     const badge = within(card).getByText('zwave_enddevice')
-    // #a855f7 → rgb(168, 85, 247) once jsdom normalises the inline colour.
-    expect(badge).toHaveStyle({ color: 'rgb(168, 85, 247)' })
+    // Through badgeStyle(): the accent is mixed toward the interface
+    // foreground (a no-op in dark looks, readable text in HA light mode).
+    // jsdom may normalise #a855f7 to rgb(168, 85, 247) inside the color-mix().
+    expect(badge.style.color).toMatch(/#a855f7|rgb\(168, 85, 247\)/)
+    expect(badge.style.color).toContain('--badge-ink-mix')
+    expect(badge.style.background).toMatch(/#a855f7|rgb\(168, 85, 247\)/)
     expect(badge.className).not.toContain('text-muted-foreground')
   })
 
@@ -571,5 +575,60 @@ describe('PendingDevicesModal — the inventory row owns the device (homelable #
         'This device is on a canvas — delete its node or hide it instead',
       ),
     )
+  })
+})
+
+describe('PendingDevicesModal — table view', () => {
+  const rowIds = () =>
+    within(screen.getByTestId('inventory-table'))
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => r.getAttribute('data-testid'))
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mockPending.mockResolvedValue({
+      data: [
+        { ...DEVICE_IP, id: 'ip-10', hostname: 'bravo', ip: '10.0.0.10' },
+        { ...DEVICE_IP, id: 'ip-9', hostname: 'charlie', ip: '10.0.0.9' },
+        { ...DEVICE_NOSVC, id: 'ip-100', hostname: 'alpha', ip: '10.0.0.100' },
+      ],
+    } as never)
+    mockHidden.mockResolvedValue({ data: [] } as never)
+  })
+
+  it('switches to a table sorted by name, and remembers the choice', async () => {
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('pending-card-ip-10')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTitle('Table view (sortable)'))
+
+    expect(rowIds()).toEqual(['inventory-row-ip-100', 'inventory-row-ip-10', 'inventory-row-ip-9'])
+    expect(localStorage.getItem('homelable.inventoryView')).toBe('table')
+  })
+
+  it('sorts by a column header, numerically for IPs, and flips on a second click', async () => {
+    localStorage.setItem('homelable.inventoryView', 'table')
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('inventory-table')).toBeInTheDocument())
+
+    const ipHeader = screen.getByRole('columnheader', { name: /IP/ })
+    fireEvent.click(within(ipHeader).getByRole('button'))
+    expect(ipHeader).toHaveAttribute('aria-sort', 'ascending')
+    expect(rowIds()).toEqual(['inventory-row-ip-9', 'inventory-row-ip-10', 'inventory-row-ip-100'])
+
+    fireEvent.click(within(ipHeader).getByRole('button'))
+    expect(ipHeader).toHaveAttribute('aria-sort', 'descending')
+    expect(rowIds()).toEqual(['inventory-row-ip-100', 'inventory-row-ip-10', 'inventory-row-ip-9'])
+  })
+
+  it('opens the device detail when a row is clicked', async () => {
+    localStorage.setItem('homelable.inventoryView', 'table')
+    render(<PendingDevicesModal {...baseProps} />)
+    await waitFor(() => expect(screen.getByTestId('inventory-row-ip-9')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId('inventory-row-ip-9'))
+    await waitFor(() => expect(screen.getAllByText('charlie').length).toBeGreaterThan(1))
   })
 })

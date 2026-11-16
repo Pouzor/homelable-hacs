@@ -9,7 +9,7 @@
  * Rack chrome proper (frame, rails, interior) stays user-configurable per rack;
  * only its *default* comes from here.
  */
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import type { ThemeId } from '@/utils/themes'
 import type { DeviceStatus, RackStyle } from '@/types'
@@ -68,6 +68,6 @@ export function rackPalette(themeId: ThemeId): RackPalette {
 
 /** Palette for the active theme. Re-renders with a theme switch. */
 export function useRackPalette(): RackPalette {
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   return rackPalette(activeTheme)
 }

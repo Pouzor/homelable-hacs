@@ -70,7 +70,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="bg-[#161b22] border-border max-w-md">
+      <DialogContent className="bg-popover border-border max-w-md">
         <DialogHeader>
           <DialogTitle className="text-foreground">Scan Configuration</DialogTitle>
         </DialogHeader>
@@ -89,7 +89,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                   value={r}
                   readOnly
                   disabled
-                  className="font-mono text-sm bg-[#0d1117] border-border"
+                  className="font-mono text-sm bg-background border-border"
                 />
               ))
             )}
@@ -119,7 +119,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                     value={httpRangesText}
                     onChange={(e) => setHttpRangesText(e.target.value)}
                     placeholder="8000-8100, 9000-9100"
-                    className="font-mono text-sm bg-[#0d1117] border-border"
+                    className="font-mono text-sm bg-background border-border"
                   />
                 </div>
 
@@ -128,7 +128,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                     type="checkbox"
                     checked={httpProbe}
                     onChange={(e) => setHttpProbe(e.target.checked)}
-                    className="accent-[#00d4ff]"
+                    className="accent-primary"
                   />
                   Enable HTTP probe
                 </label>
@@ -138,7 +138,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
                     type="checkbox"
                     checked={verifyTls}
                     onChange={(e) => setVerifyTls(e.target.checked)}
-                    className="accent-[#00d4ff]"
+                    className="accent-primary"
                   />
                   Verify TLS certificates
                 </label>
@@ -160,7 +160,7 @@ export function ScanConfigModal({ open, onClose, onScanNow }: ScanConfigModalPro
           <Button
             onClick={handleScanNow}
             disabled={saving || ranges.length === 0}
-            style={{ background: '#00d4ff', color: '#0d1117' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
           >
             Scan Now
           </Button>

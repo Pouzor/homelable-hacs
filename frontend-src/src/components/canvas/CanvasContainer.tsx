@@ -15,7 +15,7 @@ import {
 import { MousePointer2, Hand } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { computeCollapseInfo, rewireEdgesForCollapse } from '@/utils/collapseFilter'
 import { nodeTypes } from './nodes/nodeTypes'
@@ -85,7 +85,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
     return () => clearTimeout(id)
   }, [fitViewPending, nodes.length, fitView, clearFitViewPending])
 
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const theme = THEMES[activeTheme]
 
   const onNodeClick = useCallback((e: React.MouseEvent, node: Node<NodeData>) => {

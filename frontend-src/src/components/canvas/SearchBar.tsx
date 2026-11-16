@@ -132,14 +132,14 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
       }}
     >
       <div style={{
-        background: '#161b22',
-        border: '1px solid #30363d',
+        background: 'var(--popover)',
+        border: '1px solid var(--border)',
         borderRadius: 8,
         boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
         overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-          <Search size={14} style={{ color: '#8b949e', flexShrink: 0 }} />
+          <Search size={14} style={{ color: 'var(--muted-foreground)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
@@ -150,26 +150,26 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              color: '#e6edf3',
+              color: 'var(--foreground)',
               fontSize: 13,
             }}
           />
           {query && (
-            <span style={{ fontSize: 11, color: '#6e7681', flexShrink: 0 }}>
+            <span style={{ fontSize: 11, color: 'var(--muted-foreground)', flexShrink: 0 }}>
               {totalResults} result{totalResults !== 1 ? 's' : ''}
             </span>
           )}
           <button
             onClick={() => { setOpen(false); setQuery('') }}
             aria-label="Close search"
-            style={{ color: '#8b949e', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
+            style={{ color: 'var(--muted-foreground)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
           >
             <X size={14} />
           </button>
         </div>
 
         {totalResults > 0 && (
-          <div style={{ borderTop: '1px solid #30363d', maxHeight: 260, overflowY: 'auto' }}>
+          <div style={{ borderTop: '1px solid var(--border)', maxHeight: 260, overflowY: 'auto' }}>
             {nodeResults.map((n, idx) => (
               <button
                 key={`${n.node.id}-${idx}`}
@@ -185,28 +185,28 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
                   cursor: 'pointer',
                   textAlign: 'left',
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#21262d')}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--secondary)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
               >
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#e6edf3', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {n.node.data.label}
                 </span>
                 {n.matches.length > 0 && (
                   <span style={{ maxWidth: '50%', display: 'flex', flexDirection: 'column', gap: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {n.matches.map((m, mIdx) => (
-                      <span key={`${m.key}-${mIdx}`} style={{ fontSize: 11, color: '#8b949e', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0, display: 'inline-block' }}>
+                      <span key={`${m.key}-${mIdx}`} style={{ fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'var(--hl-font-mono)', flexShrink: 0, display: 'inline-block' }}>
                         {m.display_value}
                       </span>
                     ))}
                   </span>
                 )}
-                <span style={{ fontSize: 10, color: '#6e7681', flexShrink: 0 }}>
+                <span style={{ fontSize: 10, color: 'var(--muted-foreground)', flexShrink: 0 }}>
                   {NODE_TYPE_LABELS[n.node.data.type] ?? n.node.data.type}
                 </span>
               </button>
             ))}
             {pendingResults.length > 0 && nodeResults.length > 0 && (
-              <div style={{ height: 1, background: '#30363d', margin: '2px 0' }} />
+              <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
             )}
             {pendingResults.map((d) => {
               const serviceName = d.services.find((s) => s.service_name)?.service_name
@@ -225,14 +225,14 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
                     cursor: 'pointer',
                     textAlign: 'left',
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#21262d')}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--secondary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                 >
-                  <span style={{ fontSize: 10, color: '#e3b341', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>pending</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#e6edf3', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 10, color: 'var(--warning)', fontFamily: 'var(--hl-font-mono)', flexShrink: 0 }}>pending</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--foreground)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {d.hostname ?? d.ip}
                   </span>
-                  <span style={{ fontSize: 11, color: '#8b949e', fontFamily: 'JetBrains Mono, monospace', flexShrink: 0 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'var(--hl-font-mono)', flexShrink: 0 }}>
                     {serviceName ?? d.ip}
                   </span>
                 </button>
@@ -242,7 +242,7 @@ export function SearchBar({ onOpenPending }: SearchBarProps) {
         )}
 
         {q && totalResults === 0 && (
-          <div style={{ borderTop: '1px solid #30363d', padding: '10px 12px', fontSize: 12, color: '#6e7681', textAlign: 'center' }}>
+          <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px', fontSize: 12, color: 'var(--muted-foreground)', textAlign: 'center' }}>
             No results for &ldquo;{query}&rdquo;
           </div>
         )}

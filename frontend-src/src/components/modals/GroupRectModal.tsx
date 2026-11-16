@@ -153,7 +153,7 @@ export function GroupRectModal({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#161b22] border-[#30363d] text-foreground max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-popover border-border text-foreground max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
         </DialogHeader>
@@ -162,7 +162,7 @@ export function GroupRectModal({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
           {/* ── LEFT column: content & text ── */}
           <div className="flex flex-col gap-4 min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Content</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-border">Content</div>
 
           {/* Label */}
           <div className="flex flex-col gap-1.5">
@@ -171,7 +171,7 @@ export function GroupRectModal({
               value={form.label}
               onChange={(e) => set('label', e.target.value)}
               placeholder="Zone name…"
-              className={`bg-[#21262d] border-[#30363d] text-sm h-8 ${modalStyles['modal-radius']}`}
+              className={`bg-secondary border-border text-sm h-8 ${modalStyles['modal-radius']}`}
             />
           </div>
 
@@ -179,10 +179,10 @@ export function GroupRectModal({
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Font</Label>
             <Select value={form.font} onValueChange={(v: string | null) => set('font', v ?? 'inter')}>
-              <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`}> 
+              <SelectTrigger className={`bg-secondary border-border text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`}> 
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-[#21262d] border-[#30363d]">
+              <SelectContent className="bg-secondary border-border">
                 {FONTS.map((f) => (
                   <SelectItem key={f.value} value={f.value} className="text-sm">
                     {f.label}
@@ -206,9 +206,9 @@ export function GroupRectModal({
                     onClick={() => set('text_position', value)}
                     className={`h-8 rounded text-base transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                     style={{
-                      background: isSelected ? '#00d4ff22' : '#21262d',
-                      border: `1px solid ${isSelected ? '#00d4ff88' : '#30363d'}`,
-                      color: isSelected ? '#00d4ff' : '#8b949e',
+                      background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'var(--secondary)',
+                      border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--primary) 53%, transparent)' : 'var(--border)'}`,
+                      color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                     }}
                   >
                     {label}
@@ -231,9 +231,9 @@ export function GroupRectModal({
                     onClick={() => set('label_position', value)}
                     className={`flex items-center justify-center h-8 rounded text-xs transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                     style={{
-                      background: isSelected ? '#00d4ff22' : '#21262d',
-                      border: `1px solid ${isSelected ? '#00d4ff88' : '#30363d'}`,
-                      color: isSelected ? '#00d4ff' : '#8b949e',
+                      background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'var(--secondary)',
+                      border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--primary) 53%, transparent)' : 'var(--border)'}`,
+                      color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                     }}
                   >
                     {label}
@@ -257,9 +257,9 @@ export function GroupRectModal({
                     className={`flex items-center justify-center h-8 rounded transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                     aria-label={`Text size ${label}`}
                     style={{
-                      background: isSelected ? '#00d4ff22' : '#21262d',
-                      border: `1px solid ${isSelected ? '#00d4ff88' : '#30363d'}`,
-                      color: isSelected ? '#00d4ff' : '#8b949e',
+                      background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'var(--secondary)',
+                      border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--primary) 53%, transparent)' : 'var(--border)'}`,
+                      color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                       fontSize: value,
                     }}
                   >
@@ -273,7 +273,7 @@ export function GroupRectModal({
 
           {/* ── RIGHT column: style ── */}
           <div className="flex flex-col gap-4 min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Style</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-border">Style</div>
 
           {/* Colors */}
           <div className="flex flex-col gap-1.5">
@@ -285,7 +285,7 @@ export function GroupRectModal({
                   <div key={key} className="flex flex-col gap-1 items-center">
                     <label
                       className="relative w-full h-7 rounded-md border cursor-pointer overflow-hidden"
-                      style={{ borderColor: '#30363d' }}
+                      style={{ borderColor: 'var(--border)' }}
                     >
                       <input
                         type="color"
@@ -301,7 +301,7 @@ export function GroupRectModal({
                       max={100}
                       value={alpha}
                       onChange={(e) => set(key, rgbaToHex8(hex6, Number(e.target.value)))}
-                      className="w-full h-1 accent-[#00d4ff] cursor-pointer"
+                      className="w-full h-1 accent-primary cursor-pointer"
                       title={`Opacity: ${alpha}%`}
                     />
                     <span className="text-[9px] text-muted-foreground/60">{label} {alpha}%</span>
@@ -325,9 +325,9 @@ export function GroupRectModal({
                     onClick={() => set('border_style', value)}
                     className={`flex flex-col items-center justify-center h-10 rounded text-xs gap-0.5 transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                     style={{
-                      background: isSelected ? '#00d4ff22' : '#21262d',
-                      border: `1px solid ${isSelected ? '#00d4ff88' : '#30363d'}`,
-                      color: isSelected ? '#00d4ff' : '#8b949e',
+                      background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'var(--secondary)',
+                      border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--primary) 53%, transparent)' : 'var(--border)'}`,
+                      color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                     }}
                   >
                     <span className="font-mono text-[11px] leading-none">{preview}</span>
@@ -351,9 +351,9 @@ export function GroupRectModal({
                     onClick={() => set('border_width', value)}
                     className={`flex items-center justify-center h-8 rounded text-xs transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                     style={{
-                      background: isSelected ? '#00d4ff22' : '#21262d',
-                      border: `1px solid ${isSelected ? '#00d4ff88' : '#30363d'}`,
-                      color: isSelected ? '#00d4ff' : '#8b949e',
+                      background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'var(--secondary)',
+                      border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--primary) 53%, transparent)' : 'var(--border)'}`,
+                      color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                     }}
                   >
                     {label}
@@ -367,10 +367,10 @@ export function GroupRectModal({
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Z-Order (1 = furthest back)</Label>
             <Select value={String(form.z_order)} onValueChange={(v: string | null) => set('z_order', v !== null ? Number(v) : 1)}>
-              <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']}`}> 
+              <SelectTrigger className={`bg-secondary border-border text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']}`}> 
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent className="bg-[#21262d] border-[#30363d]">
+              <SelectContent className="bg-secondary border-border">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
                   <SelectItem key={n} value={String(n)} className="text-sm font-mono">
                     {n}
@@ -387,7 +387,7 @@ export function GroupRectModal({
               one-shot action, never a property of the zone, so it is not
               submitted, not persisted, and cleared after each run. */}
           {onImportSubnet && (
-            <div className="flex flex-col gap-2 pt-3 border-t border-[#30363d]">
+            <div className="flex flex-col gap-2 pt-3 border-t border-border">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
                 Import devices by subnet
               </div>
@@ -397,8 +397,8 @@ export function GroupRectModal({
                   onChange={(e) => setSubnet(e.target.value)}
                   placeholder="192.168.1.0/24"
                   aria-label="Subnet"
-                  className={`bg-[#21262d] border-[#30363d] text-sm h-8 font-mono ${modalStyles['modal-radius']}`}
-                  style={showCidrError ? { borderColor: '#f85149' } : undefined}
+                  className={`bg-secondary border-border text-sm h-8 font-mono ${modalStyles['modal-radius']}`}
+                  style={showCidrError ? { borderColor: 'var(--destructive)' } : undefined}
                   // Enter runs the import instead of submitting the whole form —
                   // except in add mode, where submitting IS how the import runs.
                   onKeyDown={(e) => {
@@ -414,7 +414,7 @@ export function GroupRectModal({
                     size="sm"
                     variant="outline"
                     disabled={!canImport}
-                    className="cursor-pointer border-[#30363d] bg-[#21262d] shrink-0"
+                    className="cursor-pointer border-border bg-secondary shrink-0"
                     onClick={handleImport}
                   >
                     Import
@@ -423,7 +423,7 @@ export function GroupRectModal({
               </div>
               <p className="text-[11px] text-muted-foreground/70">
                 {showCidrError
-                  ? <span className="text-[#f85149]">Not a valid IPv4 CIDR — try 192.168.1.0/24</span>
+                  ? <span className="text-destructive">Not a valid IPv4 CIDR — try 192.168.1.0/24</span>
                   : matchCount === null
                     ? 'Moves every unparented device in that range into this zone. Nothing is removed.'
                     : matchCount === 0
@@ -439,7 +439,7 @@ export function GroupRectModal({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-[#f85149] hover:text-[#f85149] hover:bg-[#f85149]/10 cursor-pointer"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
                 onClick={() => { onDelete(); onClose() }}
               >
                 Delete
@@ -449,7 +449,7 @@ export function GroupRectModal({
               <Button type="button" variant="ghost" size="sm" className={`cursor-pointer ${modalStyles['modal-cancel-hover']}`} onClick={onClose}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90 cursor-pointer">
+              <Button type="submit" size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer">
                 {title === 'Add Zone' ? 'Add' : 'Save'}
               </Button>
             </div>

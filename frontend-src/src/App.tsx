@@ -38,7 +38,7 @@ import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupMod
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectInterfaceIsLight, useThemeStore } from '@/stores/themeStore'
 import { canvasApi, designsApi } from '@/api/client'
 import { hydrateCanvasPayload } from '@/utils/canvasPayload'
 import { demoNodes, demoEdges } from '@/utils/demoData'
@@ -54,6 +54,7 @@ export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
+  const interfaceIsLight = useThemeStore(selectInterfaceIsLight)
   const { activeDesignId, activeDesignType, setDesigns, setActiveDesign } = useDesignStore()
   const isRackDesign = activeDesignType === 'rack'
 
@@ -631,7 +632,7 @@ export default function App() {
   return (
     <TooltipProvider>
       <ReactFlowProvider>
-        <div className="flex h-full w-full overflow-hidden bg-[#0d1117]">
+        <div className="flex h-full w-full overflow-hidden bg-background">
           <Sidebar
             onAddNode={() => setAddNodeOpen(true)}
             onAddGroupRect={() => setAddGroupRectOpen(true)}
@@ -890,7 +891,7 @@ export default function App() {
           getElement={() => canvasRef.current?.querySelector<HTMLElement>('.react-flow') ?? null}
         />
 
-        <Toaster theme="dark" position="bottom-right" />
+        <Toaster theme={interfaceIsLight ? 'light' : 'dark'} position="bottom-right" />
       </ReactFlowProvider>
     </TooltipProvider>
   )

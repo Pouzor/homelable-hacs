@@ -35,14 +35,14 @@ describe('ExportModal', () => {
   it('selects High by default', () => {
     render(<ExportModal open onClose={onClose} getElement={getElement} />)
     const highBtn = screen.getByText('High').closest('button')!
-    expect(highBtn.className).toContain('border-[#00d4ff]')
+    expect(highBtn.className).toContain('border-primary')
   })
 
   it('changes selection when another option is clicked', () => {
     render(<ExportModal open onClose={onClose} getElement={getElement} />)
     fireEvent.click(screen.getByText('Ultra').closest('button')!)
-    expect(screen.getByText('Ultra').closest('button')!.className).toContain('border-[#00d4ff]')
-    expect(screen.getByText('High').closest('button')!.className).not.toContain('border-[#00d4ff]')
+    expect(screen.getByText('Ultra').closest('button')!.className).toContain('border-primary')
+    expect(screen.getByText('High').closest('button')!.className).not.toContain('border-primary')
   })
 
   it('calls exportToPng with selected quality on Download click', async () => {
@@ -60,7 +60,7 @@ describe('ExportModal', () => {
   it('selects SVG and calls exportToSvg on Download click', async () => {
     render(<ExportModal open onClose={onClose} getElement={getElement} />)
     fireEvent.click(screen.getByText('SVG').closest('button')!)
-    expect(screen.getByText('SVG').closest('button')!.className).toContain('border-[#00d4ff]')
+    expect(screen.getByText('SVG').closest('button')!.className).toContain('border-primary')
     fireEvent.click(screen.getByRole('button', { name: /download/i }))
     await waitFor(() => expect(mockExportToSvg).toHaveBeenCalledWith(el))
     expect(mockExportToPng).not.toHaveBeenCalled()
@@ -70,8 +70,8 @@ describe('ExportModal', () => {
     render(<ExportModal open onClose={onClose} getElement={getElement} />)
     fireEvent.click(screen.getByText('SVG').closest('button')!)
     fireEvent.click(screen.getByText('Ultra').closest('button')!)
-    expect(screen.getByText('Ultra').closest('button')!.className).toContain('border-[#00d4ff]')
-    expect(screen.getByText('SVG').closest('button')!.className).not.toContain('border-[#00d4ff]')
+    expect(screen.getByText('Ultra').closest('button')!.className).toContain('border-primary')
+    expect(screen.getByText('SVG').closest('button')!.className).not.toContain('border-primary')
   })
 
   it('closes after successful export', async () => {

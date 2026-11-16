@@ -37,11 +37,11 @@ function CPStepper({ label, side, value, onChange }: {
   const min = MIN_HANDLES
   const labelEl = <span className="text-[10px] text-muted-foreground/80 leading-none">{label}</span>
   const belowLabel = side === 'bottom'
-  const btn = 'w-6 h-full flex items-center justify-center text-sm text-muted-foreground hover:text-foreground hover:bg-[#21262d] disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-default'
+  const btn = 'w-6 h-full flex items-center justify-center text-sm text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-default'
   return (
     <div className="flex flex-col items-center gap-1">
       {!belowLabel && labelEl}
-      <div className="flex items-center h-7 rounded-md border border-[#30363d] bg-[#0d1117] overflow-hidden">
+      <div className="flex items-center h-7 rounded-md border border-border bg-background overflow-hidden">
         <button
           type="button"
           aria-label={`Decrease ${label} connection points`}
@@ -199,7 +199,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="bg-[#161b22] border-[#30363d] text-foreground max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-popover border-border text-foreground max-w-[calc(100%-2rem)] sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">{title}</DialogTitle>
         </DialogHeader>
@@ -208,7 +208,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
             {/* ── LEFT column: identity & network ── */}
             <div className="flex flex-col gap-4 min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Information</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-border">Information</div>
             <div className="grid grid-cols-2 gap-3">
             {/* Type + Icon on the same row */}
             <div className="flex flex-col gap-1.5">
@@ -226,13 +226,13 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   return next
                 })
               }}>
-                <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 w-full cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Node type selector">
+                <SelectTrigger className={`bg-secondary border-border text-sm h-8 w-full cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Node type selector">
                   <SelectValue>{NODE_TYPE_LABELS[(form.type ?? 'server') as NodeType]}</SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-[#21262d] border-[#30363d]">
+                <SelectContent className="bg-secondary border-border">
                   {NODE_TYPE_GROUPS.map((group, i) => (
                     <Fragment key={group.label}>
-                      {i > 0 && <SelectSeparator className="bg-[#30363d]" />}
+                      {i > 0 && <SelectSeparator className="bg-border" />}
                       <SelectGroup>
                         <SelectLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 px-2 py-1">
                           {group.label}
@@ -267,7 +267,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               <button
                 type="button"
                 onClick={() => setIconPickerOpen((o) => !o)}
-                className={`flex items-center justify-between gap-2 h-8 px-3 bg-[#21262d] border border-[#30363d] text-sm transition-colors w-full cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`}
+                className={`flex items-center justify-between gap-2 h-8 px-3 bg-secondary border border-border text-sm transition-colors w-full cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`}
                 aria-label="Icon picker trigger"
               >
                 <span className="flex items-center gap-2 min-w-0">
@@ -278,7 +278,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     }
                     const entry = ICON_REGISTRY.find((e) => e.key === form.custom_icon)
                     if (entry) {
-                      return <>{createElement(entry.icon, { size: 13, className: 'text-[#00d4ff] shrink-0' })}<span className="text-foreground truncate">{entry.label}</span></>
+                      return <>{createElement(entry.icon, { size: 13, className: 'text-primary shrink-0' })}<span className="text-foreground truncate">{entry.label}</span></>
                     }
                     const defaultIcon = NODE_TYPE_DEFAULT_ICONS[form.type as NodeType] ?? NODE_TYPE_DEFAULT_ICONS.generic
                     return <>{createElement(defaultIcon, { size: 13, className: 'text-muted-foreground shrink-0' })}<span className="text-muted-foreground truncate">Default</span></>
@@ -307,9 +307,9 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 value={form.label ?? ''}
                 onChange={(e) => { set('label', e.target.value); if (labelError) setLabelError(false) }}
                 placeholder="My Server"
-                className={`bg-[#21262d] text-sm h-8 ${labelError ? 'border-[#f85149] focus-visible:ring-[#f85149]' : 'border-[#30363d]'} ${modalStyles['modal-radius']}`}
+                className={`bg-secondary text-sm h-8 ${labelError ? 'border-destructive focus-visible:ring-destructive' : 'border-border'} ${modalStyles['modal-radius']}`}
               />
-              {labelError && <p className="text-[11px] text-[#f85149]">Label is required</p>}
+              {labelError && <p className="text-[11px] text-destructive">Label is required</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -320,7 +320,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 value={form.hostname ?? ''}
                 onChange={(e) => set('hostname', e.target.value)}
                 placeholder="server.lan"
-                className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
+                className={`bg-secondary border-border font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
               />
             </div>
 
@@ -331,7 +331,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 value={form.ip ?? ''}
                 onChange={(e) => set('ip', e.target.value)}
                 placeholder="192.168.1.x, 2001:db8::1"
-                className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
+                className={`bg-secondary border-border font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
               />
               <span className="text-[10px] text-muted-foreground/50">comma-separated</span>
             </div>
@@ -343,10 +343,10 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 <div className="flex flex-col gap-1.5">
                   <Label className="text-xs text-muted-foreground">Check Method</Label>
                   <Select value={form.check_method ?? 'ping'} onValueChange={(v) => set('check_method', v as CheckMethod)}>
-                    <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Check method selector">
+                    <SelectTrigger className={`bg-secondary border-border text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Check method selector">
                       <SelectValue>{CHECK_METHOD_LABELS[(form.check_method ?? 'ping') as CheckMethod]}</SelectValue>
                     </SelectTrigger>
-                    <SelectContent className="bg-[#21262d] border-[#30363d]">
+                    <SelectContent className="bg-secondary border-border">
                       {CHECK_METHODS.map((m) => (
                         <SelectItem key={m} value={m} className="text-sm">{CHECK_METHOD_LABELS[m]}</SelectItem>
                       ))}
@@ -360,7 +360,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     value={form.check_target ?? ''}
                     onChange={(e) => set('check_target', e.target.value)}
                     placeholder={CHECK_TARGET_PLACEHOLDERS[(form.check_method ?? 'ping') as CheckMethod]}
-                    className={`bg-[#21262d] border-[#30363d] font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
+                    className={`bg-secondary border-border font-mono text-sm h-8 ${modalStyles['modal-radius']}`}
                   />
                 </div>
               </div>
@@ -385,14 +385,14 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     value={form.parent_id ?? 'none'}
                     onValueChange={(v) => set('parent_id', v === 'none' ? undefined : v)}
                   >
-                    <SelectTrigger className={`bg-[#21262d] border-[#30363d] text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Parent container selector">
+                    <SelectTrigger className={`bg-secondary border-border text-sm h-8 cursor-pointer ${modalStyles['modal-interactive']} ${modalStyles['modal-radius']}`} aria-label="Parent container selector">
                       <SelectValue>
                         {form.parent_id
                           ? (validParents.find((n) => n.id === form.parent_id)?.label ?? 'None')
                           : 'None'}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent className="bg-[#21262d] border-[#30363d]">
+                    <SelectContent className="bg-secondary border-border">
                       <SelectItem value="none" className="text-sm">None</SelectItem>
                       {validParents.map((n) => (
                         <SelectItem key={n.id} value={n.id} className="text-sm">{n.label}</SelectItem>
@@ -418,7 +418,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                   className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none ${modalStyles['modal-interactive']}`}
                   tabIndex={0}
                   aria-label="Container Mode"
-                  style={{ background: form.container_mode ? '#ff6e00' : '#30363d' }}
+                  style={{ background: form.container_mode ? '#ff6e00' : 'var(--border)' }}
                 >
                   <span
                     className="pointer-events-none absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all"
@@ -436,14 +436,14 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 onChange={(e) => set('notes', e.target.value)}
                 placeholder="Optional notes"
                 rows={3}
-                className={`bg-[#21262d] border-[#30363d] text-sm resize-y min-h-16 ${modalStyles['modal-radius']}`}
+                className={`bg-secondary border-border text-sm resize-y min-h-16 ${modalStyles['modal-radius']}`}
               />
             </div>
             </div>{/* ── end LEFT column ── */}
 
             {/* ── RIGHT column: display ── */}
             <div className="flex flex-col gap-4 min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-[#30363d]">Design</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pb-1 border-b border-border">Design</div>
             {/* Service visibility */}
             {form.type !== 'groupRect' && form.type !== 'group' && (
               <div className="flex items-start justify-between col-span-2 py-1">
@@ -461,7 +461,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     show_services: !showServicesEnabled,
                   })}
                   className={`relative inline-flex h-5 w-9 mt-1 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none ${modalStyles['modal-interactive']}`}
-                  style={{ background: showServicesEnabled ? resolvedNodeColors.icon : '#30363d' }}
+                  style={{ background: showServicesEnabled ? resolvedNodeColors.icon : 'var(--border)' }}
                 >
                   <span
                     className="pointer-events-none absolute top-px left-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ease-in-out"
@@ -504,7 +504,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     <div key={key} className="flex flex-col gap-1 items-center">
                       <label
                         className={`relative w-full h-7 rounded-md border cursor-pointer overflow-hidden transition-all ${modalStyles['modal-interactive']}`}
-                        style={{ borderColor: isCustom ? currentValue : '#30363d' }}
+                        style={{ borderColor: isCustom ? currentValue : 'var(--border)' }}
                         title={`${key.charAt(0).toUpperCase() + key.slice(1)}: ${currentValue}`}
                         tabIndex={0}
                         aria-label={`Color picker for ${key}`}
@@ -531,7 +531,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 <button
                   type="button"
                   onClick={() => onEditTypeStyle((form.type ?? 'generic') as NodeType)}
-                  className="flex items-center gap-1 self-start text-[10px] text-[#00d4ff] hover:underline"
+                  className="flex items-center gap-1 self-start text-[10px] text-primary hover:underline"
                 >
                   <Palette size={10} /> Edit {NODE_TYPE_LABELS[form.type ?? 'generic']} style for all nodes on the canvas
                 </button>
@@ -583,7 +583,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                     className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none ${modalStyles['modal-interactive']}`}
                     tabIndex={0}
                     aria-label="Toggle port numbers"
-                    style={{ background: form.show_port_numbers ? '#ff6e00' : '#30363d' }}
+                    style={{ background: form.show_port_numbers ? '#ff6e00' : 'var(--border)' }}
                   >
                     <span
                       className="pointer-events-none absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all"
@@ -604,7 +604,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-[#f85149] hover:text-[#f85149] hover:bg-[#f85149]/10 cursor-pointer"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
                 onClick={() => {
                   if (window.confirm('Delete this node?')) {
                     onSubmit({ ...form, _delete: true })
@@ -623,7 +623,7 @@ export function NodeModal({ open, onClose, onSubmit, initial, title = 'Add Node'
               <Button
                 type="submit"
                 size="sm"
-                className="bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90 cursor-pointer"
+                className="bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
               >
                 {title === 'Add Node' ? 'Add' : 'Save'}
               </Button>

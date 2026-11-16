@@ -17,6 +17,7 @@ vi.mock('@xyflow/react', () => ({
 
 vi.mock('@/stores/themeStore', () => ({
   useThemeStore: (sel: (s: { activeTheme: string }) => unknown) => sel({ activeTheme: 'dark' }),
+  selectCanvasTheme: (s: { activeTheme: string }) => s.activeTheme,
 }))
 
 vi.mock('@/stores/canvasStore', () => ({

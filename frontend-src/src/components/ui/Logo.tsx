@@ -38,7 +38,7 @@ export function Logo({ size = 32, showText = true, className = '' }: LogoProps) 
           style={{ fontSize: size * 0.55, fontFamily: 'Inter, sans-serif' }}
         >
           <span style={{ color: '#00d4ff' }}>Home</span>
-          <span style={{ color: '#ffffff' }}>lable</span>
+          <span style={{ color: 'var(--foreground, #ffffff)' }}>lable</span>
         </span>
       )}
     </div>

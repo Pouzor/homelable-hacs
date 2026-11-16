@@ -30,7 +30,7 @@ interface MarkerShapePickerProps {
 export function MarkerShapePicker({ label, value, onChange }: MarkerShapePickerProps) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-[#8b949e] w-10 shrink-0">{label}</span>
+      <span className="text-xs text-muted-foreground w-10 shrink-0">{label}</span>
       <div className="flex gap-1 flex-wrap">
         {MARKER_SHAPES.map((shape) => {
           const active = value === shape
@@ -44,12 +44,12 @@ export function MarkerShapePicker({ label, value, onChange }: MarkerShapePickerP
               title={shape}
               className="w-7 h-7 rounded border flex items-center justify-center transition-colors shrink-0"
               style={{
-                borderColor: active ? '#00d4ff' : '#30363d',
-                background: active ? '#00d4ff22' : 'transparent',
+                borderColor: active ? 'var(--primary)' : 'var(--border)',
+                background: active ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'transparent',
               }}
             >
               <svg width={16} height={16} viewBox="0 0 16 16">
-                {markerGlyph(shape, active ? '#00d4ff' : '#8b949e')}
+                {markerGlyph(shape, active ? 'var(--primary)' : 'var(--muted-foreground)')}
               </svg>
             </button>
           )

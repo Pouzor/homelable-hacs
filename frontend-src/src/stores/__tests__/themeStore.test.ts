@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useThemeStore } from '@/stores/themeStore'
+import { INTERFACE_THEME_STORAGE_KEY, selectCanvasTheme, selectInterfaceIsLight, useThemeStore } from '@/stores/themeStore'
 import type { CustomStyleDef } from '@/types'
 
 describe('themeStore', () => {
@@ -50,5 +50,42 @@ describe('themeStore', () => {
     useThemeStore.getState().setCustomStyle({ nodes: { server: { borderColor: '#aaa', borderOpacity: 1, bgColor: '#000', bgOpacity: 1, iconColor: '#aaa', iconOpacity: 1, width: 0, height: 0 } }, edges: {} })
     useThemeStore.getState().setCustomStyle({ nodes: {}, edges: {} })
     expect(useThemeStore.getState().customStyle.nodes).toEqual({})
+  })
+})
+
+describe('themeStore — Home Assistant theme', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useThemeStore.setState({ activeTheme: 'default', interfaceTheme: 'ha', haDarkMode: false })
+  })
+
+  it("resolves the 'ha' canvas style to Light or Dark from HA's mode", () => {
+    useThemeStore.getState().setTheme('ha')
+    expect(selectCanvasTheme(useThemeStore.getState())).toBe('light')
+    useThemeStore.getState().setHaDarkMode(true)
+    expect(selectCanvasTheme(useThemeStore.getState())).toBe('dark')
+    // The saved choice stays 'ha' so it keeps following HA.
+    expect(useThemeStore.getState().activeTheme).toBe('ha')
+  })
+
+  it('passes every other canvas style through unchanged', () => {
+    useThemeStore.getState().setHaDarkMode(true)
+    useThemeStore.getState().setTheme('neon')
+    expect(selectCanvasTheme(useThemeStore.getState())).toBe('neon')
+  })
+
+  it('persists the interface choice', () => {
+    useThemeStore.getState().setInterfaceTheme('homelable')
+    expect(useThemeStore.getState().interfaceTheme).toBe('homelable')
+    expect(localStorage.getItem(INTERFACE_THEME_STORAGE_KEY)).toBe('homelable')
+  })
+
+  it('renders the interface light only in HA light mode', () => {
+    expect(selectInterfaceIsLight(useThemeStore.getState())).toBe(true)
+    useThemeStore.getState().setHaDarkMode(true)
+    expect(selectInterfaceIsLight(useThemeStore.getState())).toBe(false)
+    useThemeStore.getState().setHaDarkMode(false)
+    useThemeStore.getState().setInterfaceTheme('homelable')
+    expect(selectInterfaceIsLight(useThemeStore.getState())).toBe(false)
   })
 })

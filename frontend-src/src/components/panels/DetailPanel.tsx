@@ -14,6 +14,7 @@ import { primaryIp } from '@/utils/maskIp'
 import { formatTimestamp } from '@/utils/timeFormat'
 import { PropertyList } from '@/components/common/PropertyList'
 import type { Node } from '@xyflow/react'
+import { badgeInk } from '@/utils/badgeColor'
 
 interface DetailPanelProps {
   onEdit: (id: string) => void
@@ -168,7 +169,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
   }
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-[#161b22] overflow-y-auto">
+    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-popover overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <span className="font-semibold text-sm text-foreground truncate">{data.label}</span>
         <button aria-label="Close panel" onClick={() => setSelectedNode(null)} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
@@ -197,7 +198,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         {data.hostname && (
           <div className="flex justify-between gap-2 items-baseline">
             <span className="text-muted-foreground text-xs shrink-0">Hostname</span>
-            <a href={`http://${data.hostname}`} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-[#00d4ff] hover:underline truncate flex items-center gap-1" title={data.hostname}>
+            <a href={`http://${data.hostname}`} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-primary hover:underline truncate flex items-center gap-1" title={data.hostname}>
               {data.hostname}<ExternalLink size={10} className="shrink-0" />
             </a>
           </div>
@@ -205,7 +206,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         {data.ip && (
           <div className="flex justify-between gap-2 items-baseline">
             <span className="text-muted-foreground text-xs shrink-0">IP Address</span>
-            <a href={`http://${primaryIp(data.ip)}`} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-[#00d4ff] hover:underline truncate flex items-center gap-1" title={data.ip}>
+            <a href={`http://${primaryIp(data.ip)}`} target="_blank" rel="noopener noreferrer" className="text-xs font-mono text-primary hover:underline truncate flex items-center gap-1" title={data.ip}>
               {data.ip}<ExternalLink size={10} className="shrink-0" />
             </a>
           </div>
@@ -222,7 +223,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         {data.device_id && onOpenInventory && (
           <button
             onClick={() => onOpenInventory(data.device_id as string)}
-            className="mt-1 flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors cursor-pointer"
+            className="mt-1 flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer"
           >
             <Boxes size={10} /> Open in inventory
           </button>
@@ -242,7 +243,7 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
       <div className="px-4 py-3 border-t border-border">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-muted-foreground">Services{services.length > 0 ? ` (${services.length})` : ''}</span>
-          <button onClick={() => setSvcModal({ nodeId: node.id, index: null })} className="flex items-center gap-1 text-[10px] text-[#00d4ff] hover:text-[#00d4ff]/80 transition-colors cursor-pointer">
+          <button onClick={() => setSvcModal({ nodeId: node.id, index: null })} className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer">
             <Plus size={10} /> Add
           </button>
         </div>
@@ -344,7 +345,7 @@ function CheckNowButton({ nodeId, method, className = '' }: { nodeId: string; me
       title={`Check now (${method}). Uses the saved node settings.`}
       disabled={checking}
       onClick={() => { void run() }}
-      className={`${className} text-muted-foreground hover:text-[#00d4ff] disabled:opacity-60 disabled:cursor-wait transition-colors cursor-pointer`}
+      className={`${className} text-muted-foreground hover:text-primary disabled:opacity-60 disabled:cursor-wait transition-colors cursor-pointer`}
     >
       <RefreshCw size={14} className={checking ? 'animate-spin' : ''} />
     </button>
@@ -446,10 +447,10 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
   }
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-[#161b22] overflow-y-auto">
+    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-popover overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
-          <Layers size={14} className="text-[#00d4ff]" />
+          <Layers size={14} className="text-primary" />
           <span className="font-semibold text-sm text-foreground">{nodeIds.length} nodes selected</span>
         </div>
         <button aria-label="Close panel" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -459,7 +460,7 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
 
       <div className="flex-1 px-4 py-3 space-y-1.5 overflow-y-auto">
         {selectedNodes.map((n) => (
-          <div key={n.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#21262d] text-xs">
+          <div key={n.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-secondary text-xs">
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLORS[n.data.status] }} />
             <span className="truncate text-foreground font-medium">{n.data.label}</span>
             <span className="ml-auto text-muted-foreground shrink-0">{NODE_TYPE_LABELS[n.data.type] ?? n.data.type}</span>
@@ -476,10 +477,10 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
               value={groupName}
               onChange={(e) => setGroupName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setCreatingGroup(false) }}
-              className="bg-[#21262d] border-[#30363d] text-xs h-7"
+              className="bg-secondary border-border text-xs h-7"
             />
             <div className="flex gap-2">
-              <Button size="sm" className="flex-1 h-7 text-[10px] bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90" onClick={handleCreate}>
+              <Button size="sm" className="flex-1 h-7 text-[10px] bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreate}>
                 Create Group
               </Button>
               <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setCreatingGroup(false)}>
@@ -490,7 +491,7 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
         ) : (
           <Button
             size="sm"
-            className="w-full gap-2 bg-[#00d4ff]/10 text-[#00d4ff] border border-[#00d4ff]/30 hover:bg-[#00d4ff]/20"
+            className="w-full gap-2 bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20"
             variant="ghost"
             onClick={() => setCreatingGroup(true)}
           >
@@ -542,10 +543,10 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
   }
 
   return (
-    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-[#161b22] overflow-y-auto">
+    <aside className="w-72 shrink-0 flex flex-col border-l border-border bg-popover overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2 min-w-0">
-          <Layers size={14} className="text-[#00d4ff] shrink-0" />
+          <Layers size={14} className="text-primary shrink-0" />
           <span className="font-semibold text-sm text-foreground truncate">{node.data.label}</span>
         </div>
         <button aria-label="Close panel" onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
@@ -572,7 +573,7 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
           onChange={(e) => handleDescriptionChange(e.target.value)}
           placeholder="Add a description for this group…"
           rows={3}
-          className="mt-1.5 w-full resize-y rounded-md bg-[#21262d] border border-[#30363d] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-[#00d4ff]/50"
+          className="mt-1.5 w-full resize-y rounded-md bg-secondary border border-border px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-primary/50"
         />
       </div>
 
@@ -583,7 +584,7 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
         {children.map((child) => (
           <div
             key={child.id}
-            className="group/member w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#21262d] text-xs hover:bg-[#30363d] transition-colors"
+            className="group/member w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-secondary text-xs hover:bg-border transition-colors"
           >
             <button
               onClick={() => onSelectChild(child.id)}
@@ -597,7 +598,7 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
               onClick={() => onRemoveChild(child.id)}
               aria-label={`Remove ${child.data.label} from group`}
               title="Remove from group"
-              className="shrink-0 opacity-0 group-hover/member:opacity-100 transition-opacity text-[#8b949e] hover:text-[#f85149] cursor-pointer"
+              className="shrink-0 opacity-0 group-hover/member:opacity-100 transition-opacity text-muted-foreground hover:text-destructive cursor-pointer"
             >
               <X size={12} />
             </button>
@@ -609,7 +610,7 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
       <div className="px-4 py-3 border-t border-border space-y-2">
         <button
           onClick={onToggleBorder}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-[#21262d] transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
         >
           {showBorder ? <Eye size={13} /> : <EyeOff size={13} />}
           {showBorder ? 'Hide border & title' : 'Show border & title'}
@@ -633,7 +634,7 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
   return (
     <div className="flex justify-between gap-2 items-baseline">
       <span className="text-muted-foreground text-xs shrink-0">{label}</span>
-      <span className={`text-xs text-right truncate ${mono ? 'font-mono text-[#00d4ff]' : 'text-foreground'}`} title={value}>
+      <span className={`text-xs text-right truncate ${mono ? 'font-mono text-primary' : 'text-foreground'}`} title={value}>
         {value}
       </span>
     </div>
@@ -679,14 +680,14 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
       onDrop={(e) => { e.preventDefault(); onDrop() }}
       className="group flex items-center justify-between gap-2 px-2 py-1.5 rounded-md border text-xs transition-colors min-w-0"
       style={{
-        background: '#21262d',
-        borderColor: isDragOver ? '#00d4ff' : '#30363d',
+        background: 'var(--secondary)',
+        borderColor: isDragOver ? 'var(--primary)' : 'var(--border)',
         opacity: isDragging ? 0.4 : 1,
       }}
     >
       <div className="flex items-center gap-1.5 min-w-0 flex-1">
         {draggable && (
-          <span className="shrink-0 cursor-grab active:cursor-grabbing text-[#8b949e] hover:text-[#00d4ff]" title="Drag to reorder">
+          <span className="shrink-0 cursor-grab active:cursor-grabbing text-muted-foreground hover:text-primary" title="Drag to reorder">
             {createElement(GripVertical, { size: 11 })}
           </span>
         )}
@@ -699,7 +700,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
             target="_blank"
             rel="noopener noreferrer"
             className="font-medium truncate min-w-0 flex-1"
-            style={{ color }}
+            style={{ color: badgeInk(color) }}
             title={svc.service_name ?? undefined}
             onClick={e => e.stopPropagation()}
           >
@@ -708,7 +709,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
         ) : (
           <span
             className="font-medium truncate min-w-0 flex-1"
-            style={{ color }}
+            style={{ color: badgeInk(color) }}
             title={svc.service_name ?? undefined}
           >
             {svc.service_name}
@@ -717,7 +718,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
 
         {pathLabel && (
           <span
-            className="shrink-0 text-[#8b949e] text-right w-16 truncate"
+            className="shrink-0 text-muted-foreground text-right w-16 truncate"
             title={pathLabel}
           >
             {pathLabel}
@@ -727,7 +728,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
 
       <div className="flex items-center gap-1.5 shrink-0">
         {svc.port != null && (
-          <span className="font-mono text-[#8b949e]">
+          <span className="font-mono text-muted-foreground">
             {svc.port}/{svc.protocol}
           </span>
         )}
@@ -748,7 +749,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
 
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleVisible() }}
-          className="text-[#8b949e] hover:text-[#00d4ff] ml-0.5 cursor-pointer transition-colors"
+          className="text-muted-foreground hover:text-primary ml-0.5 cursor-pointer transition-colors"
           title={shown ? 'Hide on node' : 'Show on node'}
         >
           {shown ? <Eye size={10} /> : <EyeOff size={10} />}
@@ -756,7 +757,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
 
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit() }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity text-[#8b949e] hover:text-[#00d4ff] ml-0.5 cursor-pointer"
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary ml-0.5 cursor-pointer"
           title="Edit service"
         >
           <Pencil size={10} />
@@ -764,7 +765,7 @@ function ServiceBadge({ svc, host, status, draggable, isDragging, isDragOver, on
 
         <button
           onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove() }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity text-[#8b949e] hover:text-[#f85149] ml-0.5 cursor-pointer"
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive ml-0.5 cursor-pointer"
           title="Remove service"
         >
           <X size={10} />

@@ -1,6 +1,6 @@
 import type { NodeType, EdgeType, NodeStatus } from '@/types'
 
-export type ThemeId = 'default' | 'dark' | 'light' | 'neon' | 'matrix' | 'custom'
+export type ThemeId = 'default' | 'dark' | 'light' | 'neon' | 'matrix' | 'custom' | 'ha'
 
 export interface ThemeColors {
   // Per node-type accent (border + icon)
@@ -35,7 +35,7 @@ export interface ThemePreset {
   colors: ThemeColors
 }
 
-export const THEMES: Record<ThemeId, ThemePreset> = {
+const PRESETS: Record<Exclude<ThemeId, 'ha'>, ThemePreset> = {
   default: {
     id: 'default',
     label: 'Default',
@@ -535,5 +535,26 @@ export const THEMES: Record<ThemeId, ThemePreset> = {
   },
 }
 
+/**
+ * 'ha' is not a palette of its own: it follows Home Assistant's dark mode and
+ * renders as the Light or Dark preset. Its THEMES entry only exists so the
+ * record stays total — render code always goes through `resolveThemeId`.
+ */
+export const THEMES: Record<ThemeId, ThemePreset> = {
+  ...PRESETS,
+  ha: {
+    ...PRESETS.light,
+    id: 'ha',
+    label: 'Home Assistant',
+    description: 'Follows the Home Assistant light / dark mode',
+  },
+}
+
+/** The preset actually drawn for a theme choice. */
+export function resolveThemeId(id: ThemeId, haDarkMode: boolean): Exclude<ThemeId, 'ha'> {
+  if (id === 'ha') return haDarkMode ? 'dark' : 'light'
+  return id
+}
+
 // Ordered list for display in the modal
-export const THEME_ORDER: ThemeId[] = ['default', 'dark', 'light', 'neon', 'matrix', 'custom']
+export const THEME_ORDER: ThemeId[] = ['default', 'ha', 'dark', 'light', 'neon', 'matrix', 'custom']

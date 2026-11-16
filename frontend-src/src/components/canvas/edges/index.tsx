@@ -10,7 +10,7 @@ import {
   type Edge,
 } from '@xyflow/react'
 import type { EdgeData, EdgeLineStyle, EdgeType, Waypoint } from '@/types'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { THEMES } from '@/utils/themes'
 import { MARKER_GEOMETRY, normalizeMarker, type NonNoneMarkerShape } from '@/utils/edgeMarkers'
@@ -318,7 +318,7 @@ export function HomelableEdge({ id, source, target, sourceHandleId, targetHandle
     setDrag(pos ? { role: 'target', x: pos.x, y: pos.y } : null)
   }, [])
 
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const theme = THEMES[activeTheme]
   const sourceType = useStore((s) => s.nodeLookup.get(source)?.type)
   const targetType = useStore((s) => s.nodeLookup.get(target)?.type)

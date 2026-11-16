@@ -29,7 +29,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-[#0d1117]">
+    <div className="flex h-screen w-screen items-center justify-center bg-background">
       {/* Grid background */}
       <div
         className="absolute inset-0 opacity-[0.03]"
@@ -42,8 +42,8 @@ export function LoginPage() {
       <div className="relative w-full max-w-sm px-4">
         {/* Logo */}
         <div className="flex flex-col items-center gap-3 mb-8">
-          <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-[#00d4ff]/10 border border-[#00d4ff]/20">
-            <Network size={28} className="text-[#00d4ff]" />
+          <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-primary/10 border border-primary/20">
+            <Network size={28} className="text-primary" />
           </div>
           <div className="text-center">
             <h1 className="text-xl font-semibold text-foreground tracking-wide">Homelable</h1>
@@ -54,7 +54,7 @@ export function LoginPage() {
         {/* Form */}
         <form
           onSubmit={handleSubmit}
-          className="flex flex-col gap-4 bg-[#161b22] border border-[#30363d] rounded-xl p-6"
+          className="flex flex-col gap-4 bg-popover border border-border rounded-xl p-6"
         >
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="username" className="text-xs text-muted-foreground">Username</Label>
@@ -63,7 +63,7 @@ export function LoginPage() {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="bg-[#21262d] border-[#30363d] focus-visible:ring-[#00d4ff]/50 text-sm"
+              className="bg-secondary border-border focus-visible:ring-primary/50 text-sm"
               placeholder="admin"
               required
             />
@@ -77,19 +77,19 @@ export function LoginPage() {
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="bg-[#21262d] border-[#30363d] focus-visible:ring-[#00d4ff]/50 text-sm"
+              className="bg-secondary border-border focus-visible:ring-primary/50 text-sm"
               required
             />
           </div>
 
           {error && (
-            <p className="text-xs text-[#f85149] text-center">{error}</p>
+            <p className="text-xs text-destructive text-center">{error}</p>
           )}
 
           <Button
             type="submit"
             disabled={loading}
-            className="mt-1 bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90 font-medium"
+            className="mt-1 bg-primary text-primary-foreground hover:bg-primary/90 font-medium"
           >
             {loading ? <Loader2 size={15} className="animate-spin" /> : 'Sign in'}
           </Button>

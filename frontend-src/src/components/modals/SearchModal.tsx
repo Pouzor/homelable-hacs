@@ -61,7 +61,7 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-24" onClick={onClose}>
       <div
-        className="bg-[#161b22] border border-border rounded-lg shadow-2xl w-full max-w-md"
+        className="bg-popover border border-border rounded-lg shadow-2xl w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
@@ -86,10 +86,10 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
             {nodeResults.map((node) => (
               <li
                 key={node.id}
-                className="flex items-center gap-3 px-4 py-2 hover:bg-[#21262d] cursor-pointer"
+                className="flex items-center gap-3 px-4 py-2 hover:bg-secondary cursor-pointer"
                 onClick={() => handleSelectNode(node.id)}
               >
-                <span className="text-xs font-mono text-[#00d4ff] w-16 shrink-0">{node.data.type}</span>
+                <span className="text-xs font-mono text-primary w-16 shrink-0">{node.data.type}</span>
                 <span className="text-sm text-foreground font-medium flex-1 truncate">{node.data.label}</span>
                 {node.data.ip && (
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{node.data.ip}</span>
@@ -106,10 +106,10 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
               return (
                 <li
                   key={device.id}
-                  className="flex items-center gap-3 px-4 py-2 hover:bg-[#21262d] cursor-pointer"
+                  className="flex items-center gap-3 px-4 py-2 hover:bg-secondary cursor-pointer"
                   onClick={() => handleSelectPending(device.id)}
                 >
-                  <span className="text-xs font-mono text-[#e3b341] w-16 shrink-0">pending</span>
+                  <span className="text-xs font-mono text-warning w-16 shrink-0">pending</span>
                   <span className="text-sm text-foreground font-medium flex-1 truncate font-mono">{device.hostname ?? device.ip}</span>
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{serviceName ?? device.ip}</span>
                 </li>

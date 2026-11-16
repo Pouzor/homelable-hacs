@@ -41,7 +41,7 @@ const DEFAULT_COLOR = '#2b323c'
 type Source = 'inventory' | 'new' | 'accessory'
 
 const inputBase =
-  'rounded border border-[#30363d] bg-[#21262d] px-2 py-1 text-sm text-foreground outline-none focus:border-[#00d4ff]'
+  'rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground outline-none focus:border-primary'
 const inputClass = `w-full ${inputBase}`
 const fieldLabel = 'text-xs text-muted-foreground'
 
@@ -357,7 +357,7 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
       {/* Wider than NodeModal: the form is two columns, and under them sits the
           faceplate at rack proportions — the plate is where ports are placed, so
           it has to be big enough to aim at. */}
-      <DialogContent className="border-[#30363d] bg-[#161b22] text-foreground max-w-[calc(100%-2rem)] sm:max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="border-border bg-popover text-foreground max-w-[calc(100%-2rem)] sm:max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">
             {isEdit ? 'Edit Device' : 'Add Device'}
@@ -381,8 +381,8 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                     onClick={() => pickSource(value)}
                     className={`flex-1 cursor-pointer rounded border px-2 py-1 text-xs ${
                       source === value
-                        ? 'border-[#00d4ff] text-[#00d4ff]'
-                        : 'border-[#30363d] text-muted-foreground hover:text-foreground'
+                        ? 'border-primary text-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     {text}
@@ -414,14 +414,14 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                     aria-label="Faceplate"
                     data-faceplate={faceplateId}
                     onClick={() => setPickerOpen(true)}
-                    className="flex max-w-[65%] cursor-pointer items-center gap-1.5 rounded border border-[#30363d] px-2 py-0.5 text-[11px] hover:border-[#00d4ff]"
+                    className="flex max-w-[65%] cursor-pointer items-center gap-1.5 rounded border border-border px-2 py-0.5 text-[11px] hover:border-primary"
                   >
                     {/* The current plate names itself; `Change` is what says the
                         name is a button and not a read-out. */}
                     <span className="truncate text-muted-foreground">
                       {getFaceplate(faceplateId).label}
                     </span>
-                    <span className="shrink-0 text-[#00d4ff]">Change</span>
+                    <span className="shrink-0 text-primary">Change</span>
                   </button>
                 }
               >
@@ -435,11 +435,11 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                 onClose={() => setPickerOpen(false)}
               />
               {plateChanged && isEdit && (
-                <p className="text-[11px] text-[#e3b341]">
+                <p className="text-[11px] text-warning">
                   Changing the plate replaces its ports and drops their patches.
                 </p>
               )}
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded border border-[#30363d] bg-[#0d1117] p-3">
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded border border-border bg-background p-3">
                 <PortPositionEditor
                   faceplateId={faceplateId}
                   label={label || getFaceplate(faceplateId).label}
@@ -473,12 +473,12 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                   aria-label="Device Inventory entry"
                   data-device-id={inventoryId}
                   onClick={() => setInventoryPickerOpen(true)}
-                  className="flex cursor-pointer flex-col items-start gap-0.5 rounded border border-[#30363d] bg-[#21262d] px-2 py-1.5 text-left hover:border-[#00d4ff]"
+                  className="flex cursor-pointer flex-col items-start gap-0.5 rounded border border-border bg-secondary px-2 py-1.5 text-left hover:border-primary"
                 >
                   <span className="text-sm">
                     {selectedEntry ? inventoryOption(selectedEntry) : 'No device picked yet'}
                   </span>
-                  <span className="text-[11px] text-[#00d4ff]">
+                  <span className="text-[11px] text-primary">
                     {selectedEntry ? 'Change device…' : 'Browse the Device Inventory…'}
                   </span>
                 </button>
@@ -616,14 +616,14 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                 <input
                   type="color"
                   aria-label="Colour override"
-                  className="h-8 flex-1 cursor-pointer rounded border border-[#30363d] bg-[#21262d]"
+                  className="h-8 flex-1 cursor-pointer rounded border border-border bg-secondary"
                   value={color ?? DEFAULT_COLOR}
                   onChange={(e) => setColor(e.target.value)}
                 />
                 <button
                   type="button"
                   onClick={() => setColor(undefined)}
-                  className="rounded border border-[#30363d] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
+                  className="rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer"
                 >
                   Reset
                 </button>
@@ -652,7 +652,7 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
                     the mount and never reaches the inventory entry. */}
                 <Field label="Show ports on the canvas">
                   <select
-                    className="h-8 w-full rounded border border-[#30363d] bg-[#21262d] px-2 text-xs cursor-pointer"
+                    className="h-8 w-full rounded border border-border bg-secondary px-2 text-xs cursor-pointer"
                     aria-label="Show ports on the canvas"
                     value={portVisibility}
                     onChange={(e) => setPortVisibility(e.target.value as PortVisibility)}
@@ -681,13 +681,13 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
 
           {/* Rule between the form and its actions, so Save never reads as part
               of the last section. */}
-          <div className="mt-1 flex items-center gap-2 border-t border-[#30363d] pt-3">
+          <div className="mt-1 flex items-center gap-2 border-t border-border pt-3">
             {isEdit && (
               <Button
                 type="button"
                 variant="ghost"
                 onClick={handleUnmount}
-                className="cursor-pointer text-[#f85149] hover:bg-[#f8514922] hover:text-[#f85149]"
+                className="cursor-pointer text-destructive hover:bg-destructive/15 hover:text-destructive"
               >
                 Unmount{device?.deviceId ? ' (stays in inventory)' : ''}
               </Button>
@@ -699,7 +699,7 @@ function DeviceForm({ deviceId, onClose }: { deviceId: string | null; onClose: (
               <Button
                 type="submit"
                 disabled={busy}
-                className="cursor-pointer bg-[#00d4ff] text-[#0d1117] hover:bg-[#00b8e0]"
+                className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {isEdit ? 'Save' : 'Add'}
               </Button>

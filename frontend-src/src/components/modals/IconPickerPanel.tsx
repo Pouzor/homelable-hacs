@@ -23,11 +23,11 @@ export function IconPickerPanel({ value, onSelect, autoFocus }: IconPickerPanelP
 
   const tabClass = (active: boolean) =>
     `text-[11px] px-2 py-1 rounded transition-colors cursor-pointer ${
-      active ? 'bg-[#21262d] text-foreground border border-[#30363d]' : 'text-muted-foreground hover:text-foreground'
+      active ? 'bg-secondary text-foreground border border-border' : 'text-muted-foreground hover:text-foreground'
     }`
 
   return (
-    <div className="flex flex-col gap-2 p-2.5 rounded-md bg-[#0d1117] border border-[#30363d]">
+    <div className="flex flex-col gap-2 p-2.5 rounded-md bg-background border border-border">
       <div className="flex gap-1 mb-1" role="tablist" aria-label="Icon source">
         <button type="button" role="tab" aria-selected={tab === 'generic'} onClick={() => setTab('generic')} className={tabClass(tab === 'generic')}>
           Generic
@@ -45,7 +45,7 @@ export function IconPickerPanel({ value, onSelect, autoFocus }: IconPickerPanelP
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search icons…"
-            className={`bg-[#21262d] border-[#30363d] text-xs h-7 ${modalStyles['modal-radius']}`}
+            className={`bg-secondary border-border text-xs h-7 ${modalStyles['modal-radius']}`}
             autoFocus={autoFocus}
           />
           <div className="flex flex-col gap-2 max-h-52 overflow-y-auto">
@@ -70,11 +70,11 @@ export function IconPickerPanel({ value, onSelect, autoFocus }: IconPickerPanelP
                           className={`flex items-center justify-center w-7 h-7 rounded transition-colors cursor-pointer ${modalStyles['modal-interactive']}`}
                           aria-label={`Select icon ${entry.label}`}
                           style={{
-                            background: isSelected ? '#00d4ff22' : 'transparent',
-                            border: isSelected ? '1px solid #00d4ff88' : '1px solid transparent',
-                            color: isSelected ? '#00d4ff' : '#8b949e',
+                            background: isSelected ? 'color-mix(in srgb, var(--primary) 13%, transparent)' : 'transparent',
+                            border: isSelected ? '1px solid color-mix(in srgb, var(--primary) 53%, transparent)' : '1px solid transparent',
+                            color: isSelected ? 'var(--primary)' : 'var(--muted-foreground)',
                           }}
-                          onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = '#21262d' }}
+                          onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'var(--secondary)' }}
                           onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                         >
                           {createElement(entry.icon, { size: 13 })}
