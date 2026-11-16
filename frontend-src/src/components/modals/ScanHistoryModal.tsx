@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { scanApi } from '@/api/client'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { toast } from 'sonner'
+import { badgeStyle } from '@/utils/badgeColor'
 
 export interface ScanRun {
   id: string
@@ -173,12 +174,12 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent
         showCloseButton={false}
-        className="!max-w-none w-[90vw] max-w-2xl h-[80vh] p-0 flex flex-col gap-0 bg-[#0d1117] border-border"
+        className="!max-w-none w-[90vw] max-w-2xl h-[80vh] p-0 flex flex-col gap-0 bg-background border-border"
       >
         <DialogHeader className="px-4 py-3 border-b border-border shrink-0">
           <div className="flex items-center justify-between gap-3">
             <DialogTitle className="text-base font-semibold flex items-center gap-2">
-              <Clock size={16} className="text-[#00d4ff]" />
+              <Clock size={16} className="text-primary" />
               Scan History
               <span className="text-muted-foreground font-normal text-xs">
                 ({filtered.length}{filtered.length !== runs.length && ` of ${runs.length}`})
@@ -203,7 +204,7 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
         </DialogHeader>
 
         {/* Filters */}
-        <div className="px-4 py-2 border-b border-border bg-[#161b22] shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="px-4 py-2 border-b border-border bg-popover shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2">
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Type</span>
             {KIND_FILTERS.map((f) => (
@@ -244,14 +245,14 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
             const advisory = r.status === 'done' && !!r.error
             const dotColor = advisory ? '#e3b341' : statusColor(r.status)
             return (
-              <div key={r.id} className="rounded-lg border border-border bg-[#161b22] p-3">
+              <div key={r.id} className="rounded-lg border border-border bg-popover p-3">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: dotColor }} />
                   <span className="font-mono text-sm text-foreground capitalize">{r.status}</span>
-                  {r.status === 'running' && <Loader2 size={12} className="animate-spin text-[#e3b341]" />}
+                  {r.status === 'running' && <Loader2 size={12} className="animate-spin text-warning" />}
                   <span
                     className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded uppercase tracking-wider"
-                    style={{ background: `${meta.color}22`, color: meta.color }}
+                    style={badgeStyle(meta.color)}
                   >
                     <KindIcon size={10} />
                     {meta.label}
@@ -266,7 +267,7 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
                           aria-label="Stop scan"
                           onClick={() => handleStop(r.id)}
                           disabled={stopping === r.id}
-                          className="p-1 text-[#f85149] hover:bg-[#f85149]/10 rounded transition-colors disabled:opacity-50"
+                          className="p-1 text-destructive hover:bg-destructive/10 rounded transition-colors disabled:opacity-50"
                         >
                           {stopping === r.id
                             ? <Loader2 size={13} className="animate-spin" />
@@ -292,15 +293,15 @@ export function ScanHistoryModal({ open, onClose }: ScanHistoryModalProps) {
                 {r.ranges.length > 0 && (
                   <div className="mt-2 text-[11px]">
                     <span className="text-muted-foreground">Ranges: </span>
-                    <span className="text-[#8b949e] font-mono break-all">{r.ranges.join(', ')}</span>
+                    <span className="text-muted-foreground font-mono break-all">{r.ranges.join(', ')}</span>
                   </div>
                 )}
 
                 {r.error && (
                   <div className={`mt-2 text-[11px] leading-tight whitespace-pre-wrap break-words rounded px-2 py-1.5 ${
                     advisory
-                      ? 'text-[#e3b341] bg-[#e3b341]/10'
-                      : 'text-[#f85149] bg-[#f85149]/10'
+                      ? 'text-warning bg-warning/10'
+                      : 'text-destructive bg-destructive/10'
                   }`}>
                     {r.error}
                   </div>
@@ -320,8 +321,8 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
       onClick={onClick}
       className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
         active
-          ? 'bg-[#00d4ff]/10 border-[#00d4ff]/40 text-[#00d4ff]'
-          : 'border-border text-muted-foreground hover:text-foreground hover:border-[#30363d]'
+          ? 'bg-primary/10 border-primary/40 text-primary'
+          : 'border-border text-muted-foreground hover:text-foreground hover:border-border'
       }`}
     >
       {children}

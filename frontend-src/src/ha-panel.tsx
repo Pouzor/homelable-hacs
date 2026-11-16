@@ -11,6 +11,8 @@ import App from './App'
 import { HassContext, setHass, type Hass } from './lib/hass'
 import { ShadowRootContext } from './lib/portal'
 import { injectShadowStyles } from './lib/shadowCss'
+import { applyInterfaceTheme } from './lib/interfaceTheme'
+import { useThemeStore } from './stores/themeStore'
 
 class HomelablePanel extends HTMLElement {
   private _hass: Hass | null = null
@@ -18,6 +20,7 @@ class HomelablePanel extends HTMLElement {
   private _mountPoint: HTMLDivElement | null = null
   private _resizeObserver: ResizeObserver | null = null
   private _onResize = () => this._applyHeight()
+  private _unsubTheme: (() => void) | null = null
 
   constructor() {
     super()
@@ -43,6 +46,7 @@ class HomelablePanel extends HTMLElement {
     const first = this._hass === null
     this._hass = value
     setHass(value)
+    useThemeStore.getState().setHaDarkMode(value.themes?.darkMode ?? false)
     if (first) this._mount()
     else this._render()
   }
@@ -67,6 +71,14 @@ class HomelablePanel extends HTMLElement {
       this._mountPoint.style.cssText = 'width: 100%; height: 100%;'
       shadow.appendChild(this._mountPoint)
     }
+    const mount = this._mountPoint
+    const syncTheme = () => {
+      const { interfaceTheme, haDarkMode } = useThemeStore.getState()
+      applyInterfaceTheme(mount, interfaceTheme, haDarkMode)
+    }
+    syncTheme()
+    this._unsubTheme?.()
+    this._unsubTheme = useThemeStore.subscribe(syncTheme)
     this._applyHeight()
     window.addEventListener('resize', this._onResize)
     if (typeof ResizeObserver !== 'undefined' && !this._resizeObserver) {
@@ -80,6 +92,8 @@ class HomelablePanel extends HTMLElement {
 
   disconnectedCallback() {
     window.removeEventListener('resize', this._onResize)
+    this._unsubTheme?.()
+    this._unsubTheme = null
     this._resizeObserver?.disconnect()
     this._resizeObserver = null
     if (this._root) {

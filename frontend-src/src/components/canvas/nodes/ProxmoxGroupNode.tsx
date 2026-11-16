@@ -8,7 +8,7 @@ import { NodeIcon } from '@/components/ui/NodeIcon'
 import { resolvePropertyIcon } from '@/utils/propertyIcons'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { maskIp, splitIps } from '@/utils/maskIp'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { BaseNode } from './BaseNode'
 import { SideHandles } from './SideHandles'
@@ -18,7 +18,7 @@ export function ProxmoxGroupNode(props: NodeProps<Node<NodeData>>) {
   const updateNodeInternals = useUpdateNodeInternals()
   useEffect(() => { updateNodeInternals(id) }, [data.top_handles, data.bottom_handles, data.left_handles, data.right_handles, id, updateNodeInternals])
 
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const hideIp = useCanvasStore((s) => s.hideIp)
   const theme = THEMES[activeTheme]
   const colors = resolveNodeColors(data, activeTheme)

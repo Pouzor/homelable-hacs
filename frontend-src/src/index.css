@@ -56,11 +56,79 @@
     --surface-base: #0d1117;
     --surface-elevated: #161b22;
     --surface-card: #21262d;
+
+    --success: var(--status-online);
+    --warning: var(--status-pending);
+
+    /* How far accent badge text is pulled toward --foreground (utils/badgeColor.ts). */
+    --badge-ink-mix: 0%;
+
+    --hl-font-sans: 'Inter Variable', 'Inter', sans-serif;
+    --hl-font-mono: 'JetBrains Mono', monospace;
+}
+
+/*
+ * Home Assistant interface theme. Set on the panel mount point (see
+ * lib/interfaceTheme.ts), so it reaches every portal too. Each token reads
+ * HA's own theme variable — custom properties inherit through the shadow
+ * boundary — so the panel follows HA light/dark and any user theme. The
+ * fallbacks are HA's stock light values.
+ */
+.homelable-ha {
+    --background: var(--primary-background-color, #fafafa);
+    --foreground: var(--primary-text-color, #212121);
+    --card: var(--card-background-color, #ffffff);
+    --card-foreground: var(--primary-text-color, #212121);
+    --popover: var(--card-background-color, #ffffff);
+    --popover-foreground: var(--primary-text-color, #212121);
+    --primary: var(--primary-color, #03a9f4);
+    --primary-foreground: var(--text-primary-color, #ffffff);
+    --secondary: var(--secondary-background-color, #e5e5e5);
+    --secondary-foreground: var(--primary-text-color, #212121);
+    --muted: var(--secondary-background-color, #e5e5e5);
+    --muted-foreground: var(--secondary-text-color, #727272);
+    --accent: var(--secondary-background-color, #e5e5e5);
+    --accent-foreground: var(--primary-color, #03a9f4);
+    --destructive: var(--error-color, #db4437);
+    --border: var(--divider-color, rgba(0, 0, 0, 0.12));
+    --input: var(--secondary-background-color, #e5e5e5);
+    --ring: var(--primary-color, #03a9f4);
+    --radius: var(--ha-card-border-radius, 12px);
+
+    --status-online: var(--success-color, #43a047);
+    --status-offline: var(--error-color, #db4437);
+    --status-pending: var(--warning-color, #ffa600);
+    --status-unknown: var(--disabled-text-color, #bdbdbd);
+
+    --accent-cyan: var(--primary-color, #03a9f4);
+
+    --surface-base: var(--primary-background-color, #fafafa);
+    --surface-elevated: var(--card-background-color, #ffffff);
+    --surface-card: var(--secondary-background-color, #e5e5e5);
+
+    /* HA's success / warning greens and ambers are tuned as fills; darken
+       them for text on a light background, as the badges are. */
+    --badge-ink-mix: 45%;
+    --success: color-mix(in srgb, var(--status-online), var(--foreground) var(--badge-ink-mix));
+    --warning: color-mix(in srgb, var(--status-pending), var(--foreground) var(--badge-ink-mix));
+
+    --hl-font-sans: var(--ha-font-family-body, var(--mdc-typography-font-family, var(--paper-font-body1_-_font-family, Roboto, Noto, sans-serif)));
+    --hl-font-mono: var(--ha-font-family-code, var(--code-font-family, 'Roboto Mono', monospace));
+
+    font-family: var(--hl-font-sans);
+    color: var(--foreground);
+    color-scheme: light;
+}
+.homelable-ha.homelable-ha-dark {
+    color-scheme: dark;
+    --badge-ink-mix: 0%;
 }
 
 @theme inline {
-    --font-sans: 'Inter Variable', 'Inter', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-sans: var(--hl-font-sans);
+    --font-mono: var(--hl-font-mono);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -113,6 +181,9 @@
     background-color: var(--surface-elevated) !important;
     border: 1px solid var(--border) !important;
     border-radius: var(--radius) !important;
+    /* Clip the square buttons to the rounded box — HA's card radius (12px)
+       otherwise leaves the first / last button poking out of the corners. */
+    overflow: hidden;
 }
 .react-flow__controls-button {
     background-color: var(--surface-elevated) !important;
@@ -134,7 +205,7 @@
 
 /* Mono font utility */
 .font-mono {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--hl-font-mono);
 }
 
 /* Edge flow animation — dot traveling from source to target */

@@ -25,7 +25,7 @@ import '@xyflow/react/dist/style.css'
 import { canvasApi } from '@/api/client'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { hydrateCanvasPayload } from '@/utils/canvasPayload'
 import { THEMES } from '@/utils/themes'
 import { nodeTypes } from '@/components/canvas/nodes/nodeTypes'
@@ -51,7 +51,7 @@ function CanvasBody({ config }: ReadOnlyCanvasProps) {
   const setFloorMap = useCanvasStore((s) => s.setFloorMap)
   const setTheme = useThemeStore((s) => s.setTheme)
   const setCustomStyle = useThemeStore((s) => s.setCustomStyle)
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const theme = THEMES[activeTheme]
   const { fitView } = useReactFlow()
   const [state, setState] = useState<LoadState>('loading')
@@ -61,6 +61,8 @@ function CanvasBody({ config }: ReadOnlyCanvasProps) {
   // HA's own theme is the fallback for a canvas that never picked one, so a
   // fresh design doesn't sit light-on-dark in a dark dashboard.
   const haDarkMode = hass.themes?.darkMode ?? false
+  const setHaDarkMode = useThemeStore((s) => s.setHaDarkMode)
+  useEffect(() => { setHaDarkMode(haDarkMode) }, [haDarkMode, setHaDarkMode])
 
   useEffect(() => {
     let cancelled = false

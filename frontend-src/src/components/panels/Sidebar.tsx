@@ -222,13 +222,13 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
 
   return (
     <aside
-      className="flex flex-col border-r border-border bg-[#161b22] transition-all duration-200 relative shrink-0"
+      className="flex flex-col border-r border-border bg-popover transition-all duration-200 relative shrink-0"
       style={{ width: collapsed ? 48 : 220 }}
     >
       {/* Toggle */}
       <button
         onClick={() => setCollapsed((c) => !c)}
-        className="absolute -right-3 top-6 z-10 flex items-center justify-center w-6 h-6 rounded-full border border-border bg-[#21262d] text-muted-foreground hover:text-foreground transition-colors"
+        className="absolute -right-3 top-6 z-10 flex items-center justify-center w-6 h-6 rounded-full border border-border bg-secondary text-muted-foreground hover:text-foreground transition-colors"
       >
         {collapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
       </button>
@@ -243,19 +243,19 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         <div className="px-2 pt-2 pb-1 border-b border-border relative">
           <button
             onClick={() => setDesignSwitcherOpen((o) => !o)}
-            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs font-medium bg-[#21262d] border border-border hover:border-[#30363d] transition-colors cursor-pointer"
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs font-medium bg-secondary border border-border hover:border-border transition-colors cursor-pointer"
           >
             {activeDesignId ? (() => {
               const active = designs.find((d) => d.id === activeDesignId)
               const Icon = resolveDesignIcon(active?.icon)
-              return <><Icon size={14} className="shrink-0 text-[#00d4ff]" /><span className="truncate text-foreground">{active?.name ?? 'Select Canvas'}</span></>
+              return <><Icon size={14} className="shrink-0 text-primary" /><span className="truncate text-foreground">{active?.name ?? 'Select Canvas'}</span></>
             })() : <span className="text-muted-foreground">Select Canvas</span>}
           </button>
           {designSwitcherOpen && (
             <>
               {/* Overlay to close */}
               <div className="fixed inset-0 z-40" onClick={() => setDesignSwitcherOpen(false)} />
-              <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-[#21262d] border border-border rounded-md shadow-xl overflow-hidden">
+              <div className="absolute left-2 right-2 top-full mt-1 z-50 bg-secondary border border-border rounded-md shadow-xl overflow-hidden">
                 {designs.map((d) => {
                   const Icon = resolveDesignIcon(d.icon)
                   const isActive = d.id === activeDesignId
@@ -263,7 +263,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                     <div
                       key={d.id}
                       className={`group flex items-center transition-colors ${
-                        isActive ? 'bg-[#00d4ff]/10 text-[#00d4ff]' : 'text-muted-foreground hover:bg-[#30363d]'
+                        isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-border'
                       }`}
                     >
                       <button
@@ -286,7 +286,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                         title="Delete canvas"
                         disabled={designs.length <= 1}
                         onClick={() => handleDesignDelete(d)}
-                        className="shrink-0 p-1.5 pr-2 text-muted-foreground hover:text-[#f85149] cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0"
+                        className="shrink-0 p-1.5 pr-2 text-muted-foreground hover:text-destructive cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-0"
                       >
                         <Trash2 size={12} />
                       </button>
@@ -296,7 +296,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                 <div className="border-t border-border" />
                 <button
                   onClick={() => { openDesignModal({ mode: 'create' }); setDesignSwitcherOpen(false) }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-[#00d4ff] hover:bg-[#00d4ff]/10 transition-colors cursor-pointer"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-primary hover:bg-primary/10 transition-colors cursor-pointer"
                 >
                   <PlusCircle size={14} />
                   <span>New Canvas</span>
@@ -352,12 +352,12 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
             <span className="text-foreground font-mono">{networkNodes.length}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#39d353]">Online</span>
-            <span className="font-mono text-[#39d353]">{onlineCount}</span>
+            <span className="text-success">Online</span>
+            <span className="font-mono text-success">{onlineCount}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[#f85149]">Offline</span>
-            <span className="font-mono text-[#f85149]">{offlineCount}</span>
+            <span className="text-destructive">Offline</span>
+            <span className="font-mono text-destructive">{offlineCount}</span>
           </div>
         </div>
       )}
@@ -477,8 +477,8 @@ function RackStats() {
         <span className="text-foreground font-mono">{cables.length}</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-[#39d353]">Free</span>
-        <span className="font-mono text-[#39d353]">{free}U / {total}U</span>
+        <span className="text-success">Free</span>
+        <span className="font-mono text-success">{free}U / {total}U</span>
       </div>
     </div>
   )
@@ -503,7 +503,7 @@ function VersionBadge() {
           href={latest.url.startsWith('https://') ? latest.url : '#'}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[#e3b341]/15 text-[#e3b341] border border-[#e3b341]/30 hover:bg-[#e3b341]/25 transition-colors self-start"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-warning/15 text-warning border border-warning/30 hover:bg-warning/25 transition-colors self-start"
         >
           ↑ v{latest.version} available
         </a>
@@ -529,16 +529,16 @@ function SidebarItem({ icon: Icon, label, collapsed, active, badge, accent, onCl
       onClick={onClick}
       className={`relative flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-sm transition-colors cursor-pointer ${
         active
-          ? 'bg-[#00d4ff]/10 text-[#00d4ff]'
+          ? 'bg-primary/10 text-primary'
           : accent
-          ? 'text-[#00d4ff] hover:bg-[#00d4ff]/10'
-          : 'text-muted-foreground hover:text-foreground hover:bg-[#21262d]'
+          ? 'text-primary hover:bg-primary/10'
+          : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
       }`}
     >
       <Icon size={16} className="shrink-0" />
       {!collapsed && <span className="truncate">{label}</span>}
       {badge && (
-        <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[#e3b341]" />
+        <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-warning" />
       )}
     </button>
   )

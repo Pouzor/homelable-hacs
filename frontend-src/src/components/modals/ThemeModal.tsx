@@ -3,10 +3,12 @@ import { toast } from 'sonner'
 import { Check, Pencil } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { THEMES, THEME_ORDER, type ThemeId } from '@/utils/themes'
-import { useThemeStore } from '@/stores/themeStore'
+import { THEMES, THEME_ORDER, resolveThemeId, type ThemeId } from '@/utils/themes'
+import { useThemeStore, type InterfaceTheme } from '@/stores/themeStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { CustomStyleModal } from './CustomStyleModal'
+
+const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
 // Node-type accent colors to display as preview swatches
 const PREVIEW_TYPES = ['isp', 'server', 'proxmox', 'switch', 'iot'] as const
@@ -22,8 +24,10 @@ interface ThemeCardProps {
 
 function ThemeCard({ themeId, selected, onClick, onKeyDown, buttonRef, onEdit }: ThemeCardProps) {
   const { customStyle } = useThemeStore()
+  const haDarkMode = useThemeStore((s) => s.haDarkMode)
   const preset = THEMES[themeId]
-  const c = preset.colors
+  // 'ha' previews whichever palette HA's current mode resolves it to.
+  const c = THEMES[resolveThemeId(themeId, haDarkMode)].colors
   const isCustom = themeId === 'custom'
 
   // For custom theme, use defined node colors for preview swatches
@@ -120,13 +124,18 @@ function ThemeCard({ themeId, selected, onClick, onKeyDown, buttonRef, onEdit }:
   )
 }
 
+const INTERFACE_OPTIONS: { id: InterfaceTheme; label: string }[] = [
+  { id: 'ha', label: 'Home Assistant' },
+  { id: 'homelable', label: 'Homelable' },
+]
+
 interface ThemeModalProps {
   open: boolean
   onClose: () => void
 }
 
 export function ThemeModal({ open, onClose }: ThemeModalProps) {
-  const { activeTheme, setTheme } = useThemeStore()
+  const { activeTheme, setTheme, interfaceTheme, setInterfaceTheme, haDarkMode } = useThemeStore()
   const { markUnsaved } = useCanvasStore()
   const cardRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [customStyleOpen, setCustomStyleOpen] = useState(false)
@@ -179,10 +188,30 @@ export function ThemeModal({ open, onClose }: ThemeModalProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={(o) => { if (!o) handleCancel() }}>
-        <DialogContent className="bg-[#161b22] border-[#30363d] w-fit max-w-[calc(100%-2rem)] sm:max-w-[50vw]">
+        <DialogContent className="bg-popover border-border w-fit max-w-[calc(100%-2rem)] sm:max-w-[50vw]">
           <DialogHeader>
             <DialogTitle className="text-sm font-semibold">Choose Canvas Style</DialogTitle>
           </DialogHeader>
+
+          {!STANDALONE && (
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <span className="text-muted-foreground">Interface</span>
+              <div role="radiogroup" aria-label="Interface theme" className="flex rounded-md border border-border overflow-hidden">
+                {INTERFACE_OPTIONS.map(({ id, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={interfaceTheme === id}
+                    onClick={() => setInterfaceTheme(id)}
+                    className={`px-2.5 py-1 transition-colors ${interfaceTheme === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex items-stretch flex-nowrap gap-3 py-1 overflow-x-auto overflow-y-hidden pb-2 pr-1">
             {THEME_ORDER.map((id, index) => (
@@ -212,10 +241,10 @@ export function ThemeModal({ open, onClose }: ThemeModalProps) {
             <Button
               type="button"
               size="sm"
-              className="bg-[#00d4ff] text-[#0d1117] hover:bg-[#00d4ff]/90"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
               style={
                 selected !== 'default'
-                  ? { background: THEMES[selected].colors.nodeAccents.isp.border }
+                  ? { background: THEMES[resolveThemeId(selected, haDarkMode)].colors.nodeAccents.isp.border }
                   : undefined
               }
               onClick={handleApply}

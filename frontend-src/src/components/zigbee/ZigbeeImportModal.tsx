@@ -98,10 +98,10 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="bg-[#161b22] border-border max-w-md flex flex-col">
+      <DialogContent className="bg-popover border-border max-w-md flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
-            <Network size={16} className="text-[#00d4ff]" />
+            <Network size={16} className="text-primary" />
             Zigbee Import
           </DialogTitle>
         </DialogHeader>
@@ -159,7 +159,7 @@ export function ZigbeeImportModal({ open, onClose, onImported }: ZigbeeImportMod
           <Button
             onClick={handleStart}
             disabled={starting}
-            style={{ background: '#00d4ff', color: '#0d1117' }}
+            style={{ background: 'var(--primary)', color: 'var(--primary-foreground)' }}
             className="gap-1.5"
           >
             {starting ? <Loader2 size={13} className="animate-spin" /> : <ScanLine size={13} />}

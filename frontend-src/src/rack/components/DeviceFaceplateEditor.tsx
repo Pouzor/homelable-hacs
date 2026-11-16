@@ -19,7 +19,7 @@ import type { DeviceRackModel } from '../deviceRackModel'
 import { RACK_COLUMNS, type DeviceStatus } from '@/types'
 
 const inputClass =
-  'w-full rounded border border-[#30363d] bg-[#21262d] px-2 py-1 text-sm text-foreground outline-none focus:border-[#00d4ff]'
+  'w-full rounded border border-border bg-secondary px-2 py-1 text-sm text-foreground outline-none focus:border-primary'
 const fieldLabel = 'text-xs text-muted-foreground'
 
 const DEFAULT_COLOR = '#2b323c'
@@ -51,7 +51,7 @@ export function DeviceFaceplateEditor({ value, label, status, editable, onChange
   return (
     <div className="flex flex-col gap-3">
       {/* The plate leads, as it does in the rack's own device modal. */}
-      <div className="flex flex-col items-center gap-2 rounded border border-[#30363d] bg-[#0d1117] p-3">
+      <div className="flex flex-col items-center gap-2 rounded border border-border bg-background p-3">
         <PortPositionEditor
           faceplateId={value.faceplateId}
           label={label}
@@ -81,10 +81,10 @@ export function DeviceFaceplateEditor({ value, label, status, editable, onChange
               aria-label="Faceplate"
               data-faceplate={value.faceplateId}
               onClick={() => setPickerOpen(true)}
-              className="flex cursor-pointer flex-col items-start gap-0.5 rounded border border-[#30363d] bg-[#21262d] px-2 py-1.5 text-left hover:border-[#00d4ff]"
+              className="flex cursor-pointer flex-col items-start gap-0.5 rounded border border-border bg-secondary px-2 py-1.5 text-left hover:border-primary"
             >
               <span className="text-sm">{plate.label}</span>
-              <span className="text-[11px] text-[#00d4ff]">Browse faceplates…</span>
+              <span className="text-[11px] text-primary">Browse faceplates…</span>
             </button>
             <FaceplatePicker
               open={pickerOpen}
@@ -135,13 +135,13 @@ export function DeviceFaceplateEditor({ value, label, status, editable, onChange
                 <input
                   type="color"
                   aria-label="Colour override"
-                  className="h-8 flex-1 cursor-pointer rounded border border-[#30363d] bg-[#21262d]"
+                  className="h-8 flex-1 cursor-pointer rounded border border-border bg-secondary"
                   value={value.color ?? DEFAULT_COLOR}
                   onChange={(e) => onChange({ ...value, color: e.target.value })}
                 />
                 <button
                   type="button"
-                  className="cursor-pointer rounded border border-[#30363d] px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="cursor-pointer rounded border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
                   onClick={() => onChange({ ...value, color: null })}
                 >
                   Reset

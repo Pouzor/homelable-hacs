@@ -59,7 +59,7 @@ export function ZwaveImportModal({ open, onClose, onImported }: ZwaveImportModal
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="bg-[#161b22] border-border max-w-md flex flex-col">
+      <DialogContent className="bg-popover border-border max-w-md flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-foreground flex items-center gap-2">
             <RadioTower size={16} className="text-[#ff6e00]" />

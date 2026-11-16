@@ -17,10 +17,10 @@ import { useDesignStore } from '@/stores/designStore'
 import type { CableVisibility } from '@/types'
 
 const ghost =
-  'gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-[#21262d]'
+  'gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer hover:bg-secondary'
 /** Reads as one of the ghost buttons around it: no box until you hover it. */
 const triggerClass =
-  'gap-1.5 border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground hover:bg-[#21262d] hover:text-foreground dark:bg-transparent dark:hover:bg-[#21262d] cursor-pointer'
+  'gap-1.5 border-transparent bg-transparent px-2 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground dark:bg-transparent dark:hover:bg-secondary cursor-pointer'
 
 const VISIBILITY_OPTIONS: { value: CableVisibility; label: string; icon: typeof Eye }[] = [
   { value: 'hover', label: 'Cables on hover', icon: MousePointer2 },
@@ -67,7 +67,7 @@ export function RackToolbarActions() {
       <Button
         size="sm"
         variant="ghost"
-        className={`${ghost} ${cableMode ? 'text-[#00d4ff]' : ''}`}
+        className={`${ghost} ${cableMode ? 'text-primary' : ''}`}
         onClick={toggleCableMode}
         title="Drag from one port to another to patch, or click both in turn. Click a cable to select it, then Delete to unplug."
       >
@@ -78,7 +78,7 @@ export function RackToolbarActions() {
         <Button
           size="sm"
           variant="ghost"
-          className={`${ghost} text-[#e3b341]`}
+          className={`${ghost} text-warning`}
           onClick={cancelCableDraft}
         >
           <X size={14} /> Cancel cable
@@ -89,7 +89,7 @@ export function RackToolbarActions() {
         <Button
           size="sm"
           variant="ghost"
-          className={`${ghost} text-[#f85149]`}
+          className={`${ghost} text-destructive`}
           onClick={removeSelectedCable}
           title="Unplug the selected cable (Delete)"
         >
@@ -106,7 +106,7 @@ export function RackToolbarActions() {
             })()}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent className="bg-[#21262d] border-[#30363d]">
+        <SelectContent className="bg-secondary border-border">
           {VISIBILITY_OPTIONS.map(({ value, icon: Icon, label }) => (
             <SelectItem key={value} value={value} className="text-xs">
               <Icon size={14} /> {label}

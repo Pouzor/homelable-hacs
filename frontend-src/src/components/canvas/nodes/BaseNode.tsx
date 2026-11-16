@@ -7,7 +7,7 @@ import { resolveNodeIcon, isBrandIconKey } from '@/utils/nodeIcons'
 import { NodeIcon } from '@/components/ui/NodeIcon'
 import { ServiceIcon } from '@/components/ui/ServiceIcon'
 import { resolvePropertyIcon } from '@/utils/propertyIcons'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
 import { maskIp, primaryIp, splitIps } from '@/utils/maskIp'
@@ -31,7 +31,7 @@ export function BaseNode({ id, data, selected, icon: typeIcon, width, height }: 
   const { zoom } = useViewport()
   const borderWidth = useMemo(() => Math.max(1, 1 / zoom), [zoom])
 
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const hideIp = useCanvasStore((s) => s.hideIp)
   const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
   const theme = THEMES[activeTheme]

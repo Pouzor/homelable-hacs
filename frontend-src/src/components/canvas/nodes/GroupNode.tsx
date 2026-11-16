@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { type NodeProps, type Node, NodeResizer, Handle, Position } from '@xyflow/react'
 import { Layers, Pencil, Check, X, ChevronDown } from 'lucide-react'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useThemeStore } from '@/stores/themeStore'
+import { selectCanvasTheme, useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
 import { STATUS_COLORS, type NodeData } from '@/types'
 
 export function GroupNode({ id, data, selected }: NodeProps<Node<NodeData>>) {
   const { nodes, updateNode, snapshotHistory, toggleNodeCollapsed } = useCanvasStore()
   const isCollapsed = data.collapsed ?? false
-  const activeTheme = useThemeStore((s) => s.activeTheme)
+  const activeTheme = useThemeStore(selectCanvasTheme)
   const theme = THEMES[activeTheme]
   const showBorder = data.custom_colors?.show_border !== false
   const isVisible = showBorder || selected
