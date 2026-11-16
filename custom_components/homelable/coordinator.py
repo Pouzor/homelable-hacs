@@ -357,8 +357,17 @@ class HomelableCoordinator(DataUpdateCoordinator):
 
     @staticmethod
     def _check_spec(facts: dict[str, Any]) -> tuple[str, Any, Any]:
-        """``(check_method, target, ip)`` the status check runs for a device."""
-        target = facts.get("check_target") or facts.get("hostname")
+        """``(check_method, target, ip)`` the status check runs for a device.
+
+        Probe order follows the standalone app: an explicit ``check_target``,
+        else the IP. The hostname is often only a display name (typed in the
+        editor, or one the local DNS doesn't serve), and an unresolvable one
+        made the checker report a reachable device offline without probing it.
+        It is used only when the device has no IP at all.
+        """
+        target = facts.get("check_target") or (
+            None if facts.get("ip") else facts.get("hostname")
+        )
         if _is_wireless(facts.get("type")):
             # Zigbee / Z-Wave devices are one-shot mesh imports; no live check.
             return "none", target, facts.get("ip")

@@ -1766,6 +1766,39 @@ async def test_check_node_reports_unknown_when_the_check_raises(coord) -> None: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "target", "ip"),
+    [
+        ({"ip": "10.0.0.1", "hostname": "alpha"}, None, "10.0.0.1"),
+        ({"ip": "10.0.0.1", "hostname": "alpha", "check_target": "box.local"},
+         "box.local", "10.0.0.1"),
+        ({"hostname": "nas.lan"}, "nas.lan", None),
+    ],
+    ids=["ip-beats-hostname", "check-target-wins", "hostname-when-no-ip"],
+)
+async def test_check_probes_check_target_then_ip_then_hostname(
+    coord, data, target, ip  # noqa: ANN001
+) -> None:
+    """A display hostname DNS can't resolve must not mask a reachable IP."""
+    await coord.save_canvas(
+        {
+            "nodes": [{"id": "n1", "type": "server", "position": {"x": 0, "y": 0},
+                       "data": {"check_method": "ping", **data}}],
+            "edges": [],
+            "viewport": {},
+        }
+    )
+    fake = AsyncMock(return_value={"status": "online", "response_time_ms": 1})
+    with patch(
+        "custom_components.homelable.coordinator.status_checker.check_node", fake
+    ):
+        await coord.async_check_node("n1")
+        await coord._async_update_data()
+
+    assert [c.args for c in fake.await_args_list] == [("ping", target, ip)] * 2
+
+
+@pytest.mark.asyncio
 async def test_check_node_unknown_id_returns_none(coord) -> None:  # noqa: ANN001
     await _two_node_canvas(coord)
     fake = AsyncMock()
