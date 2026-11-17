@@ -27,5 +27,15 @@ describe('Markdown — HTML comments', () => {
     expect(isCommentOnly({ type: 'html', value: '<!-- a -->\n<!-- b -->' })).toBe(true)
     expect(isCommentOnly({ type: 'html', value: '<b>bold</b>' })).toBe(false)
     expect(isCommentOnly({ type: 'text', value: '<!-- a -->' })).toBe(false)
+    expect(isCommentOnly({ type: 'html', value: '<!-- a --> <b>x</b>' })).toBe(false)
+    expect(isCommentOnly({ type: 'html', value: '<!-- unterminated' })).toBe(false)
+    expect(isCommentOnly({ type: 'html', value: '   ' })).toBe(false)
+  })
+
+  it('stays linear on many back-to-back comments', () => {
+    const value = '<!--' + '--><!--'.repeat(50_000) + '-->x'
+    const start = performance.now()
+    expect(isCommentOnly({ type: 'html', value })).toBe(false)
+    expect(performance.now() - start).toBeLessThan(500)
   })
 })

@@ -16,10 +16,27 @@ interface MdNode {
   children?: MdNode[]
 }
 
-const ONLY_COMMENTS = /^(?:\s*<!--[\s\S]*?-->)+\s*$/
+/**
+ * True when `value` is one or more `<!-- … -->` comments separated only by
+ * whitespace. A linear scan rather than a regex: the equivalent pattern
+ * backtracks exponentially on input like `<!----><!----><!--…`.
+ */
+function onlyComments(value: string): boolean {
+  let i = 0
+  let seen = false
+  for (;;) {
+    while (i < value.length && /\s/.test(value[i])) i++
+    if (i === value.length) return seen
+    if (!value.startsWith('<!--', i)) return false
+    const end = value.indexOf('-->', i + 4)
+    if (end === -1) return false
+    i = end + 3
+    seen = true
+  }
+}
 
 export function isCommentOnly(node: MdNode): boolean {
-  return node.type === 'html' && typeof node.value === 'string' && ONLY_COMMENTS.test(node.value)
+  return node.type === 'html' && typeof node.value === 'string' && onlyComments(node.value)
 }
 
 function strip(node: MdNode): void {
