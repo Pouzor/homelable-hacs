@@ -1,0 +1,461 @@
+import { useMemo, useState } from 'react'
+import { Menu } from '@base-ui/react/menu'
+import { Clock, Download, Ellipsis, History, House, Link2, Pencil, Plus, RefreshCw, Star, Trash2, X } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { useShadowContainer } from '@/lib/portal'
+import { cn } from '@/lib/utils'
+import { isOverdue, parseFrontmatter } from '../frontmatter'
+import { Markdown } from '../markdown/Markdown'
+import { extractToc } from '../markdown/toc'
+import type { Doc, DocBacklink, DocRevision } from '../types'
+import type { LinkableDevice, LinkableDoc } from '../wikilinks'
+import { DocHistoryRail, RevisionPreview } from './DocHistory'
+import { IconPicker } from './IconPicker'
+
+/** Everything the history rail and the revision preview need, in one prop. */
+export interface HistoryControls {
+  open: boolean
+  loading: boolean
+  revisions: DocRevision[]
+  preview: { revision: DocRevision; body: string } | null
+  onToggle: () => void
+  onSelect: (revisionId: string) => void
+  onClosePreview: () => void
+  /** Omitted by a read-only host; no Restore is then offered. */
+  onRestore?: (revisionId: string) => void
+}
+
+interface Props {
+  doc: Doc
+  docs: LinkableDoc[]
+  devices: LinkableDevice[]
+  drifted: boolean
+  /** The documents linking here. Empty until the server answers. */
+  backlinks?: DocBacklink[]
+  backlinksLoading?: boolean
+  /**
+   * Omitted by a host that keeps no history state, and then the viewer offers
+   * none — the button would have nothing to open.
+   */
+  history?: HistoryControls
+  /**
+   * Reading without a session — the public documentation view.
+   *
+   * Every control that writes is gone rather than disabled: there is no session
+   * behind this page and no endpoint to take the write, so a greyed-out button
+   * would only promise something that does not exist. History stays, because
+   * reading an old version is a read.
+   */
+  readOnly?: boolean
+  onEdit?: () => void
+  onToggleStar?: () => void
+  /** Makes this page the homepage. Only a page is offered it. */
+  onSetHomepage?: () => void
+  onMarkReviewed?: () => void
+  onRegenerate?: () => void
+  /** Opens the update-from-device review for a drifted device document. */
+  onUpdateFromDevice?: () => void
+  /** Saves this document to disk as the `.md` file its body already is. */
+  onDownload: () => void
+  onDelete?: () => void
+  onOpenDoc: (id: string) => void
+  onCreateFromLink?: (label: string) => void
+  onToggleTask?: (body: string) => void
+  /** Writes the whole tag list back into the document's frontmatter. */
+  onSetTags?: (tags: string[]) => void
+  /** Sets the emoji the tree shows for this document; `null` clears it. */
+  onSetIcon?: (icon: string | null) => void
+}
+
+const NO_HISTORY: HistoryControls = {
+  open: false,
+  loading: false,
+  revisions: [],
+  preview: null,
+  onToggle: () => {},
+  onSelect: () => {},
+  onClosePreview: () => {},
+}
+
+/** The metadata a frontmatter block is worth surfacing as a chip. */
+const CHIPS: { key: string; label: string }[] = [
+  { key: 'criticality', label: 'Criticality' },
+  { key: 'owner', label: 'Owner' },
+  { key: 'review_every', label: 'Review' },
+]
+
+export function DocViewer({
+  doc,
+  docs,
+  devices,
+  drifted,
+  backlinks = [],
+  backlinksLoading = false,
+  history,
+  readOnly = false,
+  onEdit,
+  onToggleStar,
+  onSetHomepage,
+  onMarkReviewed,
+  onUpdateFromDevice,
+  onRegenerate,
+  onDownload,
+  onDelete,
+  onOpenDoc,
+  onCreateFromLink,
+  onToggleTask,
+  onSetTags,
+  onSetIcon,
+}: Props) {
+  const controls = history ?? NO_HISTORY
+  const shadowContainer = useShadowContainer()
+  const { data } = useMemo(() => parseFrontmatter(doc.body), [doc.body])
+  const [tagDraft, setTagDraft] = useState<string | null>(null)
+  const toc = useMemo(() => extractToc(doc.body), [doc.body])
+  const overdue = isOverdue(data, doc.reviewed_at, doc.created_at)
+
+  // One field takes a whole list: "web, prod" adds two tags, and a tag already
+  // on the document is not added twice whatever its case.
+  function commitTags() {
+    const known = new Set(doc.tags.map((tag) => tag.toLowerCase()))
+    const added: string[] = []
+    for (const raw of (tagDraft ?? '').split(',')) {
+      const tag = raw.trim()
+      if (!tag || known.has(tag.toLowerCase())) continue
+      known.add(tag.toLowerCase())
+      added.push(tag)
+    }
+    if (added.length) onSetTags?.([...doc.tags, ...added])
+    setTagDraft(null)
+  }
+
+  // Reading an old version replaces the body, not the page: the title, the
+  // chips and the history rail stay put, so it reads as the same document at a
+  // different moment rather than as somewhere else.
+  const preview = controls.preview
+  if (preview) {
+    return (
+      <div className="flex min-h-0 flex-1">
+        <RevisionPreview
+          revision={preview.revision}
+          body={preview.body}
+          currentBody={doc.body}
+          docs={docs}
+          devices={devices}
+          onOpenDoc={onOpenDoc}
+          onRestore={
+            readOnly || !controls.onRestore
+              ? undefined
+              : () => controls.onRestore?.(preview.revision.id)
+          }
+          onClose={controls.onClosePreview}
+        />
+        {controls.open && (
+          <DocHistoryRail
+            revisions={controls.revisions}
+            activeId={preview.revision.id}
+            loading={controls.loading}
+            onSelect={controls.onSelect}
+            onClose={controls.onToggle}
+          />
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="flex items-start gap-2 px-6 pt-5">
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold">{doc.title}</h1>
+          {!readOnly && (
+            <>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                title={doc.starred ? 'Unstar' : 'Star'}
+                aria-pressed={doc.starred}
+                onClick={onToggleStar}
+                className="cursor-pointer"
+              >
+                <Star className={cn(doc.starred && 'fill-current text-[var(--accent-orange,#ff6e00)]')} />
+              </Button>
+              {doc.kind === 'page' && onSetHomepage && (
+                // Already the homepage: shown, not offered — there is nothing to
+                // switch it back to, only another page to pick instead.
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  title={doc.is_homepage ? 'This page is the homepage' : 'Set as homepage'}
+                  aria-label={doc.is_homepage ? 'This page is the homepage' : 'Set as homepage'}
+                  aria-pressed={Boolean(doc.is_homepage)}
+                  disabled={doc.is_homepage}
+                  onClick={onSetHomepage}
+                  className={cn('cursor-pointer', doc.is_homepage && 'text-primary disabled:opacity-100')}
+                >
+                  <House />
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={onEdit} className="cursor-pointer gap-1">
+                <Pencil size={13} /> Edit
+              </Button>
+              {doc.kind === 'device' && drifted && onUpdateFromDevice && (
+                <Button
+                  size="sm"
+                  onClick={onUpdateFromDevice}
+                  className="cursor-pointer gap-1.5 bg-[var(--status-online,#39d353)] text-[#0d1117] hover:bg-[var(--status-online,#39d353)]/90"
+                >
+                  <RefreshCw size={13} /> Update from device
+                </Button>
+              )}
+            </>
+          )}
+          {history && (
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              title="Earlier versions of this document"
+              aria-label="Version history"
+              aria-pressed={history.open}
+              onClick={history.onToggle}
+              className={cn('cursor-pointer', history.open && 'bg-muted')}
+            >
+              <History />
+            </Button>
+          )}
+          {/* A folder holds children, not a generated body — nothing to rebuild. */}
+          {!readOnly && doc.kind !== 'folder' && (
+            <Menu.Root>
+              <Menu.Trigger
+                title="More document actions"
+                aria-label="More document actions"
+                className="flex size-6 cursor-pointer items-center justify-center rounded-[min(var(--radius-md),10px)] text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <Ellipsis size={14} />
+              </Menu.Trigger>
+              {/* Into the panel's shadow root inside Home Assistant, or it renders unstyled. */}
+              <Menu.Portal container={shadowContainer}>
+                <Menu.Positioner align="end" sideOffset={4} className="isolate z-50">
+                  <Menu.Popup className="min-w-52 rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10">
+                    <Menu.Item
+                      onClick={onRegenerate}
+                      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm outline-none hover:bg-muted focus:bg-muted"
+                    >
+                      <RefreshCw size={13} /> Replace entire document…
+                    </Menu.Item>
+                  </Menu.Popup>
+                </Menu.Positioner>
+              </Menu.Portal>
+            </Menu.Root>
+          )}
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            title="Download this document as Markdown"
+            aria-label="Download this document"
+            onClick={onDownload}
+            className="cursor-pointer"
+          >
+            <Download />
+          </Button>
+          {!readOnly && (
+            <Button size="icon-xs" variant="ghost" title="Delete this document" onClick={onDelete} className="cursor-pointer">
+              <Trash2 />
+            </Button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 px-6 pt-2 text-[10px]">
+          {CHIPS.filter((chip) => data[chip.key]).map((chip) => (
+            <span key={chip.key} className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+              {chip.label}: <span className="text-foreground">{String(data[chip.key])}</span>
+            </span>
+          ))}
+          {doc.tags.map((tag) => (
+            <span
+              key={tag}
+              className={cn(
+                'flex items-center gap-1 rounded bg-primary/10 py-0.5 pl-1.5 text-primary',
+                readOnly ? 'pr-1.5' : 'pr-1',
+              )}
+            >
+              #{tag}
+              {!readOnly && (
+                <button
+                  type="button"
+                  aria-label={`Remove tag ${tag}`}
+                  onClick={() => onSetTags?.(doc.tags.filter((t) => t !== tag))}
+                  className="cursor-pointer opacity-60 hover:opacity-100"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </span>
+          ))}
+          {!readOnly &&
+            (tagDraft === null ? (
+              <button
+                type="button"
+                onClick={() => setTagDraft('')}
+                className="flex cursor-pointer items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-muted-foreground hover:text-foreground"
+              >
+                <Plus size={10} /> Tag
+              </button>
+            ) : (
+              <input
+                autoFocus
+                value={tagDraft}
+                aria-label="New tag"
+                placeholder="tag, tag…"
+                onChange={(event) => setTagDraft(event.target.value)}
+                onBlur={commitTags}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') commitTags()
+                  if (event.key === 'Escape') setTagDraft(null)
+                }}
+                className="w-28 rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground outline-none ring-1 ring-border focus:ring-primary"
+              />
+            ))}
+          {!readOnly && onSetIcon && (
+            <IconPicker
+              icon={doc.icon}
+              onChange={onSetIcon}
+              trigger={
+                doc.icon ? (
+                  <button
+                    type="button"
+                    title="Change the tree icon"
+                    aria-label={`Tree icon ${doc.icon} — change`}
+                    className="flex cursor-pointer items-center rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none hover:bg-muted/70"
+                  >
+                    {doc.icon}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    title="Give this document an emoji in the tree"
+                    className="flex cursor-pointer items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus size={10} /> Icon
+                  </button>
+                )
+              }
+            />
+          )}
+          {!doc.edited_at && (
+            <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+              Only the generated header so far
+            </span>
+          )}
+          {overdue &&
+            (readOnly ? (
+              // Still worth saying the page may be stale; marking it reviewed
+              // is a write, so the reader is told rather than offered a button.
+              <span className="flex items-center gap-1 rounded bg-[var(--status-pending,#e3b341)]/15 px-1.5 py-0.5 text-[var(--status-pending,#e3b341)]">
+                <Clock size={10} /> Due for review
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={onMarkReviewed}
+                className="flex cursor-pointer items-center gap-1 rounded bg-[var(--status-pending,#e3b341)]/15 px-1.5 py-0.5 text-[var(--status-pending,#e3b341)]"
+              >
+                <Clock size={10} /> Due for review — mark as reviewed
+              </button>
+            ))}
+          {drifted && (
+            <span className="flex items-center gap-1 rounded bg-[var(--status-pending,#e3b341)]/15 px-1.5 py-0.5 text-[var(--status-pending,#e3b341)]">
+              <RefreshCw size={10} /> The device has changed
+            </span>
+          )}
+        </div>
+
+        <Markdown
+          body={doc.body}
+          docs={docs}
+          devices={devices}
+          onOpenDoc={onOpenDoc}
+          // Both write. Left undefined, an unresolved wiki-link still renders
+          // as the dashed "no match" affordance, inert, and a task checkbox
+          // stops accepting clicks.
+          onCreateFromLink={readOnly ? undefined : onCreateFromLink}
+          onToggleTask={readOnly ? undefined : onToggleTask}
+          className="max-w-[72ch] px-6 pb-6 pt-2 text-sm"
+        />
+
+        {/* A wiki-link only says where it goes; this is the other direction,
+            and the reason a device document is worth linking to at all. */}
+        {!backlinksLoading && backlinks.length > 0 && (
+          <section aria-labelledby="backlinks-heading" className="max-w-[72ch] px-6 pb-16">
+            <h2
+              id="backlinks-heading"
+              className="mb-2 flex items-center gap-1.5 border-t border-border pt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70"
+            >
+              <Link2 size={11} /> Linked from ({backlinks.length})
+            </h2>
+            <ul className="space-y-1">
+              {backlinks.map((link) => (
+                <li key={link.doc_id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenDoc(link.doc_id)}
+                    className="w-full cursor-pointer rounded px-2 py-1.5 text-left hover:bg-muted/60"
+                  >
+                    <span className="flex items-baseline gap-1.5">
+                      <span className="truncate text-xs text-primary">{link.title}</span>
+                      {link.count > 1 && (
+                        <span className="text-[10px] text-muted-foreground">×{link.count}</span>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                      {link.context}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+
+      {controls.open ? (
+        <DocHistoryRail
+          revisions={controls.revisions}
+          activeId={null}
+          loading={controls.loading}
+          onSelect={controls.onSelect}
+          onClose={controls.onToggle}
+        />
+      ) : (
+        toc.length > 1 && (
+        <nav aria-label="On this page" className="hidden w-52 shrink-0 overflow-y-auto border-l border-border px-3 py-5 xl:block">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+            On this page
+          </p>
+          {toc.map((entry) => (
+            <a
+              key={entry.id}
+              href={`#${entry.id}`}
+              // The panel lives in Home Assistant's shadow DOM, where a
+              // `#fragment` neither finds the heading nor belongs in HA's URL:
+              // look the heading up in this node's own root and scroll to it.
+              onClick={(event) => {
+                const root = event.currentTarget.getRootNode() as Document | ShadowRoot
+                const heading = root.getElementById?.(entry.id)
+                if (!heading) return
+                event.preventDefault()
+                heading.scrollIntoView({ block: 'start' })
+              }}
+              style={{ paddingLeft: (entry.level - 2) * 10 }}
+              className="block truncate py-0.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {entry.text}
+            </a>
+          ))}
+          </nav>
+        )
+      )}
+    </div>
+  )
+}

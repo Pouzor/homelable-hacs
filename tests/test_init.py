@@ -136,3 +136,41 @@ async def test_setup_registers_the_card_even_when_the_first_refresh_fails(
 
     register_card.assert_awaited_once_with(hass)
     register_panel.assert_not_called()
+
+
+def _setup_patches(coordinator):  # noqa: ANN001
+    return (
+        patch("custom_components.homelable.HomelableCoordinator", return_value=coordinator),
+        patch("custom_components.homelable.async_register_websocket_commands"),
+        patch("custom_components.homelable.async_register_panel"),
+        patch("custom_components.homelable.async_register_card"),
+        patch("custom_components.homelable.async_register_media"),
+    )
+
+
+async def test_setup_moves_device_notes_into_documents(hass: HomeAssistant) -> None:
+    """The first setup after the upgrade runs the notes migration (homelable #418)."""
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    hass.data[DOMAIN] = {}
+    coordinator = MagicMock(async_config_entry_first_refresh=AsyncMock())
+    coordinator.documents.migrate_notes = AsyncMock(return_value=2)
+
+    a, b, c, d, e = _setup_patches(coordinator)
+    with a, b, c, d, e:
+        assert await async_setup_entry(hass, entry) is True
+
+    coordinator.documents.migrate_notes.assert_awaited_once()
+
+
+async def test_a_failed_notes_migration_does_not_fail_setup(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    hass.data[DOMAIN] = {}
+    coordinator = MagicMock(async_config_entry_first_refresh=AsyncMock())
+    coordinator.documents.migrate_notes = AsyncMock(side_effect=RuntimeError("boom"))
+
+    a, b, c, d, e = _setup_patches(coordinator)
+    with a, b, c, d, e:
+        assert await async_setup_entry(hass, entry) is True
+    assert hass.data[DOMAIN][entry.entry_id] is coordinator

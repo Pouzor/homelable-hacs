@@ -123,6 +123,13 @@ export interface NodeProperty {
  * `components/modals/PendingDeviceModal` for the call sites that predate this
  * home.
  */
+/**
+ * The standalone's name for a Device Inventory row. Same shape here: the
+ * inventory is the pending-devices Store. Kept so code ported from
+ * `homelable/frontend` (the documentation space) reads unchanged.
+ */
+export type InventoryEntry = PendingDevice
+
 export interface PendingDevice {
   id: string
   ip: string | null

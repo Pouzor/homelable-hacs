@@ -41,6 +41,10 @@ interface PendingDevicesModalProps {
   onPick?: (device: PendingDevice) => void
   /** Start with the Rackable filter on (what the rack picker wants). */
   initialRackableOnly?: boolean
+  /** Opens the Documentation section on a device, from its detail modal. The
+   *  caller closes the list on the way out — Documentation is a whole view
+   *  behind these dialogs, not something to read under them. */
+  onOpenDocumentation?: (deviceId: string, label: string) => void
 }
 
 const PORT_COLORS: Record<number, string> = {
@@ -123,7 +127,7 @@ function injectAutoEdges(edges: ServerAutoEdge[] | undefined) {
   })
 }
 
-export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending', onPick, initialRackableOnly = false }: PendingDevicesModalProps) {
+export function PendingDevicesModal({ open, onClose, highlightId, initialStatus = 'pending', onPick, initialRackableOnly = false, onOpenDocumentation }: PendingDevicesModalProps) {
   const [devices, setDevices] = useState<PendingDevice[]>([])
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<PendingDevice | null>(null)
@@ -842,6 +846,13 @@ export function PendingDevicesModal({ open, onClose, highlightId, initialStatus 
           setDevices((prev) => prev.map((d) => (d.id === saved.id ? saved : d)))
           setSelected(saved)
         }}
+        onOpenDocumentation={
+          onOpenDocumentation &&
+          ((deviceId, label) => {
+            setSelected(null)
+            onOpenDocumentation(deviceId, label)
+          })
+        }
       />
     </>
   )

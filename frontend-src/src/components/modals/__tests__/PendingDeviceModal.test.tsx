@@ -189,3 +189,28 @@ describe('PendingDeviceModal — rack gear', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
   })
 })
+
+describe('PendingDeviceModal — documentation (homelable #418)', () => {
+  it('opens the device documentation with the id and the title on screen', () => {
+    const onOpenDocumentation = vi.fn()
+    render(
+      <PendingDeviceModal
+        device={makeDevice({ hostname: 'nas.local' })}
+        onClose={vi.fn()}
+        onApprove={vi.fn()}
+        onHide={vi.fn()}
+        onIgnore={vi.fn()}
+        onOpenDocumentation={onOpenDocumentation}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Documentation/ }))
+    expect(onOpenDocumentation).toHaveBeenCalledWith('dev-1', 'nas.local')
+  })
+
+  it('offers no documentation button where there is nowhere to send it', () => {
+    render(
+      <PendingDeviceModal device={makeDevice()} onClose={vi.fn()} onApprove={vi.fn()} onHide={vi.fn()} onIgnore={vi.fn()} />
+    )
+    expect(screen.queryByRole('button', { name: /Documentation/ })).toBeNull()
+  })
+})

@@ -1,0 +1,195 @@
+/**
+ * A document either lives in the Library tree (`page`, `folder`) or describes
+ * exactly one thing elsewhere in the app (`device`, `node`, `design`).
+ *
+ * Kept in sync with DOCUMENT_KINDS in `backend/app/services/doc_tree.py`.
+ */
+export type DocKind = 'device' | 'node' | 'design' | 'page' | 'folder'
+
+/** Kinds the user files by hand. Everything else is placed by its link. */
+export const TREE_KINDS: readonly DocKind[] = ['page', 'folder']
+
+export interface DocumentSummary {
+  id: string
+  kind: DocKind
+  title: string
+  slug: string
+  icon?: string | null
+  parent_id?: string | null
+  sort_order: number
+  device_id?: string | null
+  node_id?: string | null
+  design_id?: string | null
+  tags: string[]
+  /** The parsed frontmatter, so the tree can badge without loading bodies. */
+  frontmatter: Record<string, unknown>
+  starred: boolean
+  /** The page Documentation opens on. At most one document carries it. */
+  is_homepage?: boolean
+  template_id?: string | null
+  /**
+   * The device has changed since this document's facts were snapshotted.
+   * Decided by the server — the snapshot is its shape, not the inventory's.
+   */
+  drifted?: boolean
+  reviewed_at?: string | null
+  edited_at?: string | null
+  facts_synced_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Doc extends DocumentSummary {
+  body: string
+  facts_snapshot?: Record<string, unknown> | null
+}
+
+export interface DocRevision {
+  id: string
+  document_id: string
+  title: string
+  reason: 'edit' | 'restore' | 'import' | 'migrate' | 'scaffold' | 'regenerate' | 'mcp' | 'sync'
+  saved_at: string
+  size: number
+}
+
+/**
+ * How update-from-device disposed of one fact or section. Mirrors
+ * `doc_reconcile.py`; the server is the single source of truth for the words.
+ */
+export type ChangeStatus = 'same' | 'auto' | 'conflict'
+
+/** How a conflict is settled. `custom` carries the user's own text. */
+export type ResolutionChoice = 'keep' | 'device' | 'custom'
+
+/** One fact or section the update preview surfaced, and its disposition. */
+export interface ReconcileChange {
+  id: string
+  name: string
+  kind: 'field' | 'section'
+  status: ChangeStatus
+  documented: string
+  device: string
+  previous: string
+  resolution?: ResolutionChoice | null
+  custom?: string | null
+}
+
+/** What the user wants for one conflict; echoed to the server. */
+export interface ResolutionItem {
+  id: string
+  choice: ResolutionChoice
+  custom?: string | null
+}
+
+/** The read-only result of an update-from-device merge. */
+export interface UpdatePreview {
+  preview_id: string
+  changes: ReconcileChange[]
+  proposed_body: string
+  summary: string[]
+  /** Conflict ids still waiting on a decision — the apply refuses while any remain. */
+  unresolved: string[]
+}
+
+/** A document pointing at the open one. Inverted server-side — see the route. */
+export interface DocBacklink {
+  doc_id: string
+  title: string
+  kind: DocKind
+  device_id?: string | null
+  /** The link as it was written, which may differ from the target's title. */
+  label: string
+  context: string
+  count: number
+}
+
+export interface DocSearchHit {
+  doc_id: string
+  title: string
+  kind: DocKind
+  snippet: string
+  device_id?: string | null
+}
+
+export interface DocSearchResult {
+  /** "like" means no FTS5 — the UI drops snippet highlighting. */
+  engine: 'fts5' | 'like'
+  hits: DocSearchHit[]
+}
+
+export interface DocCoverage {
+  devices: number
+  documented: number
+  header_only: number
+  missing: number
+  drifted: number
+  overdue: number
+  notes_unmigrated: number
+  library_pages: number
+}
+
+/** Templates the "New document" menu offers. Mirrors `doc_template.py`. */
+export const DOC_TEMPLATES = [
+  { id: 'blank', label: 'Blank page', hint: 'A title and nothing else' },
+  { id: 'runbook', label: 'Runbook', hint: 'Trigger, steps, rollback' },
+  { id: 'service', label: 'Service', hint: 'A service spanning hosts' },
+  { id: 'network', label: 'Network overview', hint: 'Topology, subnets, routing' },
+  { id: 'incident', label: 'Incident', hint: 'Timeline, cause, fix' },
+  { id: 'procedure', label: 'Procedure', hint: 'Goal, prerequisites, steps' },
+  { id: 'decision', label: 'Decision (ADR)', hint: 'Context, decision, consequences' },
+  { id: 'zone', label: 'Zone / group', hint: 'Purpose, members, addressing' },
+] as const
+
+export type DocTemplateId = (typeof DOC_TEMPLATES)[number]['id']
+
+/** How the Devices root is pivoted. The Library tree never changes shape. */
+export type GroupBy =
+  | 'zone'
+  | 'group'
+  | 'type'
+  | 'physicality'
+  | 'subnet'
+  | 'canvas'
+  | 'rack'
+  | 'vendor'
+  | 'source'
+  | 'status'
+  | 'tag'
+  | 'flat'
+
+export const GROUP_BY_LABELS: Record<GroupBy, string> = {
+  zone: 'Zone',
+  group: 'Group',
+  type: 'Type',
+  physicality: 'Physical / virtual',
+  subnet: 'Subnet',
+  canvas: 'Canvas',
+  rack: 'Rack',
+  vendor: 'Vendor',
+  source: 'Discovery source',
+  status: 'Status',
+  tag: 'Tag',
+  flat: 'A–Z',
+}
+
+/** What the tree badge says about a device at a glance. */
+export type DocState = 'none' | 'header-only' | 'written' | 'drifted' | 'overdue'
+
+export interface TreeLeaf {
+  id: string
+  label: string
+  docId?: string
+  deviceId?: string
+  nodeId?: string
+  kind: DocKind | 'device-without-doc'
+  state: DocState
+  icon?: string | null
+  children?: TreeLeaf[]
+}
+
+export interface TreeGroup {
+  key: string
+  label: string
+  items: TreeLeaf[]
+}

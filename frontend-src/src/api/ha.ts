@@ -19,6 +19,8 @@ interface CanvasPayload {
   design_id?: string | null
 }
 
+import type { CanvasPayload as LoadedCanvas } from '@/utils/canvasPayload'
+
 // Mimic an axios response so callers using `.data` keep working.
 function toAxiosLike<T>(data: T): { data: T } {
   return { data }
@@ -35,7 +37,9 @@ function notImplemented(name: string): never {
 
 export const canvasApi = {
   load: async (design_id?: string) => {
-    const canvas = await wsCall<CanvasPayload>('homelable/get_canvas', {
+    // Typed as what `hydrateCanvasPayload` reads, so the theme and floor plan
+    // riding on the viewport stay typed all the way through.
+    const canvas = await wsCall<LoadedCanvas>('homelable/get_canvas', {
       design_id: design_id ?? null,
     })
     return toAxiosLike(canvas)
@@ -126,7 +130,16 @@ export const mediaApi = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: form,
     })
-    if (!res.ok) throw new Error(`media upload failed: ${res.status}`)
+    if (!res.ok) {
+      // HA views answer a refusal as `{message}`. Carried in the axios error
+      // shape so the document editor can name the limit that was hit.
+      const body = (await res.json().catch(() => null)) as { message?: string } | null
+      const error = new Error(`media upload failed: ${res.status}`) as Error & {
+        response?: { status: number; data: { detail?: string } }
+      }
+      error.response = { status: res.status, data: { detail: body?.message } }
+      throw error
+    }
     return res.json()
   },
   delete: async (filename: string): Promise<void> => {
@@ -202,14 +215,14 @@ export const scanApi = {
     return toAxiosLike(result)
   },
   pending: async () => {
-    const result = await wsCall<{ devices: object[] }>(
+    const result = await wsCall<{ devices: PendingDevice[] }>(
       'homelable/scan/pending',
       { status: 'pending' }
     )
     return toAxiosLike(result.devices)
   },
   hidden: async () => {
-    const result = await wsCall<{ devices: object[] }>(
+    const result = await wsCall<{ devices: PendingDevice[] }>(
       'homelable/scan/pending',
       { status: 'hidden' }
     )
@@ -241,7 +254,11 @@ export const scanApi = {
     })
     return toAxiosLike(result)
   },
-  stop: async () => {
+  /**
+   * Cancel the running scan. The integration runs one scan at a time, so the
+   * run id the history modal passes (the standalone's signature) is not sent.
+   */
+  stop: async (_runId?: string) => {
     const result = await wsCall<{ cancelled: boolean }>(
       'homelable/scan/cancel'
     )
@@ -339,7 +356,7 @@ export const scanApi = {
     return toAxiosLike(result.devices)
   },
   runs: async () => {
-    const result = await wsCall<{ runs: object[] }>('homelable/scan/runs')
+    const result = await wsCall<{ runs: ScanRunSummary[] }>('homelable/scan/runs')
     return toAxiosLike(result.runs)
   },
   /** One run — polled by the caller waiting on a device scan it started. */
@@ -502,6 +519,119 @@ export const proxmoxApi = {
   },
 }
 
+// ─── Documents (documentation space, homelable #418 and follow-ups) ─────────
+
+import type {
+  Doc,
+  DocBacklink,
+  DocCoverage,
+  DocRevision,
+  DocSearchResult,
+  DocumentSummary,
+  ResolutionItem,
+  UpdatePreview,
+} from '@/documentation/types'
+
+/** The HTTP status the standalone would have answered with, per WS error code. */
+const DOC_ERROR_STATUS: Record<string, number> = {
+  invalid: 400,
+  unauthorized: 403,
+  not_found: 404,
+  conflict: 409,
+}
+
+/**
+ * Call a `homelable/docs/*` command. A refusal is rethrown in the axios error
+ * shape (`response.status`, `response.data.detail`) the ported documentation
+ * store reads, so a stale update-from-device preview is still told apart by
+ * its 409 and the server's reason still reaches the toast.
+ */
+async function docsCall<T>(type: string, extra: Record<string, unknown> = {}): Promise<{ data: T }> {
+  try {
+    return toAxiosLike(await wsCall<T>(`homelable/docs/${type}`, extra))
+  } catch (error) {
+    const { code, message } = (error ?? {}) as { code?: string; message?: string }
+    const wrapped = new Error(message || `homelable/docs/${type} failed`) as Error & {
+      response?: { status: number; data: { detail?: string } }
+    }
+    wrapped.response = { status: DOC_ERROR_STATUS[code ?? ''] ?? 500, data: { detail: message } }
+    throw wrapped
+  }
+}
+
+/** Decode the base64 zip the export command returns. */
+function base64ToBlob(content: string, type: string): Blob {
+  const binary = atob(content)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type })
+}
+
+export const documentsApi = {
+  list: (params?: { kind?: string; parent_id?: string; device_id?: string; tag?: string }) =>
+    docsCall<DocumentSummary[]>('list', { ...params }),
+  get: (id: string) => docsCall<Doc>('get', { document_id: id }),
+  create: (data: {
+    title: string
+    kind?: string
+    icon?: string | null
+    parent_id?: string | null
+    device_id?: string | null
+    node_id?: string | null
+    design_id?: string | null
+    template_id?: string | null
+    body?: string
+  }) => docsCall<Doc>('create', data),
+  update: (
+    id: string,
+    data: {
+      title?: string
+      icon?: string | null
+      body?: string
+      parent_id?: string | null
+      sort_order?: number
+      starred?: boolean
+      is_homepage?: boolean
+      reviewed?: boolean
+      resync_facts?: boolean
+    },
+  ) => docsCall<Doc>('update', { document_id: id, ...data }),
+  delete: (id: string) => docsCall<{ deleted: boolean }>('delete', { document_id: id }),
+  revisions: (id: string) => docsCall<DocRevision[]>('revisions', { document_id: id }),
+  revision: (revisionId: string) =>
+    docsCall<DocRevision & { body: string }>('revision', { revision_id: revisionId }),
+  restore: (id: string, revisionId: string) =>
+    docsCall<Doc>('restore', { document_id: id, revision_id: revisionId }),
+  backlinks: (id: string) => docsCall<DocBacklink[]>('backlinks', { document_id: id }),
+  regenerate: (id: string) => docsCall<Doc>('regenerate', { document_id: id }),
+  updatePreview: (id: string, resolutions: ResolutionItem[] = []) =>
+    docsCall<UpdatePreview>('update_preview', { document_id: id, resolutions }),
+  updateFromDevice: (id: string, preview_id: string, resolutions: ResolutionItem[] = []) =>
+    docsCall<Doc>('update_from_device', { document_id: id, preview_id, resolutions }),
+  search: (q: string, limit = 25) => docsCall<DocSearchResult>('search', { q, limit }),
+  block: (block: string, deviceId: string) =>
+    docsCall<{ block: string; markdown: string }>('block', { block, device_id: deviceId }),
+  coverage: () => docsCall<DocCoverage>('coverage'),
+  /**
+   * A zip of `.md` files mirroring the tree. Travels base64 over the WS (the
+   * archive of a homelab's markdown is kilobytes) and is handed back as a Blob
+   * with the server's filename in a `content-disposition`-shaped header, so the
+   * ported download helper reads it unchanged.
+   */
+  export: async () => {
+    const { data } = await docsCall<{ filename: string; content: string }>('export')
+    return {
+      data: base64ToBlob(data.content, 'application/zip'),
+      headers: { 'content-disposition': `attachment; filename="${data.filename}"` } as Record<
+        string,
+        string
+      >,
+    }
+  },
+  scaffold: (data: { device_ids?: string[]; only_with_notes?: boolean }) =>
+    docsCall<{ created: DocumentSummary[]; skipped: number }>('scaffold', data),
+}
+
 // ─── Settings (stubbed: HA owns config via options flow) ────────────────────
 
 export const settingsApi = {
@@ -527,7 +657,8 @@ export const edgesApi = {
 // ─── Auth (HA handles auth — these are no-ops) ──────────────────────────────
 
 export const authApi = {
-  login: async (_username: string, _password: string) =>
+  // Typed like the standalone call so the (unused in HA) LoginPage compiles.
+  login: async (_username: string, _password: string): Promise<{ data: { access_token: string } }> =>
     notImplemented('authApi.login (HA handles auth)'),
 }
 

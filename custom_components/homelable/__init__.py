@@ -51,6 +51,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # First setup after the upgrade that brought documentation: every device's
+    # old notes become a device document. Idempotent — a stored flag makes it
+    # run once — and never allowed to fail the setup.
+    try:
+        await coordinator.documents.migrate_notes()
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("Could not move device notes into documents")
+
     async_register_websocket_commands(hass)
     # Reload on options change unregisters the panel first, so a toggled
     # admin-only setting is applied on the way back up.

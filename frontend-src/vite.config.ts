@@ -1,5 +1,5 @@
 import path from 'path'
-import { defineConfig, type UserConfig } from 'vitest/config'
+import { defineConfig, type ViteUserConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import cssInjectedByJsPlugin from 'vite-plugin-css-injected-by-js'
@@ -12,7 +12,7 @@ const HA_OUT_DIR = path.resolve(
 export default defineConfig(({ mode }) => {
   const isHaBuild = mode === 'ha'
 
-  const baseConfig: UserConfig = {
+  const baseConfig: ViteUserConfig = {
     define: {
       // Standalone reads VERSION from disk; HA build uses package.json or a placeholder.
       __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0'),
@@ -33,7 +33,10 @@ export default defineConfig(({ mode }) => {
         ? [
             cssInjectedByJsPlugin({
               injectCodeFunction: function injectStashCode(cssCode: string) {
-                const w = window as unknown as Record<string, string | undefined>
+                // Serialized into the bundle and run in the page, where
+                // `globalThis` is `window`; spelled this way so the config,
+                // type-checked against Node, compiles.
+                const w = globalThis as unknown as Record<string, string | undefined>
                 const current = w.__HOMELABLE_CSS__ ?? ''
                 if (current.includes(cssCode)) return
                 w.__HOMELABLE_CSS__ = current + cssCode

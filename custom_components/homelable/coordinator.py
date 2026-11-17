@@ -80,6 +80,7 @@ from .const import (
     ZIGBEE_SOURCE_ZHA,
     ZIGBEE_SOURCES,
 )
+from .documents import DocumentManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -270,6 +271,9 @@ class HomelableCoordinator(DataUpdateCoordinator):
         self.racks_store: Store = Store(
             hass, STORAGE_VERSION_RACKS, STORAGE_KEY_RACKS
         )
+        # The documentation space reads the inventory, canvases and racks
+        # through this coordinator, and is told when one of them is deleted.
+        self.documents = DocumentManager(hass, self)
         # Multi-design canvas: `_canvases` maps design_id -> canvas dict;
         # `_designs` is the ordered list of design metadata. Both are loaded
         # (and legacy single-canvas data migrated) lazily via _ensure_loaded.
@@ -944,7 +948,12 @@ class HomelableCoordinator(DataUpdateCoordinator):
         if len(self._designs) <= 1:
             return "last"
         self._designs = [d for d in self._designs if d["id"] != design_id]
-        self._canvases.pop(design_id, None)
+        canvas = self._canvases.pop(design_id, None) or {}
+        # What was written about the canvas and its zones outlives them.
+        await self.documents.unlink(
+            node_ids=[n["id"] for n in canvas.get("nodes", []) if n.get("id")],
+            design_ids=[design_id],
+        )
         await self._save_designs()
         await self._save_canvases()
         rack_states = await self._get_racks()
@@ -1606,16 +1615,19 @@ class HomelableCoordinator(DataUpdateCoordinator):
         await self._ensure_loaded()
         store = await self._get_pending()
         drawn = self._nodes_by_device()
-        before = len(store["devices"])
-        store["devices"] = [
+        kept = [
             d
             for d in store["devices"]
             if d.get("status") != "pending" or d.get("id") in drawn
         ]
-        removed = before - len(store["devices"])
-        if removed:
+        # Only the rows actually dropped lose their document link: a device
+        # approved meanwhile keeps it (homelable #509).
+        dropped = {d.get("id") for d in store["devices"]} - {d.get("id") for d in kept}
+        store["devices"] = kept
+        if dropped:
+            await self.documents.unlink(device_ids=[i for i in dropped if i])
             await self._save_pending()
-        return removed
+        return len(dropped)
 
     async def remove_pending(self, device_id: str) -> bool:
         """Remove a pending device from the store. Returns True if found.
@@ -1627,6 +1639,7 @@ class HomelableCoordinator(DataUpdateCoordinator):
         before = len(store["devices"])
         store["devices"] = [d for d in store["devices"] if d["id"] != device_id]
         if len(store["devices"]) < before:
+            await self.documents.unlink(device_ids=[device_id])
             await self._save_pending()
             return True
         return False

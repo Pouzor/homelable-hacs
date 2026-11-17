@@ -7,12 +7,13 @@ Visualize and monitor your homelab network as an interactive topology, inside Ho
 - Interactive network topology canvas as a Lovelace panel
 - Read-only canvas card for any dashboard (`custom:homelable-canvas-card`)
 - Rack canvas: racks, mounted gear and port-to-port patching
+- Documentation: a Markdown page per device plus a Library of runbooks, with history, backlinks, search and Markdown export
 - nmap-based local network scanning + service fingerprinting
 - Live status monitoring (ping/HTTP/SSH/TCP)
 - 11 node types covering routers, switches, servers, Proxmox + VM/LXC, NAS, IoT, APs
 - Zigbee import from ZHA or Zigbee2MQTT, plus Z-Wave JS through HA's MQTT integration
 - Proxmox VE import (hosts / VMs / LXC) via a read-only API token, with optional auto-sync
-- Canvas persisted via HA Storage — no external database
+- Canvas and documents persisted via HA Storage — no external database
 - Uses HA native auth — no extra login
 
 ## Setup

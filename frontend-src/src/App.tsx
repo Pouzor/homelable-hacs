@@ -6,6 +6,11 @@ const LazyCanvas = lazy(() => import('@/components/canvas/LazyCanvas'))
 // The rack renderer (React Flow, faceplate artwork) only loads for rack designs.
 const RackCanvas = lazy(() => import('@/rack/components/RackCanvas').then((m) => ({ default: m.RackCanvas })))
 const RackCablePanel = lazy(() => import('@/rack/components/RackCablePanel').then((m) => ({ default: m.RackCablePanel })))
+// Code-split: the Documentation section pulls in the markdown renderer, which a
+// user who never leaves the canvas should not pay for on first load.
+const DocumentationView = lazy(() =>
+  import('@/documentation/components/DocumentationView').then((m) => ({ default: m.DocumentationView })),
+)
 import { applyDagreLayout } from '@/utils/layout'
 import { serializeNode, serializeEdge, migrateClusterHandles } from '@/utils/canvasSerializer'
 import { generateUUID } from '@/utils/uuid'
@@ -33,6 +38,8 @@ import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
 import { CustomStyleModal } from '@/components/modals/CustomStyleModal'
 import { SearchModal } from '@/components/modals/SearchModal'
+import { useUiStore } from '@/stores/uiStore'
+import { openDocument, openDocumentationForDevice } from '@/documentation/navigate'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -278,13 +285,30 @@ export default function App() {
       // Ignore shortcuts when typing in an input/textarea
       const isInput = isTypingTarget(e)
 
-      if (ctrl && e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
+      // Documentation's editor binds its own Ctrl+S; the canvas save must not
+      // fire under it.
+      if (ctrl && e.key === 's') {
+        if (useUiStore.getState().view === 'documentation') return
+        e.preventDefault(); handleSaveRef.current(); return
+      }
       // History and clipboard belong to the logical canvas; on a rack canvas
       // they would act on a canvas that is not on screen.
       const onRack = useDesignStore.getState().activeDesignType === 'rack'
       if (onRack && ctrl && ['z', 'y', 'c', 'v'].includes(e.key.toLowerCase())) return
-      if (ctrl && e.key === 'z') { e.preventDefault(); undoRef.current(); return }
-      if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redoRef.current(); return }
+      // Undo belongs to whatever is being typed in — the document editor keeps
+      // its own history, a plain field has the browser's — and the canvas only
+      // gets it when nothing has the caret (homelable #418). Documentation
+      // shows no canvas, so the canvas history is left alone there too.
+      const inDocs = useUiStore.getState().view === 'documentation'
+      if (ctrl && e.key.toLowerCase() === 'z') {
+        if (isInput || inDocs) return
+        e.preventDefault()
+        if (e.shiftKey) redoRef.current()
+        else undoRef.current()
+        return
+      }
+      if (ctrl && e.key.toLowerCase() === 'y') { if (isInput || inDocs) return; e.preventDefault(); redoRef.current(); return }
+      if (inDocs && ctrl && ['c', 'v'].includes(e.key.toLowerCase())) return
       if (ctrl && e.key === 'k') { e.preventDefault(); setSearchOpen(true); return }
       if (ctrl && e.key === 'c' && !isInput) { copyRef.current(); return }
       if (ctrl && e.key === 'v' && !isInput) { pasteRef.current(); return }
@@ -627,6 +651,8 @@ export default function App() {
   const editNode = editNodeId ? nodes.find((n) => n.id === editNodeId) : null
   const editEdge = editEdgeId ? edges.find((e) => e.id === editEdgeId) : null
 
+  const appView = useUiStore((s) => s.view)
+
   if (!STANDALONE && !isAuthenticated) return <LoginPage />
 
   return (
@@ -645,6 +671,14 @@ export default function App() {
             highlightPendingId={highlightPendingId}
           />
           <div className="flex flex-col flex-1 min-w-0">
+            {appView === 'documentation' ? (
+              <Suspense
+                fallback={<div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">Loading documentation…</div>}
+              >
+                <DocumentationView />
+              </Suspense>
+            ) : (
+            <>
             <Toolbar
               onSave={handleSave}
               onAutoLayout={handleAutoLayout}
@@ -683,8 +717,18 @@ export default function App() {
                   double-click, so it gets the rail. */}
               {isRackDesign
                 ? <Suspense fallback={null}><RackCablePanel /></Suspense>
-                : (selectedNodeId || selectedNodeIds.length > 1) && <DetailPanel onEdit={handleEditNode} onOpenInventory={openPending} />}
+                : (selectedNodeId || selectedNodeIds.length > 1) && (
+                  <DetailPanel
+                    onEdit={handleEditNode}
+                    onOpenInventory={openPending}
+                    onOpenDocumentation={
+                      STANDALONE ? undefined : (deviceId, label) => void openDocumentationForDevice(deviceId, label)
+                    }
+                  />
+                )}
             </div>
+            </>
+            )}
           </div>
         </div>
 
@@ -847,6 +891,7 @@ export default function App() {
           open={searchOpen}
           onClose={() => setSearchOpen(false)}
           onOpenPending={openPending}
+          onOpenDocument={STANDALONE ? undefined : (docId) => void openDocument(docId)}
         />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 

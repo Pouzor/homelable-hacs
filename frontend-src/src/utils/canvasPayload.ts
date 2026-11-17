@@ -15,7 +15,8 @@ import {
   type ApiNode,
   type ApiEdge,
 } from '@/utils/canvasSerializer'
-import type { CustomStyleDef, EdgeData, FloorMapConfig, NodeData, ThemeId } from '@/types'
+import type { CustomStyleDef, EdgeData, FloorMapConfig, NodeData } from '@/types'
+import type { ThemeId } from '@/utils/themes'
 
 /** The shape `canvasApi.load()` resolves to (`res.data`). */
 export interface CanvasPayload {

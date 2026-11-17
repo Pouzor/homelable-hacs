@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { SearchModal } from '../SearchModal'
 import { useCanvasStore } from '@/stores/canvasStore'
 import type { Node } from '@xyflow/react'
@@ -10,8 +10,11 @@ vi.mock('@xyflow/react', () => ({
   useReactFlow: () => ({ fitView: mockFitView }),
 }))
 
+const mockDocSearch = vi.fn()
+const mockPending = vi.fn().mockResolvedValue({ data: [] })
 vi.mock('@/api/client', () => ({
-  scanApi: { pending: vi.fn().mockResolvedValue({ data: [] }) },
+  scanApi: { pending: (...args: unknown[]) => mockPending(...args) },
+  documentsApi: { search: (...args: unknown[]) => mockDocSearch(...args) },
 }))
 
 const mockOnOpenPending = vi.fn()
@@ -167,5 +170,63 @@ describe('SearchModal', () => {
     render(<SearchModal open onClose={vi.fn()} onOpenPending={mockOnOpenPending} />)
     fireEvent.change(screen.getByPlaceholderText(/search nodes/i), { target: { value: 'MY NAS' } })
     expect(screen.getByText('My NAS')).toBeDefined()
+  })
+})
+
+describe('SearchModal — documents (homelable #421)', () => {
+  beforeEach(() => {
+    useCanvasStore.setState({ nodes: [], edges: [], selectedNodeId: null })
+    mockDocSearch.mockReset()
+    mockDocSearch.mockResolvedValue({
+      data: {
+        engine: 'like',
+        hits: [{ doc_id: 'd1', title: 'Backups', kind: 'page', snippet: 'Restic runs nightly', device_id: null }],
+      },
+    })
+  })
+
+  it('lists document hits and opens the one picked', async () => {
+    const onOpenDocument = vi.fn()
+    const onClose = vi.fn()
+    render(<SearchModal open onClose={onClose} onOpenPending={mockOnOpenPending} onOpenDocument={onOpenDocument} />)
+    fireEvent.change(screen.getByPlaceholderText(/search nodes/i), { target: { value: 'restic' } })
+
+    const hit = await screen.findByText('Backups')
+    expect(mockDocSearch).toHaveBeenCalledWith('restic', 5)
+    expect(screen.getByText('Restic runs nightly')).toBeDefined()
+    fireEvent.click(hit)
+    expect(onOpenDocument).toHaveBeenCalledWith('d1')
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not ask for documents where none can be opened', async () => {
+    render(<SearchModal open onClose={vi.fn()} onOpenPending={mockOnOpenPending} />)
+    fireEvent.change(screen.getByPlaceholderText(/search nodes/i), { target: { value: 'restic' } })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(mockDocSearch).not.toHaveBeenCalled()
+  })
+
+  it('waits for two characters before searching documents', async () => {
+    render(<SearchModal open onClose={vi.fn()} onOpenPending={mockOnOpenPending} onOpenDocument={vi.fn()} />)
+    fireEvent.change(screen.getByPlaceholderText(/search nodes/i), { target: { value: 'r' } })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(mockDocSearch).not.toHaveBeenCalled()
+  })
+})
+
+describe('SearchModal — devices with no IP', () => {
+  it('searches past a Zigbee device that has no address', async () => {
+    useCanvasStore.setState({ nodes: [], edges: [], selectedNodeId: null })
+    mockPending.mockResolvedValueOnce({
+      data: [
+        { id: 'z1', ip: null, hostname: 'kitchen-plug', services: [], status: 'pending' },
+        { id: 'd2', ip: '192.168.1.9', hostname: 'nas', services: [], status: 'pending' },
+      ],
+    })
+    render(<SearchModal open onClose={vi.fn()} onOpenPending={mockOnOpenPending} />)
+    await waitFor(() => expect(mockPending).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    fireEvent.change(screen.getByPlaceholderText(/search nodes/i), { target: { value: 'kitchen' } })
+    expect(screen.getByText('kitchen-plug')).toBeDefined()
   })
 })
