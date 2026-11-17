@@ -91,7 +91,8 @@ export function DetailPanel({ onEdit, onOpenInventory, onOpenDocumentation }: De
   const openSvcModal = svcModal?.nodeId === node.id ? svcModal : null
   const { data } = node
   const services = data.services ?? []
-  const statusColor = STATUS_COLORS[data.status]
+  const monitored = isMonitored(data)
+  const statusColor = monitored ? STATUS_COLORS[data.status] : undefined
   const host = data.ip ?? data.hostname
 
   const handleDelete = () => {
@@ -182,8 +183,14 @@ export function DetailPanel({ onEdit, onOpenInventory, onOpenDocumentation }: De
       </div>
 
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
-        <span className="text-sm capitalize" style={{ color: statusColor }}>{data.status}</span>
+        {monitored ? (
+          <>
+            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
+            <span className="text-sm capitalize" style={{ color: statusColor }}>{data.status}</span>
+          </>
+        ) : (
+          <span className="text-sm text-muted-foreground">Not monitored</span>
+        )}
         {data.response_time_ms !== undefined && (
           <span className="ml-auto font-mono text-xs text-muted-foreground">{data.response_time_ms}ms</span>
         )}
@@ -320,6 +327,30 @@ export function DetailPanel({ onEdit, onOpenInventory, onOpenDocumentation }: De
         </Button>
       </div>
     </aside>
+  )
+}
+
+// --- Status display ---
+
+/** Check method `none` is never probed: the backend reports such a node as
+ *  "online" by default, so its status carries no information (same rule as the
+ *  canvas status dot in BaseNode / ProxmoxGroupNode). */
+function isMonitored(data: NodeData): boolean {
+  return data.check_method !== 'none'
+}
+
+/** List-row status dot; an unmonitored node keeps the slot (alignment) but
+ *  draws nothing. */
+function StatusDot({ data }: { data: NodeData }) {
+  const monitored = isMonitored(data)
+  return (
+    <span
+      className="w-1.5 h-1.5 rounded-full shrink-0"
+      style={{ backgroundColor: monitored ? STATUS_COLORS[data.status] : 'transparent' }}
+      title={monitored ? data.status : 'Not monitored'}
+      data-testid="status-dot"
+      data-monitored={monitored}
+    />
   )
 }
 
@@ -477,7 +508,7 @@ function MultiSelectPanel({ nodeIds, nodes, groupName, setGroupName, creatingGro
       <div className="flex-1 px-4 py-3 space-y-1.5 overflow-y-auto">
         {selectedNodes.map((n) => (
           <div key={n.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-secondary text-xs">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLORS[n.data.status] }} />
+            <StatusDot data={n.data} />
             <span className="truncate text-foreground font-medium">{n.data.label}</span>
             <span className="ml-auto text-muted-foreground shrink-0">{NODE_TYPE_LABELS[n.data.type] ?? n.data.type}</span>
           </div>
@@ -535,8 +566,9 @@ interface GroupDetailPanelProps {
 
 function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescription, onSnapshotBeforeEdit, onToggleBorder, onClose, onSelectChild }: GroupDetailPanelProps) {
   const children = nodes.filter((n) => n.parentId === node.id)
-  const onlineCount = children.filter((n) => n.data.status === 'online').length
-  const offlineCount = children.filter((n) => n.data.status === 'offline').length
+  const monitoredChildren = children.filter((n) => isMonitored(n.data))
+  const onlineCount = monitoredChildren.filter((n) => n.data.status === 'online').length
+  const offlineCount = monitoredChildren.filter((n) => n.data.status === 'offline').length
   const showBorder = node.data.custom_colors?.show_border !== false
 
   // Description reuses data.notes, which already round-trips to the backend.
@@ -606,7 +638,7 @@ function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescr
               onClick={() => onSelectChild(child.id)}
               className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
             >
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLORS[child.data.status] }} />
+              <StatusDot data={child.data} />
               <span className="truncate text-foreground font-medium">{child.data.label}</span>
               <span className="ml-auto text-muted-foreground shrink-0">{NODE_TYPE_LABELS[child.data.type] ?? child.data.type}</span>
             </button>

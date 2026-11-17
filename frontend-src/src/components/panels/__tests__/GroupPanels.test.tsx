@@ -84,6 +84,16 @@ describe('MultiSelectPanel', () => {
     expect(screen.getByText('My NAS')).toBeDefined()
   })
 
+  it('draws no status colour for an unmonitored node (check method "none")', () => {
+    const n1 = makeNode('n1', { data: { label: 'Bulb', type: 'zigbee_enddevice', status: 'online', check_method: 'none', services: [] } })
+    const n2 = makeNode('n2', { data: { label: 'NAS', type: 'nas', status: 'online', services: [] } })
+    setupStore({ nodes: [n1, n2], selectedNodeId: null, selectedNodeIds: ['n1', 'n2'] })
+    renderPanel()
+    const dots = screen.getAllByTestId('status-dot')
+    expect(dots.map((d) => d.getAttribute('data-monitored'))).toEqual(['false', 'true'])
+    expect(dots[0].style.backgroundColor).toBe('transparent')
+  })
+
   it('shows Create Group button', () => {
     const n1 = makeNode('n1')
     const n2 = makeNode('n2')
@@ -168,6 +178,18 @@ describe('GroupDetailPanel', () => {
     renderPanel()
     expect(screen.getByText(/1 online/)).toBeDefined()
     expect(screen.getByText(/1 offline/)).toBeDefined()
+  })
+
+  it('leaves unmonitored children (check method "none") out of the online count', () => {
+    const group = makeGroupNode()
+    const c1 = makeNode('c1', { parentId: 'g1', data: { label: 'A', type: 'server', status: 'online', services: [] } })
+    const c2 = makeNode('c2', { parentId: 'g1', data: { label: 'B', type: 'server', status: 'online', check_method: 'none', services: [] } })
+    setupStore({ nodes: [group, c1, c2], selectedNodeId: 'g1', selectedNodeIds: ['g1'] })
+    renderPanel()
+    expect(screen.getByText('2 nodes')).toBeDefined()
+    expect(screen.getByText(/1 online/)).toBeDefined()
+    const dots = screen.getAllByTestId('status-dot')
+    expect(dots.map((d) => d.getAttribute('data-monitored'))).toEqual(['true', 'false'])
   })
 
   it('shows Ungroup button', () => {
