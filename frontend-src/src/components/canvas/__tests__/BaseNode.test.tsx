@@ -369,3 +369,20 @@ describe('BaseNode — legacy hardware fallback', () => {
     expect(screen.queryByText('Intel Xeon E5-2680')).toBeNull()
   })
 })
+
+describe('BaseNode — status dot', () => {
+  it('hides the status dot when check method is "none"', () => {
+    renderBaseNode({ check_method: 'none', status: 'online' })
+    expect(screen.queryByTestId('node-status-dot')).toBeNull()
+  })
+
+  it('shows the status dot when a real check method is set', () => {
+    renderBaseNode({ check_method: 'ping', status: 'online' })
+    expect(screen.queryByTestId('node-status-dot')).not.toBeNull()
+  })
+
+  it('shows the status dot when check method is unset (defaults to ping)', () => {
+    renderBaseNode({ status: 'offline' })
+    expect(screen.queryByTestId('node-status-dot')).not.toBeNull()
+  })
+})
