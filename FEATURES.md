@@ -23,6 +23,7 @@ Here's what Homelable can do inside Home Assistant. One line on what each featur
 13. [Export (PNG / SVG / YAML / Markdown)](#13-export)
 14. [Settings & Shortcuts](#14-settings--shortcuts)
 15. [Rack Canvas](#15-rack-canvas)
+16. [Documentation](#16-documentation)
 
 ---
 
@@ -218,6 +219,26 @@ Nodes: `proxmox` (host) / `vm` / `lxc`, linked host→guest by a `virtual` edge;
 - **Import links** turns the ethernet/fibre links already drawn on your network canvases into patches between the racked devices. Running it again only adds what is missing.
 - **Save Rack** stores the canvas — saves are explicit, like everywhere else. **PNG** export works on a rack canvas too.
 - Not there yet: rear view, 0U side PDUs, power budgeting, undo/redo on a rack canvas, and a dashboard card for rack canvases (the card's picker only lists network canvases).
+
+---
+
+## 16. Documentation
+
+**What:** A Markdown document per device, plus a free-form Library of pages and folders, for everything the canvas cannot say: what a box is for, how to rebuild it, where its backups go, what to do when it breaks.
+
+**Use:**
+- Sidebar → **Documentation**. The tree shows the **Library** first, then every device, grouped the way you pick: by zone, subnet, type, canvas, rack, vendor, tag…
+- Pick a device to open its document. If it has none yet, one is written from what Homelable knows: addresses, hardware, one section per fingerprinted service, rack and zone placement, the nodes it is wired to, and empty sections for configuration, backups, troubleshooting and changelog. The device's old **Notes** are copied in under **Notes**. From then on the document is yours, and nothing rewrites it on its own.
+- A node's detail panel (**Open in documentation**) and a device's Inventory modal (**Documentation**) jump straight to its document.
+- The **+** menu adds pages and folders to the Library. Templates: blank, runbook, service, network, incident, procedure, decision record, zone, and a **homepage** that indexes your canvases, Library and key devices. Set one page as the homepage and Documentation opens on it.
+- **Edit** opens a Markdown editor. Type `/` for the insert menu: fresh device blocks (services, hardware, network, rack…), tables, task lists, today's date, or **/image** and **/pdf** to upload a file (PNG, JPEG, WebP or PDF; dropping or pasting a file works too). Type `[[` to link another document: `[[VLAN plan]]`, `[[device:nas]]`. Saves are explicit, like everywhere else.
+- Each document keeps its last 50 versions: **History** shows the diff and restores any of them. **Linked from** lists the documents that point at the one you are reading.
+- When a device changes after its document was written, the document says so. **Update from device** merges the new facts into the generated tables and keeps your own text; where you and the device both changed the same thing, you choose. **Regenerate** throws the body away and starts over (still undoable from History).
+- Add `review_every: 6m` to a document's frontmatter and it is flagged once it has not been reviewed for that long. `tags: [...]` filter the tree.
+- **Search** (`Ctrl/Cmd+K`) finds documents by title, tag and text, next to nodes and devices.
+- **Export all** downloads every document as a zip of `.md` files mirroring the tree; a single document downloads from its own menu.
+- Documents live in Home Assistant Storage (`homelable_documents`). Deleting a device or a canvas keeps what you wrote: the document stays, unlinked.
+- Not here (standalone only): the read-only public link, push to a git repository, and editing from MCP. SVG uploads are refused, because Home Assistant serves uploaded files without the sandboxing an SVG needs.
 
 ---
 

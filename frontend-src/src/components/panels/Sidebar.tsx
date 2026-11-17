@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2, Map, Rows3 } from 'lucide-react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Eye, Radio, RadioTower, Server, Type, PlusCircle, Pencil, Trash2, Map, Rows3, BookOpen } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
@@ -15,6 +15,8 @@ import { toast } from 'sonner'
 import { useLatestRelease } from '@/hooks/useLatestRelease'
 
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
+import { useUiStore } from '@/stores/uiStore'
+import { openDocumentation, openDocumentationForDevice } from '@/documentation/navigate'
 import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 import { ZwaveImportModal } from '@/components/zwave/ZwaveImportModal'
@@ -27,10 +29,11 @@ import type { Node, Connection } from '@xyflow/react'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
-type SidebarView = 'canvas' | 'pending' | 'hidden' | 'history'
+type SidebarView = 'canvas' | 'documentation' | 'pending' | 'hidden' | 'history'
 
 const ALL_VIEWS = [
   { id: 'canvas' as SidebarView, icon: LayoutDashboard, label: 'Canvas' },
+  { id: 'documentation' as SidebarView, icon: BookOpen, label: 'Documentation' },
   { id: 'pending' as SidebarView, icon: ScanLine, label: 'Device Inventory' },
   { id: 'hidden' as SidebarView, icon: EyeOff, label: 'Hidden Devices' },
   { id: 'history' as SidebarView, icon: Clock, label: 'Scan History' },
@@ -61,7 +64,12 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
 
   // When forceView is set, override local state without useEffect
   const collapsed = forceView ? false : _collapsed
-  const activeView = forceView ?? _activeView
+  // Canvas and Documentation are the two top-level sections (uiStore); the
+  // other entries only open modals over whichever is showing.
+  const appView = useUiStore((s) => s.view)
+  const setAppView = useUiStore((s) => s.setView)
+  const inDocs = appView === 'documentation'
+  const activeView = forceView ?? (inDocs ? 'documentation' : _activeView)
 
   const { nodes, hasUnsavedChanges: canvasDirty, hideIp, toggleHideIp, addNode, onConnect, snapshotHistory, markUnsaved, floorMap, setFloorMap } = useCanvasStore()
   const floorMapEditNonce = useCanvasStore((s) => s.floorMapEditNonce)
@@ -332,6 +340,11 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
                 setScanHistoryOpen(true)
                 return
               }
+              if (id === 'documentation') {
+                void openDocumentation()
+                return
+              }
+              setAppView('canvas')
               setActiveView(id)
             }}
           />
@@ -341,11 +354,12 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       {/* Spacer — pending / hidden / history all open in modals. On a rack
           canvas the accessory tray takes the space: it scrolls, everything
           else stays pinned. */}
-      {isRack && !collapsed ? <AccessoryTray /> : !collapsed && <div className="flex-1" />}
+      {isRack && !inDocs && !collapsed ? <AccessoryTray /> : !collapsed && <div className="flex-1" />}
 
-      {/* Stats footer */}
-      {!collapsed && isRack && <RackStats />}
-      {!collapsed && !isRack && (
+      {/* Stats footer — and below it the canvas actions, which act on a canvas
+          Documentation does not show. */}
+      {!collapsed && !inDocs && isRack && <RackStats />}
+      {!collapsed && !inDocs && !isRack && (
         <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground space-y-0.5">
           <div className="flex justify-between">
             <span>Total</span>
@@ -363,6 +377,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
       )}
 
       {/* Actions */}
+      {!inDocs && (
       <div className="flex flex-col gap-0.5 p-2 border-t border-border">
         {isRack ? (
           <SidebarItem icon={Plus} label="Add Device" collapsed={collapsed} onClick={() => openDeviceEditor()} />
@@ -394,6 +409,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
           accent
         />
       </div>
+      )}
 
       {!collapsed && <VersionBadge />}
 
@@ -427,6 +443,14 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onSave, 
         onClose={() => setPendingModalOpen(false)}
         highlightId={highlightPendingId}
         initialStatus={pendingModalStatus}
+        onOpenDocumentation={
+          STANDALONE
+            ? undefined
+            : (deviceId, label) => {
+                setPendingModalOpen(false)
+                void openDocumentationForDevice(deviceId, label)
+              }
+        }
       />
       <ScanHistoryModal
         open={scanHistoryOpen}

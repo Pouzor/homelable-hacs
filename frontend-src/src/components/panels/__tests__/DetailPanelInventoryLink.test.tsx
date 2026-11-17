@@ -67,3 +67,27 @@ describe('DetailPanel — inventory link', () => {
     expect(screen.queryByRole('button', { name: /Open in inventory/i })).toBeNull()
   })
 })
+
+describe('DetailPanel — documentation link (homelable #418)', () => {
+  it('opens the documentation of the linked device', () => {
+    setupStore({ device_id: 'dev-1', label: 'NAS' })
+    const onOpenDocumentation = vi.fn()
+    render(<DetailPanel onEdit={vi.fn()} onOpenDocumentation={onOpenDocumentation} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Open in documentation/i }))
+    expect(onOpenDocumentation).toHaveBeenCalledWith('dev-1', 'NAS')
+  })
+
+  it('offers it beside the inventory link', () => {
+    setupStore({ device_id: 'dev-1' })
+    render(<DetailPanel onEdit={vi.fn()} onOpenInventory={vi.fn()} onOpenDocumentation={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Open in inventory/i })).toBeDefined()
+    expect(screen.getByRole('button', { name: /Open in documentation/i })).toBeDefined()
+  })
+
+  it('offers nothing for a node with no device', () => {
+    setupStore({})
+    render(<DetailPanel onEdit={vi.fn()} onOpenDocumentation={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /Open in documentation/i })).toBeNull()
+  })
+})

@@ -4,6 +4,7 @@ import { Sidebar } from '../Sidebar'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useRackStore } from '@/rack/store'
+import { useUiStore } from '@/stores/uiStore'
 import type { Node } from '@xyflow/react'
 import type { Design, NodeData } from '@/types'
 
@@ -370,5 +371,30 @@ describe('Sidebar — rack canvas', () => {
     useRackStore.setState({ hasUnsavedChanges: true })
     rerender(<Sidebar {...defaultProps} />)
     expect(screen.getByText('Save Rack').closest('button')?.querySelector('.rounded-full')).not.toBeNull()
+  })
+})
+
+describe('Sidebar — Documentation (homelable #418)', () => {
+  beforeEach(() => {
+    mockStore()
+    vi.clearAllMocks()
+    useUiStore.setState({ view: 'canvas' })
+  })
+
+  it('switches the panel to Documentation and back', () => {
+    render(<Sidebar {...defaultProps} />)
+    fireEvent.click(screen.getByText('Documentation'))
+    expect(useUiStore.getState().view).toBe('documentation')
+    fireEvent.click(screen.getByText('Canvas'))
+    expect(useUiStore.getState().view).toBe('canvas')
+  })
+
+  it('hides the canvas actions while Documentation is showing', () => {
+    useUiStore.setState({ view: 'documentation' })
+    render(<Sidebar {...defaultProps} />)
+    expect(screen.queryByText('Add Node')).not.toBeInTheDocument()
+    expect(screen.queryByText('Save Canvas')).not.toBeInTheDocument()
+    // The inventory is still one click away.
+    expect(screen.getByText('Device Inventory')).toBeInTheDocument()
   })
 })

@@ -2,18 +2,28 @@ import { useState, useCallback, useEffect } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { Search } from 'lucide-react'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { scanApi } from '@/api/client'
+import { documentsApi, scanApi } from '@/api/client'
 import type { PendingDevice } from '@/components/modals/PendingDeviceModal'
+import type { DocSearchHit } from '@/documentation/types'
+import { useUiStore } from '@/stores/uiStore'
+
+/** Long enough that a stray keystroke does not hit the server. */
+const DOC_SEARCH_DEBOUNCE = 250
 
 interface SearchModalProps {
   open: boolean
   onClose: () => void
   onOpenPending: (deviceId: string) => void
+  /** Opens a document hit. Omitted where there are no documents to open. */
+  onOpenDocument?: (docId: string) => void
 }
 
-export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) {
+export function SearchModal({ open, onClose, onOpenPending, onOpenDocument }: SearchModalProps) {
   const [query, setQuery] = useState('')
   const [pendingDevices, setPendingDevices] = useState<PendingDevice[]>([])
+  // Kept with the query it answered, so a stale answer is never shown against a
+  // newer query and no effect has to clear it (homelable #421).
+  const [docHits, setDocHits] = useState<{ query: string; hits: DocSearchHit[] }>({ query: '', hits: [] })
   const nodes = useCanvasStore((s) => s.nodes)
   const setSelectedNode = useCanvasStore((s) => s.setSelectedNode)
   const { fitView } = useReactFlow()
@@ -22,6 +32,28 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
     if (!open) return
     scanApi.pending().then((res) => setPendingDevices(res.data)).catch(() => {})
   }, [open])
+
+  // Documents are not in memory — the tree only holds their metadata, and the
+  // body is what makes a search worth running — so this one asks the server.
+  useEffect(() => {
+    if (!open || !onOpenDocument) return
+    const needle = query.trim()
+    if (needle.length < 2) return
+    let live = true
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await documentsApi.search(needle, 5)
+        if (live) setDocHits({ query: needle, hits: data.hits })
+      } catch {
+        // The rest of the modal still works without document search.
+        if (live) setDocHits({ query: needle, hits: [] })
+      }
+    }, DOC_SEARCH_DEBOUNCE)
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [open, query, onOpenDocument])
 
   const searchable = nodes.filter((n) => n.data.type !== 'groupRect')
   const q = query.toLowerCase()
@@ -33,7 +65,8 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
   ).slice(0, 6)
 
   const pendingResults = q.length === 0 ? [] : pendingDevices.filter((d) =>
-    d.ip.toLowerCase().includes(q) ||
+    // A Zigbee / Z-Wave device has no IP: matched by its other fields only.
+    d.ip?.toLowerCase().includes(q) ||
     d.hostname?.toLowerCase().includes(q) ||
     d.services.some((s) =>
       s.service_name?.toLowerCase().includes(q) ||
@@ -41,9 +74,13 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
     )
   ).slice(0, 4)
 
-  const totalResults = nodeResults.length + pendingResults.length
+  const documentResults = docHits.query && docHits.query === query.trim() ? docHits.hits : []
+
+  const totalResults = nodeResults.length + pendingResults.length + documentResults.length
 
   const handleSelectNode = useCallback((nodeId: string) => {
+    // A node hit from inside Documentation goes back to the canvas it is on.
+    useUiStore.getState().setView('canvas')
     setSelectedNode(nodeId)
     fitView({ nodes: [{ id: nodeId }], duration: 600, padding: 0.4, maxZoom: 1.5 })
     onClose()
@@ -55,6 +92,12 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
     onClose()
     setQuery('')
   }, [onOpenPending, onClose])
+
+  const handleSelectDocument = useCallback((docId: string) => {
+    onOpenDocument?.(docId)
+    onClose()
+    setQuery('')
+  }, [onOpenDocument, onClose])
 
   if (!open) return null
 
@@ -70,12 +113,14 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search nodes, pending devices by IP or service…"
+            placeholder={onOpenDocument ? 'Search nodes, devices and documents…' : 'Search nodes, pending devices by IP or service…'}
             className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Escape') { onClose(); setQuery('') }
+              // Enter takes the first result in the order they are listed.
               if (e.key === 'Enter' && nodeResults.length > 0) handleSelectNode(nodeResults[0].id)
-              if (e.key === 'Enter' && nodeResults.length === 0 && pendingResults.length > 0) handleSelectPending(pendingResults[0].id)
+              else if (e.key === 'Enter' && pendingResults.length > 0) handleSelectPending(pendingResults[0].id)
+              else if (e.key === 'Enter' && documentResults.length > 0) handleSelectDocument(documentResults[0].doc_id)
             }}
           />
           <kbd className="text-[10px] text-muted-foreground border border-border rounded px-1">ESC</kbd>
@@ -115,6 +160,30 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
                 </li>
               )
             })}
+            {documentResults.length > 0 && nodeResults.length + pendingResults.length > 0 && (
+              <li className="px-4 py-1">
+                <div className="h-px bg-border" />
+              </li>
+            )}
+            {documentResults.map((hit) => (
+              <li
+                key={hit.doc_id}
+                className="flex items-center gap-3 px-4 py-2 hover:bg-secondary cursor-pointer"
+                onClick={() => handleSelectDocument(hit.doc_id)}
+              >
+                <span className="text-xs font-mono text-primary w-16 shrink-0">
+                  {hit.kind === 'device' ? 'doc·dev' : 'doc'}
+                </span>
+                <span className="text-sm text-foreground font-medium flex-1 truncate">{hit.title}</span>
+                {/* The snippet is the line the match sits on; it is the only
+                    reason a body search beats scanning the tree by eye. */}
+                {hit.snippet && (
+                  <span className="text-xs text-muted-foreground shrink-0 max-w-[45%] truncate">
+                    {hit.snippet}
+                  </span>
+                )}
+              </li>
+            ))}
           </ul>
         )}
 
@@ -123,7 +192,9 @@ export function SearchModal({ open, onClose, onOpenPending }: SearchModalProps) 
         )}
 
         {q.length === 0 && (
-          <p className="px-4 py-3 text-xs text-muted-foreground">Type to search nodes and pending devices…</p>
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            Type to search nodes, pending devices{onOpenDocument ? ' and documents' : ''}…
+          </p>
         )}
       </div>
     </div>

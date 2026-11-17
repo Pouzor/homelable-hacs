@@ -76,6 +76,27 @@ async def test_upload_accepts_jpeg(hass: HomeAssistant, media_client) -> None:  
     assert (await resp.json())["filename"].endswith(".jpg")
 
 
+async def test_upload_accepts_a_pdf_for_documents(hass: HomeAssistant, media_client) -> None:  # noqa: ANN001
+    # homelable #548: a document page links a PDF.
+    resp = await _upload(media_client, b"%PDF-1.7\n...", "application/pdf", filename="manual.pdf")
+    assert resp.status == 200
+    name = (await resp.json())["filename"]
+    assert name.endswith(".pdf")
+    assert NAME_RE.match(name)
+
+
+async def test_upload_rejects_a_pdf_that_is_not_one(media_client) -> None:  # noqa: ANN001
+    resp = await _upload(media_client, b"<html>", "application/pdf", filename="x.pdf")
+    assert resp.status == 415
+
+
+async def test_upload_rejects_svg(media_client) -> None:  # noqa: ANN001
+    # Served same-origin with no sandboxing CSP, an SVG could run script.
+    svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    resp = await _upload(media_client, svg, "image/svg+xml", filename="x.svg")
+    assert resp.status == 415
+
+
 async def test_upload_rejects_unsupported_type(media_client) -> None:  # noqa: ANN001
     resp = await _upload(media_client, b"GIF89a", "image/gif", filename="x.gif")
     assert resp.status == 415

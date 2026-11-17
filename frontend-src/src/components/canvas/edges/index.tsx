@@ -260,12 +260,14 @@ function EndpointDot({ edgeId, role, x, y, position, color, source, target, sour
     const wantClass = role === 'source' ? 'source' : 'target'
     let handleEl: HTMLElement | null = null
     let bestDist = SNAP_RADIUS
-    root.querySelectorAll<HTMLElement>('[data-handleid]').forEach((h) => {
-      if (!h.classList.contains(wantClass)) return
+    // A plain loop, not forEach: TS cannot see an assignment made inside a
+    // callback and would narrow `handleEl` to `never` below.
+    for (const h of Array.from(root.querySelectorAll<HTMLElement>('[data-handleid]'))) {
+      if (!h.classList.contains(wantClass)) continue
       const r = h.getBoundingClientRect()
       const d = Math.hypot(r.left + r.width / 2 - e.clientX, r.top + r.height / 2 - e.clientY)
       if (d < bestDist) { bestDist = d; handleEl = h }
-    })
+    }
     onDrag(null)
     if (!handleEl) return  // no handle within range → keep edge unchanged
     const newHandleId = handleEl.getAttribute('data-handleid')

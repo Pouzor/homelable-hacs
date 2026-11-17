@@ -30,6 +30,11 @@ STORAGE_VERSION_PENDING = 1
 STORAGE_KEY_RACKS = f"{DOMAIN}_racks"
 STORAGE_VERSION_RACKS = 1
 
+# The documentation space: {"documents": {id: doc}, "revisions": {doc_id:
+# [revision, newest first]}, "notes_migrated": bool}. See documents.py.
+STORAGE_KEY_DOCUMENTS = f"{DOMAIN}_documents"
+STORAGE_VERSION_DOCUMENTS = 1
+
 STORAGE_KEY_RUNS = f"{DOMAIN}_scan_runs"
 STORAGE_VERSION_RUNS = 1
 MAX_SCAN_RUNS = 50

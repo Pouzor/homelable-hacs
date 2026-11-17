@@ -12,6 +12,7 @@ from . import proxmox, racks, scanner
 from .const import DESIGN_TYPES, DOMAIN, SCAN_SIGNAL, SERVICE_STATUS_SIGNAL
 from .coordinator import DeviceScanError
 from .media import delete_media
+from .websocket_documents import async_register_document_commands
 from .zha import ZhaNotReadyError
 from .zigbee import ZigbeeMqttNotReadyError
 from .zwave import ZwaveMqttNotReadyError
@@ -62,6 +63,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_racks_inventory)
     websocket_api.async_register_command(hass, ws_scan_add_pending)
     websocket_api.async_register_command(hass, ws_scan_update_pending)
+    async_register_document_commands(hass)
 
 
 def _coordinator(hass: HomeAssistant):

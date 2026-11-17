@@ -1,5 +1,5 @@
 import { createElement, useRef, useState } from 'react'
-import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff, GripVertical, Boxes, RefreshCw } from 'lucide-react'
+import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff, GripVertical, Boxes, RefreshCw, BookOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { checkNodeStatus } from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -21,10 +21,14 @@ interface DetailPanelProps {
   /** Opens the Device Inventory on this node's row. Absent where there is no
    *  inventory to open, and the link is then simply not offered. */
   onOpenInventory?: (deviceId: string) => void
+  /** Opens the Documentation section on this node's device, writing the
+   *  document first if it has none (homelable #418). Absent where there is no
+   *  backend to hold documents. */
+  onOpenDocumentation?: (deviceId: string, label: string) => void
 }
 
 
-export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
+export function DetailPanel({ onEdit, onOpenInventory, onOpenDocumentation }: DetailPanelProps) {
   const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup, removeFromGroup, setNodeSize } = useCanvasStore()
   const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
 
@@ -220,13 +224,25 @@ export function DetailPanel({ onEdit, onOpenInventory }: DetailPanelProps) {
         {data.updated_at && <DetailRow label="Last Modified" value={formatTimestamp(data.updated_at)} />}
         {/* The row behind this node — where the same facts live for every other
             canvas showing it. */}
-        {data.device_id && onOpenInventory && (
-          <button
-            onClick={() => onOpenInventory(data.device_id as string)}
-            className="mt-1 flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer"
-          >
-            <Boxes size={10} /> Open in inventory
-          </button>
+        {data.device_id && (onOpenInventory || onOpenDocumentation) && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {onOpenInventory && (
+              <button
+                onClick={() => onOpenInventory(data.device_id as string)}
+                className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer"
+              >
+                <Boxes size={10} /> Open in inventory
+              </button>
+            )}
+            {onOpenDocumentation && (
+              <button
+                onClick={() => onOpenDocumentation(data.device_id as string, data.label)}
+                className="flex items-center gap-1 text-[10px] text-primary hover:text-primary/80 transition-colors cursor-pointer"
+              >
+                <BookOpen size={10} /> Open in documentation
+              </button>
+            )}
+          </div>
         )}
       </div>
 

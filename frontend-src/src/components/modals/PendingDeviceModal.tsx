@@ -32,6 +32,7 @@ import {
   Tags,
   X,
   type LucideIcon,
+  BookOpen,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -69,6 +70,9 @@ interface PendingDeviceModalProps {
   onIgnore: (device: PendingDevice) => void
   /** Called with the saved row after an edit, so the list can refresh in place. */
   onSaved?: (device: PendingDevice) => void
+  /** Opens the Documentation section on this device, writing the document
+   *  first if it has none (homelable #418). Absent where there is no backend. */
+  onOpenDocumentation?: (deviceId: string, label: string) => void
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -265,7 +269,7 @@ const numeric = (v: string) => (v.trim() === '' ? null : Number(v))
  * The form is seeded from `device` once, on mount. Callers render it with
  * `key={device.id}` so pointing it at another device starts a fresh form.
  */
-export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnore, onSaved }: PendingDeviceModalProps) {
+export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnore, onSaved, onOpenDocumentation }: PendingDeviceModalProps) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<EditForm>(() => (device ? toForm(device) : toForm({} as PendingDevice)))
   const [properties, setProperties] = useState<NodeProperty[]>(device?.properties ?? [])
@@ -495,14 +499,27 @@ export function PendingDeviceModal({ device, onClose, onApprove, onHide, onIgnor
               </div>
             </div>
             {!editing && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`shrink-0 gap-1.5 text-primary hover:text-primary hover:bg-primary/10 ${modalStyles['modal-interactive']}`}
-                onClick={() => setEditing(true)}
-              >
-                <Pencil size={13} /> Edit
-              </Button>
+              <div className="shrink-0 flex items-center gap-1">
+                {onOpenDocumentation && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`gap-1.5 text-primary hover:text-primary hover:bg-primary/10 ${modalStyles['modal-interactive']}`}
+                    onClick={() => onOpenDocumentation(device.id, titleLabel)}
+                    title="Open this device's documentation page"
+                  >
+                    <BookOpen size={13} /> Documentation
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`gap-1.5 text-primary hover:text-primary hover:bg-primary/10 ${modalStyles['modal-interactive']}`}
+                  onClick={() => setEditing(true)}
+                >
+                  <Pencil size={13} /> Edit
+                </Button>
+              </div>
             )}
           </div>
         </DialogHeader>

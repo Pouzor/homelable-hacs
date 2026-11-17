@@ -35,6 +35,12 @@ _ALLOWED_TYPES: dict[str, str] = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
+    # Documents link a PDF rather than embed it (homelable #548). SVG, which the
+    # standalone also takes, is left out on purpose: it is served from the static
+    # path below with no way to attach the sandboxing CSP the standalone sends,
+    # and an SVG opened at its own URL would run script on Home Assistant's
+    # origin.
+    "application/pdf": ".pdf",
 }
 
 # Magic-byte signatures for defense-in-depth (don't trust content-type alone).
@@ -42,10 +48,11 @@ _MAGIC: dict[str, tuple[bytes, ...]] = {
     ".png": (b"\x89PNG\r\n\x1a\n",),
     ".jpg": (b"\xff\xd8\xff",),
     ".webp": (b"RIFF",),  # RIFF....WEBP; RIFF prefix is enough to reject non-images
+    ".pdf": (b"%PDF-",),
 }
 
 # Only ever serve/delete files we created: 32 hex chars + known extension.
-NAME_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpg|webp)$")
+NAME_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpg|webp|pdf)$")
 
 
 def media_path(hass: HomeAssistant) -> Path:
@@ -84,7 +91,7 @@ def delete_media(hass: HomeAssistant, filename: str) -> bool:
 
 
 class HomelableMediaUploadView(HomeAssistantView):
-    """POST an image (multipart ``file`` field); returns its static URL."""
+    """POST an image or a PDF (multipart ``file`` field); returns its static URL."""
 
     url = "/api/homelable/media/upload"
     name = f"api:{DOMAIN}:media:upload"
@@ -103,7 +110,7 @@ class HomelableMediaUploadView(HomeAssistantView):
         ext = _ALLOWED_TYPES.get(content_type)
         if ext is None:
             return self.json_message(
-                "Unsupported media type — PNG, JPEG, or WebP only",
+                "Unsupported media type — PNG, JPEG, WebP or PDF only",
                 HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
             )
 
