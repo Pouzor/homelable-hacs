@@ -65,6 +65,20 @@ describe('DetailPanel', () => {
     expect(screen.getByText('online')).toBeDefined()
   })
 
+  it('shows "Not monitored" instead of a status when check method is "none"', () => {
+    setupStore({ label: 'Bulb', status: 'online', check_method: 'none' })
+    render(<DetailPanel onEdit={vi.fn()} />)
+    expect(screen.getByText('Not monitored')).toBeDefined()
+    expect(screen.queryByText('online')).toBeNull()
+  })
+
+  it('shows the status when check method is unset (defaults to ping)', () => {
+    setupStore({ status: 'offline' })
+    render(<DetailPanel onEdit={vi.fn()} />)
+    expect(screen.getByText('offline')).toBeDefined()
+    expect(screen.queryByText('Not monitored')).toBeNull()
+  })
+
   it('renders nothing for groupRect nodes', () => {
     setupStore({ type: 'groupRect', label: 'Zone' })
     const { container } = render(<DetailPanel onEdit={vi.fn()} />)
