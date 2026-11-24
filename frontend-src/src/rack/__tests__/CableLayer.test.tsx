@@ -2,8 +2,8 @@
  * Cabling overlay: in patch mode a click selects a cable rather than deleting
  * it outright, so a misclick costs nothing and Delete is the destructive step.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, fireEvent } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { render, fireEvent, act } from '@testing-library/react'
 import { CableLayer } from '../components/CableLayer'
 import { useRackStore } from '../store'
 import { seedDemo } from './fixtures'
@@ -37,6 +37,82 @@ describe('CableLayer selection', () => {
     fireEvent.click(paths[0])
     expect(useRackStore.getState().cableMode).toBe(false)
     expect(useRackStore.getState().selectedCableId).toBe(useRackStore.getState().cables[0].id)
+  })
+
+  // The overlay paints above the plates and a hit stroke is 14 wide around the
+  // run's own end point, so it covered the socket that run is plugged into. A
+  // second patch released on a patch panel port landed on the cable and the
+  // canvas read it as a drop on nothing.
+  it('stops taking the pointer while a patch is in flight', () => {
+    const store = useRackStore.getState()
+    store.setCableVisibility('always')
+    const { container, rerender } = render(<CableLayer />)
+    expect(hitPaths(container)[0].style.pointerEvents).toBe('stroke')
+
+    const { from } = useRackStore.getState().cables[0]
+    act(() => {
+      useRackStore.getState().startCableDrag(from.deviceId, from.portId)
+    })
+    rerender(<CableLayer />)
+    expect(hitPaths(container)[0].style.pointerEvents).toBe('none')
+
+    act(() => useRackStore.getState().cancelCableDraft())
+    rerender(<CableLayer />)
+    expect(hitPaths(container)[0].style.pointerEvents).toBe('stroke')
+  })
+
+  describe('a press on a socket under a cable', () => {
+    /** A port the plates would draw, reported as lying under the pointer. */
+    function portUnderPointer(container: HTMLElement) {
+      const port = document.createElement('div')
+      port.setAttribute('data-rack-port', '')
+      const socket = document.createElement('span')
+      port.appendChild(socket)
+      container.appendChild(port)
+      const pressed = vi.fn()
+      port.addEventListener('pointerdown', pressed)
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: () => [socket],
+      })
+      return pressed
+    }
+
+    afterEach(() => {
+      delete (document as unknown as { elementsFromPoint?: unknown }).elementsFromPoint
+    })
+
+    it('reaches the port in patch mode, without panning the canvas', () => {
+      useRackStore.getState().toggleCableMode()
+      const { container } = render(<CableLayer />)
+      const pressed = portUnderPointer(container)
+
+      // fireEvent returns false when the default was prevented.
+      expect(fireEvent.pointerDown(hitPaths(container)[0])).toBe(false)
+      expect(pressed).toHaveBeenCalledOnce()
+    })
+
+    it('stays on the cable outside patch mode', () => {
+      useRackStore.getState().setCableVisibility('always')
+      const { container } = render(<CableLayer />)
+      const pressed = portUnderPointer(container)
+
+      expect(fireEvent.pointerDown(hitPaths(container)[0])).toBe(true)
+      expect(pressed).not.toHaveBeenCalled()
+    })
+
+    it('still selects the cable when no port is under the press', () => {
+      useRackStore.getState().toggleCableMode()
+      const { container } = render(<CableLayer />)
+      Object.defineProperty(document, 'elementsFromPoint', {
+        configurable: true,
+        value: () => [hitPaths(container)[0]],
+      })
+
+      expect(fireEvent.pointerDown(hitPaths(container)[0])).toBe(true)
+      fireEvent.click(hitPaths(container)[0])
+      expect(useRackStore.getState().selectedCableId).toBe(useRackStore.getState().cables[0].id)
+    })
   })
 
   it('keeps the selected cable drawn when cables are hidden', () => {

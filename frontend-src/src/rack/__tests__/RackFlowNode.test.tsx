@@ -10,6 +10,7 @@ import { rackPalette } from '../rackTheme'
 import { useThemeStore } from '@/stores/themeStore'
 import { getFaceplate } from '../faceplates'
 import type { NodeProps } from '@xyflow/react'
+import { toast } from 'sonner'
 import { seedDemo } from './fixtures'
 
 vi.mock('@xyflow/react', async () => {
@@ -17,9 +18,12 @@ vi.mock('@xyflow/react', async () => {
   return mockReactFlow({ useReactFlow: () => ({ getZoom: () => 1 }) })
 })
 
+vi.mock('sonner', async () => (await import('@/test/mocks')).mockSonner())
+
 const store = () => useRackStore.getState()
 
 beforeEach(() => {
+  vi.mocked(toast.error).mockClear()
   store().reset()
   seedDemo()
 })
@@ -138,6 +142,73 @@ describe('RackFlowNode patching', () => {
     const created = store().cables[store().cables.length - 1]
     expect(created.from.portId).toBe(a.port.id)
     expect(created.to.portId).toBe(b.port.id)
+  })
+
+  it('says so when the release lands on a port that is already full', () => {
+    store().toggleCableMode()
+    renderRack()
+    const { b } = freePorts()
+    const taken = store().cables.find((c) => c.from.deviceId !== 'dev-patch')!
+    const device = store().devices.find((d) => d.id === taken.from.deviceId)!
+    const port = device.ports.find((p) => p.id === taken.from.portId)!
+    const before = store().cables.length
+
+    fireEvent.pointerDown(portGroup(b.device.label, b.port.label, b.port.type))
+    fireEvent.pointerUp(portGroup(device.label, port.label, port.type))
+
+    expect(store().cables).toHaveLength(before)
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already patched'))
+  })
+
+  it('says so when a click-then-click closes onto a full port', () => {
+    store().toggleCableMode()
+    renderRack()
+    const { b } = freePorts()
+    const taken = store().cables.find((c) => c.from.deviceId !== 'dev-patch')!
+    const device = store().devices.find((d) => d.id === taken.from.deviceId)!
+    const port = device.ports.find((p) => p.id === taken.from.portId)!
+    const before = store().cables.length
+
+    const portB = portGroup(b.device.label, b.port.label, b.port.type)
+    fireEvent.pointerDown(portB)
+    fireEvent.pointerUp(portB)
+    fireEvent.pointerDown(portGroup(device.label, port.label, port.type))
+
+    expect(store().cables).toHaveLength(before)
+    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already patched'))
+  })
+
+  it('marks its ports for the cable overlay only in patch mode', () => {
+    const { unmount } = renderRack()
+    const { a } = freePorts()
+    expect(
+      portGroup(a.device.label, a.port.label, a.port.type).hasAttribute('data-rack-port'),
+    ).toBe(false)
+    unmount()
+
+    store().toggleCableMode()
+    renderRack()
+    expect(
+      portGroup(a.device.label, a.port.label, a.port.type).hasAttribute('data-rack-port'),
+    ).toBe(true)
+  })
+
+  it('keeps the first cable colour on a patch panel socket carrying two', () => {
+    const first = store().cables.find((c) => c.from.deviceId === 'dev-patch')!
+    const { b } = freePorts()
+    const second = store().addCable(
+      first.from,
+      { deviceId: b.device.id, portId: b.port.id },
+      { color: '#ff00ff' },
+    )
+    expect(second).not.toBeNull()
+    store().toggleCableMode()
+    renderRack()
+
+    const panel = store().devices.find((d) => d.id === 'dev-patch')!
+    const port = panel.ports.find((p) => p.id === first.from.portId)!
+    const socket = portGroup(panel.label, port.label, port.type).querySelector('[stroke]')!
+    expect(socket.getAttribute('stroke')).toBe(first.color)
   })
 
   it('still patches with two separate clicks', () => {

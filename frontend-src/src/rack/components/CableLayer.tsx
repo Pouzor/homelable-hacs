@@ -54,6 +54,19 @@ function annotationLines(cable: Cable): string[] {
   return lines
 }
 
+/**
+ * The patchable port under a point, if any. Asked of the element's own root:
+ * the panel lives in a Shadow DOM, where `document` only sees the host.
+ */
+function patchablePortAt(from: Element, x: number, y: number): Element | null {
+  const root = from.getRootNode() as Document | ShadowRoot
+  for (const el of root.elementsFromPoint(x, y)) {
+    const port = el.closest('[data-rack-port]')
+    if (port) return port
+  }
+  return null
+}
+
 export function CableLayer() {
   const racks = useRackStore((s) => s.racks)
   const devices = useRackStore((s) => s.devices)
@@ -100,6 +113,10 @@ export function CableLayer() {
     if (!from || !to) continue
     visible.push({ cable, from, to })
   }
+
+  // A port is armed: the next release belongs to the plates, not to the runs
+  // drawn over them.
+  const patching = cableDraft !== null
 
   // Rubber band: the patch being dragged out of its source port.
   const dragFrom = cableDraft && resolve(cableDraft.deviceId, cableDraft.portId)
@@ -158,7 +175,14 @@ export function CableLayer() {
               />
               {/* Fat invisible hit area — a 1.8px path is hard to hit at low
                   zoom. Clickable outside patch mode too: a cable is selected to
-                  read and edit it, not only to unplug it. */}
+                  read and edit it, not only to unplug it.
+
+                  It steps aside while a patch is in flight: the overlay paints
+                  above the plates and this stroke is 14 wide around a run's own
+                  end point, so it covered the very socket the cable is plugged
+                  into. Releasing a second patch on a patch panel port landed on
+                  the cable instead of the port, and the canvas read it as a
+                  drop on nothing. */}
               <path
                 data-testid={`cable-hit-${cable.id}`}
                 d={d}
@@ -166,7 +190,28 @@ export function CableLayer() {
                 stroke="transparent"
                 strokeWidth={14}
                 strokeLinecap="round"
-                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                style={{ pointerEvents: patching ? 'none' : 'stroke', cursor: 'pointer' }}
+                onPointerDown={(e) => {
+                  // Nothing is armed yet, so this stroke still covers the
+                  // sockets under it. In patch mode a press on one belongs to
+                  // the port: a panel port's second cable can start there.
+                  if (!cableMode) return
+                  const port = patchablePortAt(e.currentTarget, e.clientX, e.clientY)
+                  if (!port) return
+                  // Keeps the canvas from panning, as the port's own handler does.
+                  e.stopPropagation()
+                  e.preventDefault()
+                  port.dispatchEvent(
+                    new PointerEvent('pointerdown', {
+                      bubbles: true,
+                      composed: true,
+                      button: e.button,
+                      pointerId: e.pointerId,
+                      clientX: e.clientX,
+                      clientY: e.clientY,
+                    }),
+                  )
+                }}
                 onClick={(e) => {
                   // The pane click behind would clear the selection again.
                   e.stopPropagation()
