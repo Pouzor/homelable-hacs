@@ -178,6 +178,21 @@ describe('RackFlowNode patching', () => {
     expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already patched'))
   })
 
+  it('marks its ports for the cable overlay only in patch mode', () => {
+    const { unmount } = renderRack()
+    const { a } = freePorts()
+    expect(
+      portGroup(a.device.label, a.port.label, a.port.type).hasAttribute('data-rack-port'),
+    ).toBe(false)
+    unmount()
+
+    store().toggleCableMode()
+    renderRack()
+    expect(
+      portGroup(a.device.label, a.port.label, a.port.type).hasAttribute('data-rack-port'),
+    ).toBe(true)
+  })
+
   it('keeps the first cable colour on a patch panel socket carrying two', () => {
     const first = store().cables.find((c) => c.from.deviceId === 'dev-patch')!
     const { b } = freePorts()

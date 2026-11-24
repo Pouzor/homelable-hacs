@@ -292,6 +292,7 @@ export const Faceplate = memo(function Faceplate({
           return (
             <g
               key={port.id}
+              data-rack-port={interactivePorts ? '' : undefined}
               transform={`translate(${cx} ${cy})`}
               style={{
                 cursor: interactivePorts ? 'crosshair' : undefined,
