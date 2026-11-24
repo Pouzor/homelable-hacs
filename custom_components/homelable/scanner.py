@@ -298,6 +298,72 @@ async def _resolve_hostname_async(ip: str) -> str | None:
         return None
 
 
+# ─── device_tracker name fallback (issue #40) ────────────────────────────────
+# Reverse DNS only answers when HA's resolver forwards PTR queries to the
+# router — not the case behind Pi-hole/AdGuard or a public resolver. The names
+# the user gave their devices in the router are often already in HA, though,
+# on the `device_tracker` entities of a router integration (fritz, unifi,
+# asuswrt, nmap…). Those fill in a hostname discovery left empty.
+
+TrackerNames = tuple[dict[str, str], dict[str, str]]
+
+
+def _normalize_mac(mac: str | None) -> str | None:
+    """Lower-case, colon-separated, zero-padded: `A-b-0C…` → `0a:0b:0c…`.
+
+    macOS `arp -a` drops leading zeros (`a:b:c:d:e:f`), routers report upper
+    case or dashes; without this the same NIC never matches itself.
+    """
+    if not mac:
+        return None
+    parts = re.split(r"[:-]", mac.strip().lower())
+    if len(parts) != 6 or not all(re.fullmatch(r"[0-9a-f]{1,2}", p) for p in parts):
+        return None
+    return ":".join(p.zfill(2) for p in parts)
+
+
+def _tracker_names(hass: Any | None) -> TrackerNames:
+    """Index `device_tracker` names by MAC and by IP. Must run on the loop.
+
+    The IP index only holds trackers that are `home` right now: a tracker that
+    left keeps its last IP, and DHCP may since have handed it to another device.
+    A MAC is stable, so it matches whatever the tracker's state.
+    """
+    by_mac: dict[str, str] = {}
+    by_ip: dict[str, str] = {}
+    if hass is None:
+        return by_mac, by_ip
+    try:
+        states = hass.states.async_all("device_tracker")
+    except Exception as exc:  # noqa: BLE001 — a name hint must never fail a scan
+        _LOGGER.debug("device_tracker lookup failed: %s", exc)
+        return by_mac, by_ip
+    for state in states:
+        attrs = state.attributes
+        name = attrs.get("host_name") or attrs.get("friendly_name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        name = name.strip()
+        mac = _normalize_mac(attrs.get("mac"))
+        if mac:
+            by_mac.setdefault(mac, name)
+        ip = attrs.get("ip")
+        if isinstance(ip, str) and ip and state.state == "home":
+            by_ip.setdefault(ip, name)
+    return by_mac, by_ip
+
+
+def _fill_tracker_name(host: dict[str, Any], names: TrackerNames) -> None:
+    """Give `host` a tracker name if discovery found none. MAC first, then IP."""
+    if host.get("hostname"):
+        return
+    by_mac, by_ip = names
+    mac = _normalize_mac(host.get("mac"))
+    name = (by_mac.get(mac) if mac else None) or by_ip.get(host.get("ip") or "")
+    if name:
+        host["hostname"] = name
+
+
 def _arp_table_hosts(network: str) -> dict[str, dict[str, Any]]:
     """Read OS ARP cache for hosts in the target network. Linux + macOS."""
     try:
@@ -725,8 +791,12 @@ async def run_scan(
 
     devices: list[dict[str, Any]] = []
     seen_ips: set[str] = set()
+    tracker_names = _tracker_names(hass)
 
     async def _emit_phase1(host: dict[str, Any]) -> None:
+        # Phase 2 and the result list hold this same dict, so a name filled
+        # here reaches the streamed event, the enrichment and the return value.
+        _fill_tracker_name(host, tracker_names)
         ip = host.get("ip")
         if not ip or ip in exclude_ips or ip in seen_ips:
             return
@@ -782,6 +852,7 @@ async def run_scan(
                 # seen_ips was populated by _emit_phase1 above; for hosts that
                 # only came through the ARP fallback (no ping), add now.
                 seen_ips.add(ip)
+                _fill_tracker_name(host, tracker_names)
                 devices.append(
                     await _enrich(host, discovery_source="tcp", deep_scan=deep_scan)
                 )
@@ -795,6 +866,7 @@ async def run_scan(
                 if ip in exclude_ips or ip in seen_ips:
                     continue
                 seen_ips.add(ip)
+                _fill_tracker_name(host, tracker_names)
                 enriched = await _enrich(host, discovery_source="mdns")
                 devices.append(enriched)
                 # mDNS is single-shot: emit discovery + enrichment together so

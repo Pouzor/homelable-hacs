@@ -686,3 +686,192 @@ async def test_run_device_scan_stops_between_slices_when_cancelled() -> None:
 async def test_run_device_scan_rejects_a_bad_port_spec() -> None:
     with pytest.raises(ValueError, match="Invalid port range"):
         await scanner.run_device_scan("10.0.0.5", ports="1-99999", budget=10, discovery_source="tcp")
+
+
+# ─── device_tracker name fallback (issue #40) ────────────────────────────────
+
+
+async def _no_mdns(*_args, **_kwargs) -> list[dict]:
+    return []
+
+
+def _bare_host(ip: str, mac: str | None = None, hostname: str | None = None) -> dict:
+    return {"ip": ip, "mac": mac, "hostname": hostname, "os": None, "open_ports": []}
+
+
+async def _scan_with(hass, hosts: list[dict], **kwargs) -> list[dict]:
+    async def _fake_scan(target: str, **_kw) -> list[dict]:
+        return hosts
+
+    with (
+        patch.object(scanner, "_scan_target", _fake_scan),
+        patch.object(scanner, "_mdns_discover", _no_mdns),
+    ):
+        return await scanner.run_scan(["192.168.178.0/24"], hass=hass, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("AA:BB:CC:DD:EE:FF", "aa:bb:cc:dd:ee:ff"),
+        ("aa-bb-cc-dd-ee-ff", "aa:bb:cc:dd:ee:ff"),
+        ("a:b:c:d:e:f", "0a:0b:0c:0d:0e:0f"),  # macOS `arp -a` drops zeros
+        ("not-a-mac", None),
+        ("aa:bb:cc", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_normalize_mac(raw: str | None, expected: str | None) -> None:
+    assert scanner._normalize_mac(raw) == expected
+
+
+async def test_scan_names_a_host_from_its_tracker_by_mac(hass) -> None:
+    """A router-named device shows its name when reverse DNS found none."""
+    hass.states.async_set(
+        "device_tracker.nas",
+        "not_home",  # a MAC is stable: it matches whatever the state
+        {"mac": "AA:BB:CC:00:00:01", "ip": "192.168.178.99", "host_name": "nas-wohnzimmer"},
+    )
+
+    devices = await _scan_with(hass, [_bare_host("192.168.178.20", mac="aa:bb:cc:0:0:1")])
+
+    assert devices[0]["hostname"] == "nas-wohnzimmer"
+
+
+async def test_scan_names_a_host_from_its_tracker_by_ip(hass) -> None:
+    """No MAC (routed subnet): a tracker at home on that IP names it."""
+    hass.states.async_set(
+        "device_tracker.printer",
+        "home",
+        {"ip": "192.168.178.30", "friendly_name": "Drucker Büro"},
+    )
+
+    devices = await _scan_with(hass, [_bare_host("192.168.178.30")])
+
+    assert devices[0]["hostname"] == "Drucker Büro"
+
+
+async def test_scan_ignores_an_away_tracker_ip(hass) -> None:
+    """An away tracker's last IP may belong to another device by now."""
+    hass.states.async_set(
+        "device_tracker.old_phone",
+        "not_home",
+        {"ip": "192.168.178.40", "host_name": "old-phone"},
+    )
+
+    devices = await _scan_with(hass, [_bare_host("192.168.178.40")])
+
+    assert devices[0]["hostname"] is None
+
+
+async def test_scan_prefers_the_mac_match_over_the_ip_match(hass) -> None:
+    hass.states.async_set(
+        "device_tracker.by_ip", "home", {"ip": "192.168.178.50", "host_name": "wrong"}
+    )
+    hass.states.async_set(
+        "device_tracker.by_mac", "home", {"mac": "aa:bb:cc:00:00:05", "host_name": "right"}
+    )
+
+    devices = await _scan_with(
+        hass, [_bare_host("192.168.178.50", mac="AA:BB:CC:00:00:05")]
+    )
+
+    assert devices[0]["hostname"] == "right"
+
+
+async def test_scan_keeps_a_resolved_hostname_over_the_tracker(hass) -> None:
+    """Reverse DNS / mDNS answered: the tracker never overrides it."""
+    hass.states.async_set(
+        "device_tracker.nas",
+        "home",
+        {"ip": "192.168.178.20", "mac": "aa:bb:cc:00:00:01", "host_name": "tracker-name"},
+    )
+
+    devices = await _scan_with(
+        hass,
+        [_bare_host("192.168.178.20", mac="aa:bb:cc:00:00:01", hostname="nas.fritz.box")],
+    )
+
+    assert devices[0]["hostname"] == "nas.fritz.box"
+
+
+async def test_scan_leaves_a_host_unnamed_without_a_match(hass) -> None:
+    hass.states.async_set(
+        "device_tracker.other", "home", {"ip": "192.168.178.77", "host_name": "other"}
+    )
+
+    devices = await _scan_with(hass, [_bare_host("192.168.178.20")])
+
+    assert devices[0]["hostname"] is None
+
+
+async def test_scan_streams_the_tracker_name_in_device_discovered(hass) -> None:
+    """The live pending list gets the name too, not only the final result."""
+    hass.states.async_set(
+        "device_tracker.tv", "home", {"ip": "192.168.178.60", "host_name": "fernseher"}
+    )
+    host = _bare_host("192.168.178.60")
+    events: list[dict] = []
+
+    async def _on_event(payload: dict) -> None:
+        events.append(payload)
+
+    async def _fake_scan(target: str, *, on_phase1_host, **_kw) -> list[dict]:
+        await on_phase1_host(host)
+        return [host]
+
+    with (
+        patch.object(scanner, "_scan_target", _fake_scan),
+        patch.object(scanner, "_mdns_discover", _no_mdns),
+    ):
+        await scanner.run_scan(["192.168.178.0/24"], hass=hass, on_event=_on_event)
+
+    discovered = [e for e in events if e["event"] == "device_discovered"]
+    assert discovered[0]["device"]["hostname"] == "fernseher"
+
+
+async def test_scan_names_an_mdns_only_host_from_its_tracker(hass) -> None:
+    hass.states.async_set(
+        "device_tracker.speaker", "home", {"ip": "192.168.178.70", "host_name": "kueche"}
+    )
+
+    async def _empty_scan(target: str, **_kw) -> list[dict]:
+        return []
+
+    async def _mdns(*_args, **_kwargs) -> list[dict]:
+        return [_bare_host("192.168.178.70")]
+
+    with (
+        patch.object(scanner, "_scan_target", _empty_scan),
+        patch.object(scanner, "_mdns_discover", _mdns),
+    ):
+        devices = await scanner.run_scan(["192.168.178.0/24"], hass=hass)
+
+    assert devices[0]["hostname"] == "kueche"
+
+
+def test_tracker_names_skips_trackers_without_a_name() -> None:
+    class _State:
+        def __init__(self, state: str, attributes: dict) -> None:
+            self.state, self.attributes = state, attributes
+
+    class _States:
+        def async_all(self, _domain: str) -> list[_State]:
+            return [
+                _State("home", {"ip": "10.0.0.1", "host_name": "  "}),
+                _State("home", {"ip": "10.0.0.2"}),
+                _State("home", {"ip": "10.0.0.3", "host_name": "ok"}),
+            ]
+
+    class _Hass:
+        states = _States()
+
+    by_mac, by_ip = scanner._tracker_names(_Hass())
+
+    assert by_mac == {}
+    assert by_ip == {"10.0.0.3": "ok"}
+
+
+def test_tracker_names_without_hass_is_empty() -> None:
+    assert scanner._tracker_names(None) == ({}, {})
